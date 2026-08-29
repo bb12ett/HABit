@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Household Budget Planner</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  
+  <!-- CSS Stylesheet with strict cache busting -->
+  <link rel="stylesheet" href="static/css/styles.css?v={{ BUILD_ID }}">
+  
+  <!-- Critical inline layout styles -->
+  <style>
+    .top-nav-bar {
+      display: flex !important;
+      justify-content: space-between !important;
+      align-items: center !important;
+      width: 100% !important;
+      gap: 8px !important;
+      padding: 4px 0 !important;
+      box-sizing: border-box !important;
+    }
+    .top-nav-left {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      flex: 0 0 auto !important;
+    }
+    .top-nav-right {
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+      flex: 0 0 auto !important;
+      margin-left: auto !important;
+    }
+    .payday-meta-bar {
+      display: flex !important;
+      justify-content: space-between !important;
+      align-items: center !important;
+      width: 100% !important;
+      gap: 8px !important;
+      background: var(--panel-bg, #1e293b) !important;
+      border: 1px solid var(--border, rgba(255,255,255,0.15)) !important;
+      border-radius: 8px !important;
+      padding: 6px 12px !important;
+      margin: 4px 0 8px 0 !important;
+      box-sizing: border-box !important;
+      min-height: 38px !important;
+    }
+    .payday-archive-btn {
+      display: inline-flex !important;
+      align-items: center !important;
+      gap: 4px !important;
+      font-size: 11px !important;
+      padding: 4px 10px !important;
+      white-space: nowrap !important;
+      flex-shrink: 0 !important;
+    }
+    @media (max-width: 600px) {
+      .top-nav-bar .btn-text,
+      .top-nav-right .btn-text,
+      .payday-meta-bar .btn-text {
+        display: none !important;
+      }
+      .top-nav-bar .btn,
+      .top-nav-right .btn {
+        padding: 6px 10px !important;
+        font-size: 15px !important;
+        min-width: 38px !important;
+        min-height: 34px !important;
+        justify-content: center !important;
+        display: inline-flex !important;
+        align-items: center !important;
+      }
+      .payday-meta-bar .btn {
+        padding: 4px 8px !important;
+        font-size: 14px !important;
+        min-width: 34px !important;
+        min-height: 30px !important;
+        justify-content: center !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        flex-shrink: 0 !important;
+      }
+      .payday-period-text {
+        font-size: 11px !important;
+      }
+    }
+
+    /* CRITICAL ITEM ENTRY STYLES (Zero overspill) */
+    .item-entry {
+      display: grid !important;
+      grid-template-columns: 14px 46px 1fr 50px 20px 18px !important;
+      gap: 3px !important;
+      align-items: center !important;
+      margin-bottom: 4px !important;
+      padding: 2px 3px !important;
+      border-radius: 6px !important;
+      background: rgba(255, 255, 255, 0.04) !important;
+      border: 1px solid var(--border, rgba(255,255,255,0.1)) !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+      overflow: hidden !important;
+    }
+    .item-entry > * {
+      min-width: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .item-entry select, .item-select {
+      padding: 2px 1px !important;
+      font-size: 10.5px !important;
+      font-weight: 700 !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+    .item-entry input[type="text"], .item-desc-input {
+      padding: 2px 4px !important;
+      font-size: 11.5px !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+    .item-entry input[type="number"], .item-amt-input {
+      padding: 2px 2px !important;
+      font-size: 11.5px !important;
+      font-weight: 600 !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      text-align: right !important;
+    }
+    .item-entry .move-btn {
+      height: 24px !important;
+      width: 20px !important;
+      min-width: 20px !important;
+      padding: 0 !important;
+      font-size: 10px !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      background: var(--panel-bg, #0f172a) !important;
+      border: 1px solid var(--border, #334155) !important;
+      cursor: pointer !important;
+      color: var(--text) !important;
+      flex-shrink: 0 !important;
+    }
+    .item-entry .del-btn {
+      position: relative !important;
+      z-index: 10 !important;
+      pointer-events: auto !important;
+      height: 24px !important;
+      width: 18px !important;
+      min-width: 18px !important;
+      padding: 0 !important;
+      font-size: 14px !important;
+      line-height: 1 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      cursor: pointer !important;
+      flex-shrink: 0 !important;
+    }
+    .col-input-add {
+      display: grid !important;
+      grid-template-columns: 46px 1fr 50px 24px !important;
+      gap: 3px !important;
+      margin-top: 5px !important;
+      padding-top: 5px !important;
+      border-top: 1px dashed var(--border, rgba(255,255,255,0.15)) !important;
+      box-sizing: border-box !important;
+      width: 100% !important;
+      max-width: 100% !important;
+      align-items: center !important;
+      overflow: hidden !important;
+    }
+    .col-input-add > * {
+      min-width: 0 !important;
+      max-width: 100% !important;
+      box-sizing: border-box !important;
+    }
+    .col-input-add select {
+      padding: 2px 1px !important;
+      font-size: 10.5px !important;
+      font-weight: 700 !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+    .col-input-add input[type="text"] {
+      padding: 2px 4px !important;
+      font-size: 11.5px !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+    }
+    .col-input-add input[type="number"] {
+      padding: 2px 2px !important;
+      font-size: 11.5px !important;
+      font-weight: 600 !important;
+      border-radius: 4px !important;
+      height: 26px !important;
+      width: 100% !important;
+      min-width: 0 !important;
+      text-align: right !important;
+    }
+    .col-input-add .btn {
+      height: 26px !important;
+      width: 24px !important;
+      min-width: 24px !important;
+      padding: 0 !important;
+      font-size: 14px !important;
+      font-weight: bold !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      border-radius: 4px !important;
+      flex-shrink: 0 !important;
+    }
+
+      /* =========================================================
+       FLOATING ACTION BUTTON (FAB) & SPEED DIAL
+       ========================================================= */
+    .fab-container {
+      position: fixed !important;
+      bottom: 24px !important;
+      right: 24px !important;
+      z-index: 1050 !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: flex-end !important;
+      pointer-events: none !important;
+    }
+
+    /* Backdrop: strictly hidden until .open */
+    .fab-backdrop {
+      display: none !important;
+    }
+    .fab-container.open .fab-backdrop {
+      display: block !important;
+      position: fixed !important;
+      inset: 0 !important;
+      background: rgba(0, 0, 0, 0.45) !important;
+      backdrop-filter: blur(2px) !important;
+      pointer-events: auto !important;
+      z-index: 1040 !important;
+    }
+
+    /* Speed Dial Menu: STRICTLY display: none when closed */
+    .fab-speed-dial {
+      display: none !important;
+      pointer-events: none !important;
+    }
+
+    /* Speed Dial Menu: ONLY flex when .fab-container.open */
+    .fab-container.open .fab-speed-dial {
+      display: flex !important;
+      flex-direction: column-reverse !important;
+      gap: 12px !important;
+      align-items: flex-end !important;
+      margin-bottom: 14px !important;
+      pointer-events: auto !important;
+      z-index: 1055 !important;
+      position: relative !important;
+      width: auto !important;
+      animation: fabPopIn 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards !important;
+    }
+
+    @keyframes fabPopIn {
+      from {
+        opacity: 0;
+        transform: translateY(16px) scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .fab-action-row {
+      display: flex !important;
+      flex-direction: row !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 16px !important;
+      min-width: 250px !important;
+      max-width: 340px !important;
+      width: max-content !important;
+      padding: 6px 6px 6px 18px !important;
+      border-radius: 36px !important;
+      background: var(--panel-bg, #0f172a) !important;
+      border: 1.5px solid var(--border, #334155) !important;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5) !important;
+      backdrop-filter: blur(12px) !important;
+      cursor: pointer !important;
+      user-select: none !important;
+      white-space: nowrap !important;
+      pointer-events: auto !important;
+      transition: transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), 
+                  border-color 0.18s ease, 
+                  box-shadow 0.18s ease,
+                  background 0.18s ease !important;
+    }
+    .fab-action-row:hover,
+    .fab-action-row:active {
+      transform: translateX(-4px) scale(1.02) !important;
+      border-color: var(--curr-border, #38bdf8) !important;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 16px rgba(56, 189, 248, 0.3) !important;
+    }
+    .fab-action-label {
+      display: inline-block !important;
+      background: transparent !important;
+      border: none !important;
+      color: var(--heading, #f8fafc) !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      border-radius: 0 !important;
+      font-size: 14.5px !important;
+      font-weight: 600 !important;
+      letter-spacing: 0.2px !important;
+      box-shadow: none !important;
+      white-space: nowrap !important;
+      overflow: visible !important;
+      flex-shrink: 0 !important;
+      flex-grow: 1 !important;
+      text-align: left !important;
+      pointer-events: none !important;
+      transition: color 0.15s ease !important;
+    }
+    .fab-action-row:hover .fab-action-label,
+    .fab-action-row:active .fab-action-label {
+      color: var(--curr-border, #38bdf8) !important;
+    }
+    .fab-action-btn {
+      width: 42px !important;
+      height: 42px !important;
+      min-width: 42px !important;
+      border-radius: 50% !important;
+      border: 1.5px solid rgba(255, 255, 255, 0.2) !important;
+      color: #ffffff !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      font-size: 20px !important;
+      cursor: pointer !important;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35) !important;
+      transition: transform 0.18s ease, filter 0.18s ease !important;
+      pointer-events: none !important;
+      padding: 0 !important;
+      flex-shrink: 0 !important;
+    }
+    .fab-action-row:hover .fab-action-btn,
+    .fab-action-row:active .fab-action-btn {
+      transform: scale(1.08) !important;
+      filter: brightness(1.15) !important;
+    }
+    .fab-btn-checkin { background: #0284c7 !important; border-color: #38bdf8 !important; }
+    .fab-btn-expense { background: #10b981 !important; border-color: #34d399 !important; }
+    .fab-btn-budget { background: #8b5cf6 !important; border-color: #a78bfa !important; }
+    .fab-btn-birthday { background: #ec4899 !important; border-color: #f472b6 !important; }
+
+    /* Main Floating Trigger Button */
+    .fab-main-btn {
+      width: 58px !important;
+      height: 58px !important;
+      min-width: 58px !important;
+      border-radius: 50% !important;
+      background: linear-gradient(135deg, #0284c7, #0ea5e9) !important;
+      border: 2px solid #38bdf8 !important;
+      color: #ffffff !important;
+      font-size: 32px !important;
+      font-weight: 300 !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      cursor: pointer !important;
+      box-shadow: 0 6px 20px rgba(2, 132, 199, 0.5) !important;
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.2s ease !important;
+      z-index: 1055 !important;
+      padding: 0 !important;
+      outline: none !important;
+      pointer-events: auto !important;
+    }
+    .fab-main-icon {
+      font-size: 32px !important;
+      line-height: 1 !important;
+      font-weight: 300 !important;
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+      display: inline-block !important;
+    }
+    .fab-container.open .fab-main-btn {
+      transform: rotate(45deg) !important;
+      background: #ef4444 !important;
+      border-color: #f87171 !important;
+      box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5) !important;
+    }
+
+    @media (max-width: 680px) {
+      .fab-container {
+        bottom: 20px !important;
+        right: 16px !important;
+      }
+      .fab-speed-dial {
+        gap: 10px !important;
+        margin-bottom: 12px !important;
+      }
+      .fab-action-row {
+        min-width: 220px !important;
+        max-width: calc(100vw - 32px) !important;
+        width: auto !important;
+        padding: 6px 6px 6px 16px !important;
+        gap: 12px !important;
+      }
+      .fab-action-label {
+        font-size: 14px !important;
+      }
+      .fab-action-btn {
+        width: 38px !important;
+        height: 38px !important;
+        min-width: 38px !important;
+        font-size: 18px !important;
+      }
+      .fab-main-btn {
+        width: 54px !important;
+        height: 54px !important;
+        min-width: 54px !important;
+        font-size: 28px !important;
+      }
+    }
+  </style>
+
+  <!-- Global Error Handler to guarantee zero blank screens -->
+  <script>
+    window.onerror = function(msg, url, line, col, error) {
+      const banner = document.getElementById('errorBanner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.innerText = `🚨 App Error: ${msg}\nLine: ${line}, Column: ${col}\n${error && error.stack ? error.stack : ''}`;
+      }
+      return false;
+    };
+    
+    // Theme Initializer to prevent white flash
+    (function() {
+      try {
+        const saved = localStorage.getItem('budget_theme') || 'grey_dark';
+        window.changeTheme = function(theme) {
+          if (!theme || theme === 'ha_dark' || theme === 'grey_dark') {
+            document.documentElement.setAttribute('data-theme', 'grey_dark');
+          } else if (theme === 'dark' || theme === 'navy_dark') {
+            document.documentElement.setAttribute('data-theme', 'navy_dark');
+          } else if (theme === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+          } else if (theme === 'contrast') {
+            document.documentElement.setAttribute('data-theme', 'contrast');
+          }
+          localStorage.setItem('budget_theme', theme);
+        };
+        window.changeTheme(saved);
+      } catch (e) {}
+    })();
+  </script>
+      <script>
+      window.__BUILD_ID__ = "{{ BUILD_ID }}";
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for (var i = 0; i < registrations.length; i++) {
+            registrations[i].unregister();
+          }
+        });
+      }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- ERROR BANNER -->
+    <div id="errorBanner" style="display:none; background:#ef4444; color:#fff; padding:12px; font-weight:bold; font-size:12px; margin:8px 16px; border-radius:6px; white-space:pre-wrap;"></div>
+
+    <!-- STATIC FIXED TOP HEADER & TABS (Never scrolls with content) -->
+    <header id="appHeaderSticky" class="app-header-static">
+      <!-- ROW 1: TOP NAV BAR (Logo + Year on Left, View Mode + Settings on Far Right) -->
+      <div class="top-nav-bar">
+        <div class="top-nav-left">
+          <div class="logo">
+            <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
+            <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
+            <span id="topBarMonthTitle">Budget</span>
+          </div>
+        </div>
+
+        <div class="top-nav-right">
+          <div class="dropdown">
+            <button id="yearDropdownBtn" class="btn secondary" onclick="window.budgetApp.toggleYearDropdown(event)" title="Select Year"><span class="btn-icon">&#128197;</span><span class="btn-text"> <span id="currentYearDisplay">2026</span> &#9662;</span></button>
+            <div class="dropdown-content">
+              <div id="yearListOptions"></div>
+              <div style="border-top:1px solid var(--border); margin-top:4px;">
+                <button id="dropdownArchiveManagerBtn" onclick="window.budgetApp.openArchiveManagerModal()">&#128230; Archive Manager</button>
+                <button id="archiveYearActionBtn" onclick="window.budgetApp.toggleArchiveYear()">&#128230; Archive Year</button>
+                <button id="createNewYearBtn" onclick="window.budgetApp.promptCreateNewYear()">&#10133; Create New Year</button>
+              </div>
+            </div>
+          </div>
+          <button id="calculatorNavBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator (Alt+C)"><span class="btn-icon">&#129518;</span><span class="btn-text"> Calculator</span></button>
+          <button id="globalModeBtn" class="btn secondary" onclick="window.budgetApp.toggleGlobalEditMode()" title="Toggle View/Edit Mode"><span class="btn-icon">&#128065;&#65039;</span><span class="btn-text"> View Mode</span></button>
+          <button id="openDrawerBtn" class="btn secondary" onclick="window.budgetApp.openDrawer()" title="Settings & Tools"><span class="btn-icon">&#9776;</span><span class="btn-text"> Settings</span></button>
+        </div>
+      </div>
+
+      <!-- ROW 2: PAYDAY PERIOD META BAR (Sleek full-width banner) -->
+      <div id="monthMetaBar" class="payday-meta-bar"></div>
+
+      <!-- ROW 3: NAVIGATION TABS -->
+      <div class="nav-tabs" id="navTabs"></div>
+
+      <!-- ROW 4: SUB-NAVIGATION BAR -->
+      <div class="sub-nav" id="subNavBar" style="display:none;"></div>
+    </header>
+
+    <!-- SCROLLABLE CONTENT VIEWPORT -->
+    <main id="appBody" class="app-body-scroll"></main>
+  </div>
+
+  <!-- BACKDROP FOR SIDE DRAWER -->
+  <div id="drawerBackdrop" class="drawer-backdrop" onclick="window.budgetApp.closeDrawer()"></div>
+
+  <!-- SIDE DRAWER -->
+  <div id="sideDrawer" class="drawer">
+    <div class="drawer-header">
+      <h3>&#9881;&#65039; Settings & Tools</h3>
+      <button id="closeDrawerBtn" class="btn secondary" onclick="window.budgetApp.closeDrawer()" style="padding:2px 8px;">&#10005;</button>
+    </div>
+    
+    <div style="display:flex; flex-direction:column; gap:16px;">
+      <div>
+        <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Appearance Theme</label>
+        <select id="themeSelect" onchange="window.budgetApp.changeTheme(this.value)" style="width:100%; margin-top:4px;">
+          <option value="grey_dark">&#127770; Dark Mode (Charcoal)</option>
+          <option value="navy_dark">&#127769; Navy Dark Mode (Deep Blue)</option>
+          <option value="light">&#9728;&#65039; Light Mode</option>
+          <option value="contrast">&#11035; High Contrast</option>
+        </select>
+      </div>
+
+      <div style="border-top:1px solid var(--border); padding-top:12px;">
+        <h4 style="font-size:13px; margin-bottom:8px;">Household & Navigation</h4>
+        <button id="drawerCalculatorBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.openCalculator();">&#129518; Budget Calculator</button>
+        <button id="drawerSettingsBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.setTab('Settings');">&#9881;&#65039; Global Settings</button>
+        <button id="drawerBirthdaysBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.setTab('Budgets');">&#127874; Birthdays & Occasions</button>
+        <button id="drawerScheduledBillsBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.setTab('Bills');">&#128197; Scheduled & Recurring Bills</button>
+        <button id="drawerArchiveBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.openArchiveManagerModal();">&#128230; Archive Manager</button>
+        <button id="drawerAccountTrackingBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.openAccountTrackingModal();">&#9881;&#65039; Accounts & Tracking Setup</button>
+        <button id="drawerOnboardingBtn" class="btn secondary" style="width:100%; margin-bottom:8px; justify-content:center;" onclick="window.budgetApp.closeDrawer(); window.budgetApp.startOnboarding();">&#129497; Setup Wizard</button>
+      </div>
+
+      <div style="border-top:1px solid var(--border); padding-top:12px;">
+        <h4 style="font-size:13px; margin-bottom:8px;">Data & Backup</h4>
+        <div style="display:flex; gap:8px;">
+          <button id="exportDataBtn" class="btn secondary" style="flex:1; justify-content:center;" onclick="window.budgetApp.exportData();">&#11015; Export Data</button>
+          <button id="importDataBtn" class="btn secondary" style="flex:1; justify-content:center;" onclick="document.getElementById('importFileInput').click();">&#11014; Import Data</button>
+        </div>
+        <input type="file" id="importFileInput" accept=".json" style="display:none;" onchange="window.budgetApp.importData(event)">
+      </div>
+
+      <div style="border-top:1px solid var(--border); padding-top:12px;">
+        <button id="factoryResetBtn" class="btn red" style="width:100%; justify-content:center;" onclick="window.budgetApp.resetAllData();">&#9888;&#65039; Factory Reset</button>
+      </div>
+
+      <div class="drawer-branding" style="margin-top:auto; padding-top:14px; border-top:1px solid var(--border); text-align:center;">
+        <img src="static/img/banner_dark.png" alt="HABit Logo" class="drawer-banner-img logo-dark-mode">
+        <img src="static/img/banner_light.png" alt="HABit Logo" class="drawer-banner-img logo-light-mode">
+        <div class="drawer-version-text" style="margin-top:8px; font-size:11px; font-weight:600; color:var(--text-muted); letter-spacing:0.5px;">
+          v{{ app_version }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ONBOARDING WIZARD MODAL -->
+  <div id="onboardingWizard" class="modal-overlay" style="display:none;">
+    <div class="modal-box" style="max-width:650px; position:relative;">
+      <button class="modal-close-btn" onclick="window.budgetApp.closeOnboarding()" title="Close Wizard" style="position:absolute; top:14px; right:14px; z-index:10; font-size:20px; cursor:pointer;">&times;</button>
+      
+      <!-- STEP 1: PREFERENCES -->
+      <div id="obStep1" class="wizard-step">
+        <h2 style="color:var(--heading); font-size:18px;">&#128075; Welcome to Household Budget Planner</h2>
+        <p style="color:var(--text-muted); font-size:12px; margin:4px 0 16px 0;">Customize your regional preferences and visual appearance.</p>
+        
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Appearance Theme</label>
+            <select id="ob-theme" onchange="window.budgetApp.changeTheme(this.value)" style="width:100%; margin-top:4px;">
+              <option value="grey_dark">&#127770; Dark Mode (Charcoal)</option>
+              <option value="navy_dark">&#127769; Navy Dark Mode (Deep Blue)</option>
+              <option value="light">&#9728;&#65039; Light Mode</option>
+              <option value="contrast">&#11035; High Contrast</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Currency Symbol</label>
+            <input type="text" id="ob-curr" value="&pound;" maxlength="4" style="width:100%; margin-top:4px;">
+          </div>
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Payday Day of Month</label>
+            <input type="number" id="ob-pday" value="26" min="1" max="31" style="width:100%; margin-top:4px;">
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Weekly schedules anchor to this day or the closest working Monday.</div>
+          </div>
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Bank Holiday Region</label>
+            <select id="ob-holiday" style="width:100%; margin-top:4px;">
+              <option value="uk_ew">UK - England & Wales</option>
+              <option value="uk_scot">UK - Scotland</option>
+              <option value="us">United States (Federal)</option>
+              <option value="none">None (Weekends Only)</option>
+            </select>
+          </div>
+          <div style="margin-top:6px;">
+            <label style="font-size:12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="ob-tracksavings" checked> Enable Savings Accounts & Portfolio Tracking
+            </label>
+          </div>
+        </div>
+
+        <div style="margin-top:24px; display:flex; justify-content:space-between; align-items:center;">
+          <button class="btn secondary" onclick="window.budgetApp.closeOnboarding()">Skip / Close</button>
+          <button id="obNext1" class="btn green" onclick="window.budgetApp.nextObStep(2)">Next: Household & Accounts &#10140;</button>
+        </div>
+      </div>
+
+      <!-- STEP 2: HOUSEHOLD & ACCOUNTS -->
+      <div id="obStep2" class="wizard-step" style="display:none;">
+        <h3 style="color:var(--heading);">Step 2: Household & Accounts</h3>
+        <h4 style="margin:16px 0 6px 0; color:var(--text);">Household Members</h4>
+        <div id="obPeopleList" style="display:flex; flex-direction:column; gap:6px;"></div>
+        <button id="obAddPersonBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddPerson()">+ Add Household Member</button>
+
+        <h4 style="margin:16px 0 6px 0; color:var(--curr-border);">Current Accounts</h4>
+        <div id="obCurrentList" style="display:flex; flex-direction:column; gap:6px;"></div>
+        <button id="obAddCurrentBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddCurrent()">+ Add Current Account</button>
+
+        <h4 style="margin:16px 0 6px 0; color:var(--purple);">Savings Accounts</h4>
+        <div id="obSavingsList" style="display:flex; flex-direction:column; gap:6px;"></div>
+        <button id="obAddSavingsBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddSavings()">+ Add Savings Account</button>
+
+        <h4 style="margin:16px 0 6px 0; color:var(--amber);">Credit Cards</h4>
+        <div id="obCreditList" style="display:flex; flex-direction:column; gap:6px;"></div>
+        <button id="obAddCreditBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddCredit()">+ Add Credit Card</button>
+
+        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+          <button id="obBack2" class="btn secondary" onclick="window.budgetApp.nextObStep(1)">&#11013; Back</button>
+          <button id="obNext2" class="btn green" onclick="window.budgetApp.nextObStep(3)">Next: Salaries & Deductions &#10140;</button>
+        </div>
+      </div>
+
+      <!-- STEP 3: SALARIES & DEDUCTIONS -->
+      <div id="obStep3" class="wizard-step" style="display:none;">
+        <h3 style="color:var(--heading);">Step 3: Salaries & Deductions</h3>
+        <p style="color:var(--text-muted); font-size:12px;">Add salaries and personal deductions (e.g. individual phone bills). Assign amounts per person and select transfer destinations.</p>
+        
+        <div id="obDeductList" style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; margin-bottom:8px;"></div>
+        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
+          <div style="display:flex; gap:4px; margin-bottom:4px;">
+            <input type="text" id="ob-deduct-name" placeholder="Item Name (e.g. Salary, Phone Bill)" style="flex:1;">
+            <select id="ob-deduct-target" title="Transfer Destination" style="width:140px;"></select>
+          </div>
+          <div id="obDeductPeopleInputs" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:4px;"></div>
+          <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+            <label style="font-size:12px; cursor:pointer; color:var(--green); font-weight:bold;"><input type="checkbox" id="ob-deduct-issalary" checked> Is Salary / Income?</label>
+            <button id="obAddDeductBtn" class="btn green" onclick="window.budgetApp.obAddDeduction()">+ Add Item</button>
+          </div>
+        </div>
+
+        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+          <button id="obBack3" class="btn secondary" onclick="window.budgetApp.nextObStep(2)">&#11013; Back</button>
+          <button id="obNext3" class="btn green" onclick="window.budgetApp.nextObStep(4)">Next: Scheduled Bills &#10140;</button>
+        </div>
+      </div>
+
+      <!-- STEP 4: SCHEDULED BILLS -->
+      <div id="obStep4" class="wizard-step" style="display:none;">
+        <h3 style="color:var(--heading);">Step 4: Scheduled Bills</h3>
+        <p style="color:var(--text-muted); font-size:12px;">Add your monthly Direct Debits and annual recurring bills.</p>
+        
+        <h4 style="margin:16px 0 6px 0; color:var(--curr-border);">Monthly Direct Debits</h4>
+        <div id="obDDList" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto;"></div>
+        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
+          <div style="display:grid; grid-template-columns:1fr 60px 80px; gap:4px; margin-bottom:4px;">
+            <input type="text" id="ob-dd-desc" placeholder="Bill Description">
+            <input type="number" id="ob-dd-day" placeholder="Day (1-31)">
+            <input type="number" step="0.01" id="ob-dd-amt" placeholder="Amount">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 1fr 40px; gap:4px;">
+            <select id="ob-dd-acc" title="Paid From Account"></select>
+            <select id="ob-dd-transfer" title="Transfer Destination"></select>
+            <button id="obAddDDBtn" class="btn green" onclick="window.budgetApp.obAddDD()">+</button>
+          </div>
+        </div>
+
+        <h4 style="margin:24px 0 6px 0; color:var(--amber);">Annual Recurring Bills</h4>
+        <div id="obYearlyList" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto;"></div>
+        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
+          <div style="display:grid; grid-template-columns:1fr 70px 60px 80px; gap:4px; margin-bottom:4px;">
+            <input type="text" id="ob-yb-desc" placeholder="Bill Description">
+            <select id="ob-yb-m">
+              <option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option>
+              <option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option>
+              <option value="Jul">Jul</option><option value="Aug">Aug</option><option value="Sep">Sep</option>
+              <option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option>
+            </select>
+            <input type="number" id="ob-yb-day" placeholder="Day">
+            <input type="number" step="0.01" id="ob-yb-amt" placeholder="Amount">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 40px; gap:4px;">
+            <select id="ob-yb-acc" title="Paid From Account"></select>
+            <button id="obAddYearlyBtn" class="btn green" onclick="window.budgetApp.obAddYearly()">+</button>
+          </div>
+        </div>
+
+        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+          <button id="obBack4" class="btn secondary" onclick="window.budgetApp.nextObStep(3)">&#11013; Back</button>
+          <button id="obNext4" class="btn green" onclick="window.budgetApp.nextObStep(5)">Next: Weekly Expense Baselines &#10140;</button>
+        </div>
+      </div>
+
+      <!-- STEP 5: WEEKLY EXPENSE BASELINES -->
+      <div id="obStep5" class="wizard-step" style="display:none;">
+        <h3 style="color:var(--heading);">Step 5: Weekly Expense Baselines</h3>
+        <p style="color:var(--text-muted); font-size:12px;">Set up default weekly allowances (e.g. Groceries, Fuel) that populate automatically every week.</p>
+        
+        <div id="obWeeklyList" style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto;"></div>
+        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
+          <div style="display:grid; grid-template-columns:85px 1fr 80px; gap:4px; margin-bottom:4px;">
+            <select id="ob-wk-type"><option value="expense">- Expense</option><option value="income">+ Income</option></select>
+            <input type="text" id="ob-wk-desc" placeholder="Category (e.g. Food / Groceries)">
+            <input type="number" step="0.01" id="ob-wk-amt" placeholder="Amount">
+          </div>
+          <div style="display:grid; grid-template-columns:1fr 40px; gap:4px;">
+            <select id="ob-wk-acc" title="Account"></select>
+            <button id="obAddWeeklyBtn" class="btn green" onclick="window.budgetApp.obAddWeekly()">+</button>
+          </div>
+        </div>
+
+        <div style="margin-top:32px; display:flex; justify-content:space-between;">
+          <button id="obBack5" class="btn secondary" onclick="window.budgetApp.nextObStep(4)">&#11013; Back</button>
+          <button id="obFinishBtn" class="btn green" onclick="window.budgetApp.obFinish()">Complete Setup &#127881;</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- GENERIC MODAL OVERLAY -->
+  <div id="genericModal" class="modal-overlay" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-title">
+        <h3 id="modalTitle">Modal</h3>
+        <button id="modalCloseBtn" class="modal-close-btn">&times;</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
+      <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <!-- Synchronous Bundle Loading with Strict Dynamic Jinja Cache-Buster -->
+    <!-- FLOATING ACTION BUTTON (FAB) & SPEED DIAL -->
+  <div id="fabContainer" class="fab-container">
+    <!-- Backdrop to close on tap outside -->
+    <div class="fab-backdrop" onclick="window.budgetApp.closeFabMenu()"></div>
+
+    <!-- Speed Dial Option Actions (ONLY VISIBLE WHEN .open) -->
+    <div class="fab-speed-dial" id="fabSpeedDial">
+      <!-- 1. Check In -->
+      <div class="fab-action-row" onclick="window.budgetApp.openQuickCheckInModal()">
+        <span class="fab-action-label">Balance Check-In</span>
+        <button class="fab-action-btn fab-btn-checkin" title="Quick Balance Check-In">
+          <span class="fab-action-icon">&#128241;</span>
+        </button>
+      </div>
+
+      <!-- 2. Add Weekly Item -->
+      <div class="fab-action-row" onclick="window.budgetApp.openQuickWeeklyExpenseModal()">
+        <span class="fab-action-label">Add Weekly Expense</span>
+        <button class="fab-action-btn fab-btn-expense" title="Add Weekly Expense">
+          <span class="fab-action-icon">&#128179;</span>
+        </button>
+      </div>
+
+      <!-- 3. Add Budget Spend -->
+      <div class="fab-action-row" onclick="window.budgetApp.openQuickBudgetTxModal()">
+        <span class="fab-action-label">Add Budget Spend</span>
+        <button class="fab-action-btn fab-btn-budget" title="Add Budget Spend">
+          <span class="fab-action-icon">&#127919;</span>
+        </button>
+      </div>
+
+      <!-- 4. Log Birthday Spend -->
+      <div class="fab-action-row" onclick="window.budgetApp.openQuickBirthdaySpendModal()">
+        <span class="fab-action-label">Log Gift Spend</span>
+        <button class="fab-action-btn fab-btn-birthday" title="Log Gift Spend">
+          <span class="fab-action-icon">&#127874;</span>
+        </button>
+      </div>
+      <!-- 5. Budget Calculator -->
+      <div class="fab-action-row" onclick="window.budgetApp.toggleCalculator()">
+        <span class="fab-action-label">Budget Calculator</span>
+        <button class="fab-action-btn fab-btn-calc" style="background: linear-gradient(135deg, #6366f1, #8b5cf6) !important; border-color: #a78bfa !important;" title="Open Calculator">
+          <span class="fab-action-icon">&#129518;</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main FAB Trigger Button -->
+    <button id="fabMainBtn" class="fab-main-btn" onclick="window.budgetApp.toggleFabMenu()" title="Quick Actions">
+      <span class="fab-main-icon">+</span>
+    </button>
+  </div>
+
+  <!-- VALUE PICKER FLOATING HUD BAR (Top of screen during Value Picker mode) -->
+  <div id="calculatorPickerHud" class="calculator-picker-hud" style="display:none;">
+    <div class="picker-hud-content">
+      <span class="picker-hud-icon">&#127919;</span>
+      <div class="picker-hud-text">
+        <strong class="picker-hud-title">Value Picker Active</strong>
+        <span class="picker-hud-sub">Click or tap any number on screen to insert into calculation</span>
+      </div>
+      <button id="cancelPickerBtn" class="picker-cancel-btn" onclick="window.budgetApp.cancelValuePicker()" title="Cancel Selection">
+        &#10005; Cancel
+      </button>
+    </div>
+  </div>
+
+  <!-- MINIMIZED CALCULATOR FLOATING BADGE -->
+  <div id="calcMinimizedBadge" class="calc-minimized-badge" style="display:none;" onclick="window.budgetApp.restoreFromMinimized()" title="Click to open Calculator">
+    <span class="calc-min-icon">&#129518;</span>
+    <span id="calcMinResult" class="calc-min-val">0</span>
+  </div>
+
+  <!-- FLOATING BUDGET CALCULATOR WIDGET -->
+  <div id="budgetCalculatorWidget" class="budget-calculator-widget" style="display:none;">
+    <!-- Drag Header -->
+    <div id="calcDragHeader" class="calc-header">
+      <div class="calc-title">
+        <span class="calc-title-icon">&#129518;</span>
+        <span class="calc-title-text">Calculator</span>
+      </div>
+      <div class="calc-header-actions">
+        <button class="calc-win-btn" onclick="window.budgetApp.toggleCalcHistory()" title="Calculation History">&#128220;</button>
+        <button class="calc-win-btn" onclick="window.budgetApp.copyCalcResult()" title="Copy Result">&#128203;</button>
+        <button class="calc-win-btn" onclick="window.budgetApp.minimizeCalculator()" title="Minimize">&#9472;</button>
+        <button class="calc-win-btn calc-close-btn" onclick="window.budgetApp.closeCalculator()" title="Close">&#10005;</button>
+      </div>
+    </div>
+
+    <!-- History Drawer (Inside calculator) -->
+    <div id="calcHistoryPanel" class="calc-history-panel" style="display:none;">
+      <div class="calc-history-header">
+        <span>Recent Calculations</span>
+        <button class="btn secondary" style="padding:2px 8px; font-size:10px;" onclick="window.budgetApp.clearCalcHistory()">Clear</button>
+      </div>
+      <div id="calcHistoryList" class="calc-history-list"></div>
+    </div>
+
+    <!-- Calculator Display -->
+    <div class="calc-screen">
+      <div id="calcExprDisplay" class="calc-expr-display"></div>
+      <div id="calcMainDisplay" class="calc-main-display">0</div>
+    </div>
+
+    <!-- Keypad -->
+    <div class="calc-keypad">
+      <!-- Special Value Picker Button -->
+      <button class="calc-btn calc-btn-picker" onclick="window.budgetApp.startValuePicker()" title="Tap any number in the budget to insert it">
+        <span class="calc-picker-btn-icon">&#127919;</span> <span class="calc-picker-btn-text">Select Value from UI</span>
+      </button>
+
+      <!-- Keypad Grid -->
+      <div class="calc-grid">
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcClearAll()">C</button>
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcClearEntry()" title="Backspace">&#9003;</button>
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcInputParen('(')">(</button>
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcInputParen(')')">)</button>
+
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcInputPercent()">%</button>
+        <button class="calc-btn calc-btn-op" onclick="window.budgetApp.calcInputOperator('÷')">&divide;</button>
+        <button class="calc-btn calc-btn-op" onclick="window.budgetApp.calcInputOperator('×')">&times;</button>
+        <button class="calc-btn calc-btn-op" onclick="window.budgetApp.calcInputOperator('−')">&minus;</button>
+
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(7)">7</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(8)">8</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(9)">9</button>
+        <button class="calc-btn calc-btn-op" onclick="window.budgetApp.calcInputOperator('+')">+</button>
+
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(4)">4</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(5)">5</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(6)">6</button>
+        <button class="calc-btn calc-btn-fn" onclick="window.budgetApp.calcToggleSign()">&plusmn;</button>
+
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(1)">1</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(2)">2</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDigit(3)">3</button>
+        <button class="calc-btn calc-btn-eq" onclick="window.budgetApp.calcEquals()">=</button>
+
+        <button class="calc-btn calc-btn-num calc-btn-zero" onclick="window.budgetApp.calcInputDigit(0)">0</button>
+        <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDecimal()">.</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="static/js/bundle.js?v={{ BUILD_ID }}"></script>
+</body>
+</html>

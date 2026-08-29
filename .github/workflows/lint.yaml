@@ -1,0 +1,20 @@
+name: Add-on Validation & Lint
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    name: Home Assistant Add-on Linter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Add-on Linter
+        uses: home-assistant/action-addon-linter@v2.16.0
+        with:
+          path: "."
