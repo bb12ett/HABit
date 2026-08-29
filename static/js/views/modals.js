@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner } from '../state.js';
 import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -256,6 +256,8 @@ export function openAccountTrackingModal() {
               const conf = getAccountConfig('current', a);
               const isEdited = mData.current_data[a] && mData.current_data[a].user_edited;
               const bal = (mData.current_data[a] && mData.current_data[a].opening !== undefined) ? mData.current_data[a].opening : '';
+              const owner = getAccountOwner('current', a);
+              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -266,12 +268,23 @@ export function openAccountTrackingModal() {
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
-                      <select id="m_trk_c_${idx}" style="padding:3px 6px; font-size:11px;">
-                        <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
-                        <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
-                      </select>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="display:flex; align-items:center; gap:4px;">
+                        <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
+                        <select id="m_trk_c_${idx}" style="padding:3px 6px; font-size:11px;">
+                          <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
+                          <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
+                        </select>
+                      </div>
+                      ${isMulti ? `
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
+                          <select id="m_own_c_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        </div>
+                      ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                       <input type="checkbox" id="m_net_c_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
@@ -291,6 +304,8 @@ export function openAccountTrackingModal() {
               const conf = getAccountConfig('credit', c.name);
               const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
               const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
+              const owner = getAccountOwner('credit', c.name);
+              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -304,12 +319,23 @@ export function openAccountTrackingModal() {
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
-                      <select id="m_trk_cr_${idx}" style="padding:3px 6px; font-size:11px;">
-                        <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
-                        <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
-                      </select>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="display:flex; align-items:center; gap:4px;">
+                        <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
+                        <select id="m_trk_cr_${idx}" style="padding:3px 6px; font-size:11px;">
+                          <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
+                          <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
+                        </select>
+                      </div>
+                      ${isMulti ? `
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
+                          <select id="m_own_cr_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        </div>
+                      ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                       <input type="checkbox" id="m_net_cr_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
@@ -330,6 +356,8 @@ export function openAccountTrackingModal() {
                 const conf = getAccountConfig('savings', s);
                 const isEdited = mData.savings_data[s] && mData.savings_data[s].user_edited;
                 const bal = (mData.savings_data[s] && mData.savings_data[s].opening !== undefined) ? mData.savings_data[s].opening : '';
+                const owner = getAccountOwner('savings', s);
+                const isMulti = isMultiUserEnabled();
                 return `
                   <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -341,10 +369,10 @@ export function openAccountTrackingModal() {
                     </div>
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
                       <div style="display:flex; align-items:center; gap:6px;">
-                        <label style="font-size:11px; color:var(--text-muted);">Forecast Mode:</label>
-                        <select id="m_pred_s_${idx}" style="padding:3px 6px; font-size:11px; max-width:180px;">
-                          <option value="planned" ${conf.savings_predict_mode !== 'actual' ? 'selected' : ''}>📈 Planned Cashflow</option>
-                          <option value="actual" ${conf.savings_predict_mode === 'actual' ? 'selected' : ''}>🔄 Roll Forward from Actuals</option>
+                        <label style="font-size:11px; color:var(--text-muted);">Forecast:</label>
+                        <select id="m_pred_s_${idx}" style="padding:3px 6px; font-size:11px; max-width:140px;">
+                          <option value="planned" ${conf.savings_predict_mode !== 'actual' ? 'selected' : ''}>📈 Planned</option>
+                          <option value="actual" ${conf.savings_predict_mode === 'actual' ? 'selected' : ''}>🔄 Rollover</option>
                         </select>
                       </div>
                       <div style="display:flex; align-items:center; gap:8px;">
@@ -352,6 +380,12 @@ export function openAccountTrackingModal() {
                           <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Weekly</option>
                           <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Monthly</option>
                         </select>
+                        ${isMulti ? `
+                          <select id="m_own_s_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        ` : ''}
                         <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                           <input type="checkbox" id="m_net_s_${idx}" ${conf.include_in_net ? 'checked' : ''}> Net
                         </label>

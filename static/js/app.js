@@ -9,7 +9,11 @@ import {
   months,
   applyTheme,
   getBirthdays,
-  getRecurringPayments
+  getRecurringPayments,
+  isMultiUserEnabled,
+  setPersonSalaryPrivacy,
+  getAccountOwner,
+  setAccountOwner
 } from './state.js';
 
 import {
@@ -1292,6 +1296,8 @@ window.budgetApp = {
       const trk = document.getElementById(`m_trk_c_${idx}`)?.value || 'weekly';
       const net = document.getElementById(`m_net_c_${idx}`)?.checked !== false;
       configs.current[acc] = { tracking: trk, include_in_net: net };
+      const own = document.getElementById(`m_own_c_${idx}`)?.value;
+      if (own) setAccountOwner('current', acc, own);
 
       const openVal = document.getElementById(`m_open_c_${idx}`)?.value;
       if (!md.current_data[acc]) md.current_data[acc] = {};
@@ -1308,6 +1314,8 @@ window.budgetApp = {
       const trk = document.getElementById(`m_trk_cr_${idx}`)?.value || 'weekly';
       const net = document.getElementById(`m_net_cr_${idx}`)?.checked !== false;
       configs.credit[c.name] = { tracking: trk, include_in_net: net };
+      const own = document.getElementById(`m_own_cr_${idx}`)?.value;
+      if (own) setAccountOwner('credit', c.name, own);
 
       const spentVal = document.getElementById(`m_open_cr_${idx}`)?.value;
       if (!md.credit_data[c.name]) md.credit_data[c.name] = {};
@@ -1326,6 +1334,8 @@ window.budgetApp = {
         const net = document.getElementById(`m_net_s_${idx}`)?.checked !== false;
         const predMode = document.getElementById(`m_pred_s_${idx}`)?.value || 'planned';
         configs.savings[s] = { tracking: trk, include_in_net: net, savings_predict_mode: predMode };
+        const own = document.getElementById(`m_own_s_${idx}`)?.value;
+        if (own) setAccountOwner('savings', s, own);
 
         const savVal = document.getElementById(`m_open_s_${idx}`)?.value;
         if (!md.savings_data[s]) md.savings_data[s] = {};
@@ -1435,8 +1445,22 @@ window.budgetApp = {
   obAddPerson() { obAddPerson(); },
   obUpdatePerson(idx, val) {
     if (!getSettings().people) getSettings().people = [];
-    getSettings().people[idx] = val;
+    const oldName = getSettings().people[idx];
+    const newName = (val || '').trim();
+    getSettings().people[idx] = newName;
+    if (oldName && oldName !== newName) {
+      if (!getSettings().people_settings) getSettings().people_settings = {};
+      getSettings().people_settings[newName] = getSettings().people_settings[oldName] || { hide_salary: false };
+      delete getSettings().people_settings[oldName];
+    }
     obRenderLists();
+  },
+  obUpdatePersonPrivacy(idx, hide) {
+    if (!getSettings().people) getSettings().people = [];
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonSalaryPrivacy(p, hide);
+    }
   },
   obDelPerson(idx) {
     if (getSettings().people) getSettings().people.splice(idx, 1);
@@ -1445,8 +1469,27 @@ window.budgetApp = {
   obAddCurrent() { obAddCurrent(); },
   obUpdateCurrent(idx, val) {
     if (!getSettings().current_accounts) getSettings().current_accounts = [];
-    getSettings().current_accounts[idx] = val;
+    const oldName = getSettings().current_accounts[idx];
+    const newName = (val || '').trim();
+    getSettings().current_accounts[idx] = newName;
+    if (oldName && oldName !== newName) {
+      const owner = getAccountOwner('current', oldName);
+      setAccountOwner('current', newName, owner);
+    }
     obRenderLists();
+  },
+  obUpdateAccountOwner(accType, idx, owner) {
+    let accName = '';
+    if (accType === 'current' && getSettings().current_accounts) {
+      accName = getSettings().current_accounts[idx];
+    } else if (accType === 'credit' && getSettings().credit_accounts) {
+      accName = getSettings().credit_accounts[idx]?.name;
+    } else if (accType === 'savings' && getSettings().savings_accounts) {
+      accName = getSettings().savings_accounts[idx];
+    }
+    if (accName) {
+      setAccountOwner(accType, accName, owner);
+    }
   },
   obDelCurrent(idx) {
     if (getSettings().current_accounts) getSettings().current_accounts.splice(idx, 1);
@@ -2432,11 +2475,13 @@ window.budgetApp = {
     const holidayEl = document.getElementById('cfg-holiday');
     const themeEl = document.getElementById('cfg-theme');
     const trackSavEl = document.getElementById('cfg-tracksavings');
+    const multiUsersEl = document.getElementById('cfg-multiusers');
 
     if (currEl) cfg.currency = currEl.value;
     if (pdayEl) cfg.payday_day = parseInt(pdayEl.value, 10) || 26;
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
+    if (multiUsersEl) cfg.enable_multi_user = multiUsersEl.checked;
     if (themeEl) {
       cfg.theme = themeEl.value;
       applyTheme(themeEl.value);
@@ -2457,9 +2502,50 @@ window.budgetApp = {
     alert("Settings saved successfully!");
   },
 
+  async toggleMultiUserModeInSettings(enabled) {
+    getSettings().enable_multi_user = !!enabled;
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  async updatePersonSalaryPrivacy(idx, hide) {
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonSalaryPrivacy(p, hide);
+      calculateAndSyncRollovers();
+      renderContent();
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+  },
+
+  async updateAccountOwner(accType, accName, owner) {
+    setAccountOwner(accType, accName, owner);
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  setUserFilter(filterName) {
+    appState.selectedUserFilter = filterName;
+    renderContent();
+  },
+
+  toggleSalaryReveal(person) {
+    if (!appState.unmaskedSalaries) appState.unmaskedSalaries = {};
+    appState.unmaskedSalaries[person] = !appState.unmaskedSalaries[person];
+    renderContent();
+  },
+
   async renameCurrentAccount(idx, newName) {
-    if (newName) {
-      getSettings().current_accounts[idx] = newName.trim();
+    if (newName && newName.trim()) {
+      const oldName = getSettings().current_accounts[idx];
+      const name = newName.trim();
+      getSettings().current_accounts[idx] = name;
+      if (oldName && oldName !== name) {
+        const owner = getAccountOwner('current', oldName);
+        setAccountOwner('current', name, owner);
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -2556,8 +2642,15 @@ window.budgetApp = {
   },
 
   async updatePersonNameInSettings(idx, val) {
-    if (val) {
-      getSettings().people[idx] = val.trim();
+    if (val && val.trim()) {
+      const oldName = getSettings().people[idx];
+      const newName = val.trim();
+      getSettings().people[idx] = newName;
+      if (oldName && oldName !== newName) {
+        if (!getSettings().people_settings) getSettings().people_settings = {};
+        getSettings().people_settings[newName] = getSettings().people_settings[oldName] || { hide_salary: false };
+        delete getSettings().people_settings[oldName];
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }

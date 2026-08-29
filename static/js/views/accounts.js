@@ -1,4 +1,4 @@
-import { appState, getSettings, getMonthData, getAccountConfig } from '../state.js';
+import { appState, getSettings, getMonthData, getAccountConfig, isMultiUserEnabled, getAccountOwner } from '../state.js';
 
 export function renderAccountsView(container) {
   const cfg = getSettings();
@@ -6,6 +6,7 @@ export function renderAccountsView(container) {
   const activeTab = appState.activeTab;
   const globalEditMode = appState.globalEditMode;
   const mData = getMonthData(activeTab);
+  const isMulti = isMultiUserEnabled();
 
   let html = `
     <div class="panel">
@@ -26,10 +27,14 @@ export function renderAccountsView(container) {
         ${cfg.current_accounts.map(acc => {
           const isEdited = mData.current_data[acc] && mData.current_data[acc].user_edited;
           const bal = (mData.current_data[acc] && mData.current_data[acc].opening !== undefined) ? mData.current_data[acc].opening : '';
+          const owner = getAccountOwner('current', acc);
           return `
             <div class="account-card">
               <div class="account-card-header">
-                <strong style="color:var(--curr-border); font-size:14px;">🏦 ${acc}</strong>
+                <div>
+                  <strong style="color:var(--curr-border); font-size:14px;">🏦 ${acc}</strong>
+                  ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                </div>
                 ${isEdited ? '<span class="badge" style="font-size:9px; background:var(--curr-border); color:#fff;">Override</span>' : '<span style="font-size:10px; color:var(--text-muted);">Auto-Rollover</span>'}
               </div>
               <div class="account-row" style="margin-top:8px;">
@@ -50,11 +55,15 @@ export function renderAccountsView(container) {
         ${cfg.credit_accounts.map(c => {
           const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
           const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
+          const owner = getAccountOwner('credit', c.name);
           return `
             <div class="account-card">
               <div class="account-card-header">
-                <strong style="color:var(--amber); font-size:14px;">💳 ${c.name}</strong>
-                <span style="font-size:11px; color:var(--text-muted);">Credit Limit: ${curr}${c.limit}</span>
+                <div>
+                  <strong style="color:var(--amber); font-size:14px;">💳 ${c.name}</strong>
+                  ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                </div>
+                <span style="font-size:11px; color:var(--text-muted);">Limit: ${curr}${c.limit}</span>
               </div>
               <div class="account-row" style="margin-top:8px;">
                 <label style="font-size:12px;">Opening Debt:</label>
@@ -76,10 +85,14 @@ export function renderAccountsView(container) {
             const isEdited = mData.savings_data[accName] && mData.savings_data[accName].user_edited;
             const bal = (mData.savings_data[accName] && mData.savings_data[accName].opening !== undefined) ? mData.savings_data[accName].opening : '';
             const conf = (typeof getAccountConfig === 'function') ? getAccountConfig('savings', accName) : { savings_predict_mode: 'planned' };
+            const owner = getAccountOwner('savings', accName);
             return `
               <div class="account-card">
                 <div class="account-card-header">
-                  <strong style="color:var(--purple); font-size:14px;">📈 ${accName}</strong>
+                  <div>
+                    <strong style="color:var(--purple); font-size:14px;">📈 ${accName}</strong>
+                    ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                  </div>
                   ${isEdited ? '<span class="badge" style="font-size:9px; background:var(--purple); color:#fff;">Override</span>' : '<span style="font-size:10px; color:var(--text-muted);">Auto-Rollover</span>'}
                 </div>
                 <div class="account-row" style="margin:8px 0;">

@@ -5,7 +5,16 @@ export const DEFAULT_SETTINGS = {
   payday_day: 26,
   track_savings: true,
   enable_yearly_budgets: true,
+  enable_multi_user: false,
   people: ["Person 1", "Person 2"],
+  people_settings: {
+    "Person 1": { hide_salary: false },
+    "Person 2": { hide_salary: false }
+  },
+  account_owners: {
+    "Joint Account": "Joint",
+    "Credit Card": "Joint"
+  },
   current_accounts: ["Joint Account"],
   credit_accounts: [
     {
@@ -78,7 +87,9 @@ export const appState = {
   activeSubTab: "overview",
   globalEditMode: false,
   draggedItemInfo: null,
-  activeChart: null
+  activeChart: null,
+  selectedUserFilter: 'all',
+  unmaskedSalaries: {}
 };
 
 if (typeof window !== 'undefined') {
@@ -285,6 +296,58 @@ export function isAccountIncludedInNet(accType, accName, year = appState.current
   return getAccountConfig(accType, accName, year).include_in_net !== false;
 }
 
+export function isMultiUserEnabled() {
+  const cfg = getSettings();
+  return !!cfg.enable_multi_user;
+}
+
+export function getPersonSettings(personName) {
+  const cfg = getSettings();
+  if (!cfg.people_settings) cfg.people_settings = {};
+  if (!cfg.people_settings[personName]) {
+    cfg.people_settings[personName] = {
+      hide_salary: false
+    };
+  }
+  return cfg.people_settings[personName];
+}
+
+export function isPersonSalaryHidden(personName) {
+  if (!isMultiUserEnabled()) return false;
+  const pConf = getPersonSettings(personName);
+  return !!pConf.hide_salary;
+}
+
+export function getAccountOwner(accType, accName) {
+  const cfg = getSettings();
+  if (!cfg.account_owners) cfg.account_owners = {};
+  const key = `${accType}:${accName}`;
+  if (cfg.account_owners[key]) return cfg.account_owners[key];
+  if (cfg.account_owners[accName]) return cfg.account_owners[accName];
+  if (accType === 'credit' && Array.isArray(cfg.credit_accounts)) {
+    const cObj = cfg.credit_accounts.find(c => (typeof c === 'object' && c.name === accName));
+    if (cObj && cObj.owner) return cObj.owner;
+  }
+  return "Joint";
+}
+
+export function setAccountOwner(accType, accName, owner) {
+  const cfg = getSettings();
+  if (!cfg.account_owners) cfg.account_owners = {};
+  const key = `${accType}:${accName}`;
+  cfg.account_owners[key] = owner || "Joint";
+  cfg.account_owners[accName] = owner || "Joint";
+  if (accType === 'credit' && Array.isArray(cfg.credit_accounts)) {
+    const cObj = cfg.credit_accounts.find(c => (typeof c === 'object' && c.name === accName));
+    if (cObj) cObj.owner = owner || "Joint";
+  }
+}
+
+export function setPersonSalaryPrivacy(personName, hide) {
+  const pConf = getPersonSettings(personName);
+  pConf.hide_salary = !!hide;
+}
+
 if (typeof window !== 'undefined') {
   window.__budgetAppState = appState;
   window.appState = appState;
@@ -296,6 +359,12 @@ if (typeof window !== 'undefined') {
   window.getAccountTrackingSettings = getAccountTrackingSettings;
   window.isAccountTrackedWeekly = isAccountTrackedWeekly;
   window.isAccountIncludedInNet = isAccountIncludedInNet;
+  window.isMultiUserEnabled = isMultiUserEnabled;
+  window.getPersonSettings = getPersonSettings;
+  window.isPersonSalaryHidden = isPersonSalaryHidden;
+  window.getAccountOwner = getAccountOwner;
+  window.setAccountOwner = setAccountOwner;
+  window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;
   window.months = months;
   window.applyTheme = applyTheme;
 }

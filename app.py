@@ -53,7 +53,16 @@ DEFAULT_SETTINGS = {
     "payday_day": 26,
     "track_savings": True,
     "enable_yearly_budgets": True,
+    "enable_multi_user": False,
     "people": ["Person 1", "Person 2"],
+    "people_settings": {
+        "Person 1": {"hide_salary": False},
+        "Person 2": {"hide_salary": False}
+    },
+    "account_owners": {
+        "Joint Account": "Joint",
+        "Credit Card": "Joint"
+    },
     "current_accounts": ["Joint Account"],
     "credit_accounts": [
         {

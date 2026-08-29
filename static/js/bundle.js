@@ -8,7 +8,16 @@ const DEFAULT_SETTINGS = {
   payday_day: 26,
   track_savings: true,
   enable_yearly_budgets: true,
+  enable_multi_user: false,
   people: ["Person 1", "Person 2"],
+  people_settings: {
+    "Person 1": { hide_salary: false },
+    "Person 2": { hide_salary: false }
+  },
+  account_owners: {
+    "Joint Account": "Joint",
+    "Credit Card": "Joint"
+  },
   current_accounts: ["Joint Account"],
   credit_accounts: [
     {
@@ -81,7 +90,9 @@ const appState = {
   activeSubTab: "overview",
   globalEditMode: false,
   draggedItemInfo: null,
-  activeChart: null
+  activeChart: null,
+  selectedUserFilter: 'all',
+  unmaskedSalaries: {}
 };
 
 if (typeof window !== 'undefined') {
@@ -288,6 +299,58 @@ function isAccountIncludedInNet(accType, accName, year = appState.currentYear) {
   return getAccountConfig(accType, accName, year).include_in_net !== false;
 }
 
+function isMultiUserEnabled() {
+  const cfg = getSettings();
+  return !!cfg.enable_multi_user;
+}
+
+function getPersonSettings(personName) {
+  const cfg = getSettings();
+  if (!cfg.people_settings) cfg.people_settings = {};
+  if (!cfg.people_settings[personName]) {
+    cfg.people_settings[personName] = {
+      hide_salary: false
+    };
+  }
+  return cfg.people_settings[personName];
+}
+
+function isPersonSalaryHidden(personName) {
+  if (!isMultiUserEnabled()) return false;
+  const pConf = getPersonSettings(personName);
+  return !!pConf.hide_salary;
+}
+
+function getAccountOwner(accType, accName) {
+  const cfg = getSettings();
+  if (!cfg.account_owners) cfg.account_owners = {};
+  const key = `${accType}:${accName}`;
+  if (cfg.account_owners[key]) return cfg.account_owners[key];
+  if (cfg.account_owners[accName]) return cfg.account_owners[accName];
+  if (accType === 'credit' && Array.isArray(cfg.credit_accounts)) {
+    const cObj = cfg.credit_accounts.find(c => (typeof c === 'object' && c.name === accName));
+    if (cObj && cObj.owner) return cObj.owner;
+  }
+  return "Joint";
+}
+
+function setAccountOwner(accType, accName, owner) {
+  const cfg = getSettings();
+  if (!cfg.account_owners) cfg.account_owners = {};
+  const key = `${accType}:${accName}`;
+  cfg.account_owners[key] = owner || "Joint";
+  cfg.account_owners[accName] = owner || "Joint";
+  if (accType === 'credit' && Array.isArray(cfg.credit_accounts)) {
+    const cObj = cfg.credit_accounts.find(c => (typeof c === 'object' && c.name === accName));
+    if (cObj) cObj.owner = owner || "Joint";
+  }
+}
+
+function setPersonSalaryPrivacy(personName, hide) {
+  const pConf = getPersonSettings(personName);
+  pConf.hide_salary = !!hide;
+}
+
 if (typeof window !== 'undefined') {
   window.__budgetAppState = appState;
   window.appState = appState;
@@ -299,6 +362,12 @@ if (typeof window !== 'undefined') {
   window.getAccountTrackingSettings = getAccountTrackingSettings;
   window.isAccountTrackedWeekly = isAccountTrackedWeekly;
   window.isAccountIncludedInNet = isAccountIncludedInNet;
+  window.isMultiUserEnabled = isMultiUserEnabled;
+  window.getPersonSettings = getPersonSettings;
+  window.isPersonSalaryHidden = isPersonSalaryHidden;
+  window.getAccountOwner = getAccountOwner;
+  window.setAccountOwner = setAccountOwner;
+  window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;
   window.months = months;
   window.applyTheme = applyTheme;
 }
@@ -2021,6 +2090,8 @@ function openAccountTrackingModal() {
               const conf = getAccountConfig('current', a);
               const isEdited = mData.current_data[a] && mData.current_data[a].user_edited;
               const bal = (mData.current_data[a] && mData.current_data[a].opening !== undefined) ? mData.current_data[a].opening : '';
+              const owner = getAccountOwner('current', a);
+              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -2031,12 +2102,23 @@ function openAccountTrackingModal() {
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
-                      <select id="m_trk_c_${idx}" style="padding:3px 6px; font-size:11px;">
-                        <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
-                        <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
-                      </select>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="display:flex; align-items:center; gap:4px;">
+                        <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
+                        <select id="m_trk_c_${idx}" style="padding:3px 6px; font-size:11px;">
+                          <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
+                          <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
+                        </select>
+                      </div>
+                      ${isMulti ? `
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
+                          <select id="m_own_c_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        </div>
+                      ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                       <input type="checkbox" id="m_net_c_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
@@ -2056,6 +2138,8 @@ function openAccountTrackingModal() {
               const conf = getAccountConfig('credit', c.name);
               const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
               const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
+              const owner = getAccountOwner('credit', c.name);
+              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -2069,12 +2153,23 @@ function openAccountTrackingModal() {
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
-                    <div style="display:flex; align-items:center; gap:6px;">
-                      <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
-                      <select id="m_trk_cr_${idx}" style="padding:3px 6px; font-size:11px;">
-                        <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
-                        <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
-                      </select>
+                    <div style="display:flex; align-items:center; gap:8px;">
+                      <div style="display:flex; align-items:center; gap:4px;">
+                        <label style="font-size:11px; color:var(--text-muted);">Tracking:</label>
+                        <select id="m_trk_cr_${idx}" style="padding:3px 6px; font-size:11px;">
+                          <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Track Weekly</option>
+                          <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Track Monthly</option>
+                        </select>
+                      </div>
+                      ${isMulti ? `
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
+                          <select id="m_own_cr_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        </div>
+                      ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                       <input type="checkbox" id="m_net_cr_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
@@ -2095,6 +2190,8 @@ function openAccountTrackingModal() {
                 const conf = getAccountConfig('savings', s);
                 const isEdited = mData.savings_data[s] && mData.savings_data[s].user_edited;
                 const bal = (mData.savings_data[s] && mData.savings_data[s].opening !== undefined) ? mData.savings_data[s].opening : '';
+                const owner = getAccountOwner('savings', s);
+                const isMulti = isMultiUserEnabled();
                 return `
                   <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -2106,10 +2203,10 @@ function openAccountTrackingModal() {
                     </div>
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
                       <div style="display:flex; align-items:center; gap:6px;">
-                        <label style="font-size:11px; color:var(--text-muted);">Forecast Mode:</label>
-                        <select id="m_pred_s_${idx}" style="padding:3px 6px; font-size:11px; max-width:180px;">
-                          <option value="planned" ${conf.savings_predict_mode !== 'actual' ? 'selected' : ''}>📈 Planned Cashflow</option>
-                          <option value="actual" ${conf.savings_predict_mode === 'actual' ? 'selected' : ''}>🔄 Roll Forward from Actuals</option>
+                        <label style="font-size:11px; color:var(--text-muted);">Forecast:</label>
+                        <select id="m_pred_s_${idx}" style="padding:3px 6px; font-size:11px; max-width:140px;">
+                          <option value="planned" ${conf.savings_predict_mode !== 'actual' ? 'selected' : ''}>📈 Planned</option>
+                          <option value="actual" ${conf.savings_predict_mode === 'actual' ? 'selected' : ''}>🔄 Rollover</option>
                         </select>
                       </div>
                       <div style="display:flex; align-items:center; gap:8px;">
@@ -2117,6 +2214,12 @@ function openAccountTrackingModal() {
                           <option value="weekly" ${conf.tracking === 'weekly' ? 'selected' : ''}>📅 Weekly</option>
                           <option value="monthly" ${conf.tracking === 'monthly' ? 'selected' : ''}>📊 Monthly</option>
                         </select>
+                        ${isMulti ? `
+                          <select id="m_own_s_${idx}" style="padding:3px 6px; font-size:11px;">
+                            <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                          </select>
+                        ` : ''}
                         <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
                           <input type="checkbox" id="m_net_s_${idx}" ${conf.include_in_net ? 'checked' : ''}> Net
                         </label>
@@ -3120,6 +3223,8 @@ function startOnboarding() {
   }
   const trackSavEl = document.getElementById('ob-tracksavings');
   if (trackSavEl) trackSavEl.checked = !!cfg.track_savings;
+  const multiUserEl = document.getElementById('ob-multiusers');
+  if (multiUserEl) multiUserEl.checked = !!cfg.enable_multi_user;
 
   applyTheme(theme);
   nextObStep(1);
@@ -3142,6 +3247,8 @@ function nextObStep(step) {
     if (themeEl) cfg.theme = themeEl.value;
     const trackSavEl = document.getElementById('ob-tracksavings');
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
+    const multiUserEl = document.getElementById('ob-multiusers');
+    if (multiUserEl) cfg.enable_multi_user = multiUserEl.checked;
     
     applyTheme(cfg.theme || 'grey_dark');
     obRenderLists();
@@ -3153,13 +3260,19 @@ function nextObStep(step) {
 function obRenderLists() {
   const cfg = getSettings();
   const curr = cfg.currency || '£';
+  const isMulti = !!cfg.enable_multi_user;
 
   // Step 2 People List
   const pList = document.getElementById('obPeopleList');
   if (pList) {
     pList.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border);">
+        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0 4px;">
+            <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide Salary
+          </label>
+        ` : ''}
         ${(cfg.people || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelPerson(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -3169,8 +3282,14 @@ function obRenderLists() {
   const cList = document.getElementById('obCurrentList');
   if (cList) {
     cList.innerHTML = (cfg.current_accounts || []).map((acc, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <select onchange="window.budgetApp.obUpdateAccountOwner('current', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+            <option value="Joint" ${getAccountOwner('current', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+            ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('current', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+          </select>
+        ` : ''}
         ${(cfg.current_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCurrent(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -3180,8 +3299,14 @@ function obRenderLists() {
   const sList = document.getElementById('obSavingsList');
   if (sList) {
     sList.innerHTML = (cfg.savings_accounts || []).map((acc, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <select onchange="window.budgetApp.obUpdateAccountOwner('savings', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+            <option value="Joint" ${getAccountOwner('savings', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+            ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('savings', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+          </select>
+        ` : ''}
         ${(cfg.savings_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelSavings(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -3192,9 +3317,15 @@ function obRenderLists() {
   if (crList) {
     crList.innerHTML = (cfg.credit_accounts || []).map((c, idx) => `
       <div style="background:rgba(0,0,0,0.15); padding:8px; border-radius:8px; border:1px solid var(--border);">
-        <div style="display:flex; gap:6px; margin-bottom:4px;">
-          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name">
+        <div style="display:flex; gap:6px; margin-bottom:4px; align-items:center;">
+          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name" style="flex:1;">
           <input type="number" value="${c.limit}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'limit', this.value)" placeholder="Limit" style="width:90px;">
+          ${isMulti ? `
+            <select onchange="window.budgetApp.obUpdateAccountOwner('credit', ${idx}, this.value)" style="width:115px; font-size:11px; padding:3px 4px;" title="Card Owner">
+              <option value="Joint" ${getAccountOwner('credit', c.name) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+              ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('credit', c.name) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+            </select>
+          ` : ''}
           <button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCredit(${idx})">&times;</button>
         </div>
         <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
@@ -4003,6 +4134,17 @@ function renderOverviewView(container) {
         </div>
       </div>
 
+      ${isMulti ? `
+        <div class="user-filter-bar" style="display:flex; align-items:center; gap:6px; margin:0 0 14px 0; padding:8px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap;">
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Filter Weekly Perspective:</span>
+          <button class="btn ${selectedUserFilter === 'all' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('all')">🌐 All Accounts</button>
+          <button class="btn ${selectedUserFilter === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('Joint')">👥 Joint Only</button>
+          ${cfg.people.map(p => `
+            <button class="btn ${selectedUserFilter === p ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('${p}')">👤 ${p}</button>
+          `).join('')}
+        </div>
+      ` : ''}
+
       <div class="weeks-container">
         ${schedule.weeks.map((wObj, wIdx) => {
           const w = wObj.name;
@@ -4018,11 +4160,14 @@ function renderOverviewView(container) {
           const columns = [];
           cfg.current_accounts.forEach(acc => {
             const trkWeekly = isAccountTrackedWeekly('current', acc);
-            if (trkWeekly || isFinalWeek) {
+            const owner = getAccountOwner('current', acc);
+            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'current',
                 name: acc,
                 label: `🏦 ${acc}`,
+                owner: owner,
                 isMonthlyOnly: !trkWeekly && isFinalWeek
               });
             }
@@ -4030,12 +4175,15 @@ function renderOverviewView(container) {
 
           cfg.credit_accounts.forEach(c => {
             const trkWeekly = isAccountTrackedWeekly('credit', c.name);
-            if (trkWeekly || isFinalWeek) {
+            const owner = getAccountOwner('credit', c.name);
+            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'credit',
                 name: c.name,
                 label: `💳 ${c.name}`,
                 limit: c.limit,
+                owner: owner,
                 isMonthlyOnly: !trkWeekly && isFinalWeek
               });
             }
@@ -4044,11 +4192,14 @@ function renderOverviewView(container) {
           if (cfg.track_savings) {
             cfg.savings_accounts.forEach(s => {
               const trkWeekly = isAccountTrackedWeekly('savings', s);
-              if (trkWeekly || isFinalWeek) {
+              const owner = getAccountOwner('savings', s);
+              const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+              if ((trkWeekly || isFinalWeek) && matchesFilter) {
                 columns.push({
                   type: 'savings',
                   name: s,
                   label: `📈 ${s}`,
+                  owner: owner,
                   isMonthlyOnly: !trkWeekly && isFinalWeek
                 });
               }
@@ -4155,6 +4306,7 @@ function renderOverviewView(container) {
                           <div class="week-column-header">
                             <span style="color:${col.type === 'current' ? 'var(--curr-border)' : (col.type === 'credit' ? 'var(--amber)' : 'var(--purple)')};">
                               ${col.label} ${col.isMonthlyOnly ? '<span style="font-size:9px; color:var(--text-muted); font-weight:normal;">(Monthly)</span>' : ''}
+                              ${isMulti && col.owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:3px;">${col.owner === 'Joint' ? '👥 Joint' : '👤 ' + col.owner}</span>` : ''}
                             </span>
                             <div style="text-align:right;">
                               <span style="color:${colTotalNet >= 0 ? 'var(--green)' : 'var(--text)'}; font-size:12px; font-weight:600;">
@@ -4350,7 +4502,25 @@ function renderOverviewView(container) {
           <button class="btn secondary" style="font-size:11px; padding:2px 8px;" onclick="window.budgetApp.propagateDeductions('${activeTab}')" title="Copy this month's salaries and deductions to all following months in ${appState.currentYear}">📋 Propagate to Future Months</button>
         </div>
         <table class="table">
-          <thead><tr><th>Category</th><th>Transfer Destination</th>${cfg.people.map(p => `<th class="text-right">${p}</th>`).join('')}${globalEditMode ? '<th></th>' : ''}</tr></thead>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Transfer Destination</th>
+              ${cfg.people.map(p => `
+                <th class="text-right">
+                  <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
+                    <span>${p}</span>
+                    ${isMulti && isPersonSalaryHidden(p) ? `
+                      <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? 'Hide salary' : 'Reveal salary'}">
+                        ${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? '🙈' : '👁️'}
+                      </button>
+                    ` : ''}
+                  </div>
+                </th>
+              `).join('')}
+              ${globalEditMode ? '<th></th>' : ''}
+            </tr>
+          </thead>
           <tbody>
             ${deducts.map((d, idx) => `
               <tr>
@@ -4366,13 +4536,28 @@ function renderOverviewView(container) {
                     </select>
                   ` : (d.target_account !== 'none' ? `<span style="color:var(--curr-border); font-weight:600;">➔ ${d.target_account}</span>` : '<span style="color:var(--text-muted);">-</span>')}
                 </td>
-                ${cfg.people.map(p => `
-                  <td class="text-right">
-                    ${globalEditMode ? `
-                      <input class="table-input text-right" type="number" step="0.01" value="${(d.amounts && d.amounts[p]) || 0}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
-                    ` : `${curr}${Number((d.amounts && d.amounts[p]) || 0).toFixed(2)}`}
-                  </td>
-                `).join('')}
+                ${cfg.people.map(p => {
+                  const val = (d.amounts && d.amounts[p]) || 0;
+                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                  return `
+                    <td class="text-right">
+                      ${globalEditMode ? (
+                        isHidden ? `
+                          <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
+                            <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)" style="letter-spacing:2px; width:70px;">
+                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Reveal">👁️</button>
+                          </div>
+                        ` : `
+                          <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
+                        `
+                      ) : (
+                        isHidden ? `
+                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted);" title="Salary hidden for privacy (click 👁️ to reveal)">••••••</span>
+                        ` : `${curr}${Number(val).toFixed(2)}`
+                      )}
+                    </td>
+                  `;
+                }).join('')}
                 ${globalEditMode ? `<td class="text-right"><button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteSalaryDeduction(${idx})">&times;</button></td>` : ''}
               </tr>
             `).join('')}
@@ -4383,6 +4568,10 @@ function renderOverviewView(container) {
               <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
               ${cfg.people.map(p => {
                 const bal = personTotals[p] ? personTotals[p].leftover : 0;
+                const isHidden = isMulti && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                if (isHidden) {
+                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px;">••••••</td>`;
+                }
                 return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
               }).join('')}
               ${globalEditMode ? '<td></td>' : ''}
@@ -4547,6 +4736,7 @@ function renderAccountsView(container) {
   const activeTab = appState.activeTab;
   const globalEditMode = appState.globalEditMode;
   const mData = getMonthData(activeTab);
+  const isMulti = isMultiUserEnabled();
 
   let html = `
     <div class="panel">
@@ -4567,10 +4757,14 @@ function renderAccountsView(container) {
         ${cfg.current_accounts.map(acc => {
           const isEdited = mData.current_data[acc] && mData.current_data[acc].user_edited;
           const bal = (mData.current_data[acc] && mData.current_data[acc].opening !== undefined) ? mData.current_data[acc].opening : '';
+          const owner = getAccountOwner('current', acc);
           return `
             <div class="account-card">
               <div class="account-card-header">
-                <strong style="color:var(--curr-border); font-size:14px;">🏦 ${acc}</strong>
+                <div>
+                  <strong style="color:var(--curr-border); font-size:14px;">🏦 ${acc}</strong>
+                  ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                </div>
                 ${isEdited ? '<span class="badge" style="font-size:9px; background:var(--curr-border); color:#fff;">Override</span>' : '<span style="font-size:10px; color:var(--text-muted);">Auto-Rollover</span>'}
               </div>
               <div class="account-row" style="margin-top:8px;">
@@ -4591,11 +4785,15 @@ function renderAccountsView(container) {
         ${cfg.credit_accounts.map(c => {
           const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
           const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
+          const owner = getAccountOwner('credit', c.name);
           return `
             <div class="account-card">
               <div class="account-card-header">
-                <strong style="color:var(--amber); font-size:14px;">💳 ${c.name}</strong>
-                <span style="font-size:11px; color:var(--text-muted);">Credit Limit: ${curr}${c.limit}</span>
+                <div>
+                  <strong style="color:var(--amber); font-size:14px;">💳 ${c.name}</strong>
+                  ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                </div>
+                <span style="font-size:11px; color:var(--text-muted);">Limit: ${curr}${c.limit}</span>
               </div>
               <div class="account-row" style="margin-top:8px;">
                 <label style="font-size:12px;">Opening Debt:</label>
@@ -4617,10 +4815,14 @@ function renderAccountsView(container) {
             const isEdited = mData.savings_data[accName] && mData.savings_data[accName].user_edited;
             const bal = (mData.savings_data[accName] && mData.savings_data[accName].opening !== undefined) ? mData.savings_data[accName].opening : '';
             const conf = (typeof getAccountConfig === 'function') ? getAccountConfig('savings', accName) : { savings_predict_mode: 'planned' };
+            const owner = getAccountOwner('savings', accName);
             return `
               <div class="account-card">
                 <div class="account-card-header">
-                  <strong style="color:var(--purple); font-size:14px;">📈 ${accName}</strong>
+                  <div>
+                    <strong style="color:var(--purple); font-size:14px;">📈 ${accName}</strong>
+                    ${isMulti && owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:4px;">${owner === 'Joint' ? '👥 Joint' : '👤 ' + owner}</span>` : ''}
+                  </div>
                   ${isEdited ? '<span class="badge" style="font-size:9px; background:var(--purple); color:#fff;">Override</span>' : '<span style="font-size:10px; color:var(--text-muted);">Auto-Rollover</span>'}
                 </div>
                 <div class="account-row" style="margin:8px 0;">
@@ -5575,11 +5777,12 @@ function renderSettingsView(container) {
   let currentTheme = cfg.theme || 'grey_dark';
   if (currentTheme === 'ha_dark') currentTheme = 'grey_dark';
   if (currentTheme === 'dark') currentTheme = 'navy_dark';
+  const isMulti = isMultiUserEnabled();
 
   container.innerHTML = `
     <div class="panel" style="max-width:800px;">
       <h2>⚙️ Global Budget Settings</h2>
-      <p style="color:var(--text-muted); font-size:13px;">Configure household accounts, visual appearance, dashboard widgets, and regional preferences.</p>
+      <p style="color:var(--text-muted); font-size:13px;">Configure household accounts, multi-user options, visual appearance, dashboard widgets, and regional preferences.</p>
       
       <div class="settings-form" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:14px; margin-top:14px;">
         <div class="form-group">
@@ -5613,6 +5816,17 @@ function renderSettingsView(container) {
         </div>
       </div>
 
+      <!-- MULTI-USER & HOUSEHOLD TOGGLE -->
+      <div style="margin:20px 0 14px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px;">
+        <label style="font-size:13px; cursor:pointer; font-weight:700; display:flex; align-items:center; gap:8px; color:var(--curr-border);">
+          <input type="checkbox" id="cfg-multiusers" ${isMulti ? 'checked' : ''} onchange="window.budgetApp.toggleMultiUserModeInSettings(this.checked)">
+          👥 Enable Multi-User / Household Mode
+        </label>
+        <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; margin-left:24px; line-height:1.4;">
+          Allows per-user salary privacy masking, individual persona switching, and tracking personal checking/credit accounts alongside joint finances.
+        </div>
+      </div>
+
       <h3 style="margin-top:24px;">Top Dashboard Widgets</h3>
       <p style="font-size:12px; color:var(--text-muted);">Choose which cards to display at the top of each month:</p>
       <div class="widget-select-grid">
@@ -5637,10 +5851,16 @@ function renderSettingsView(container) {
       </div>
 
       <h3 style="margin-top:24px;">Current Accounts</h3>
-      <div id="currentAccountsList" style="display:flex; flex-direction:column; gap:8px; max-width:450px;">
+      <div id="currentAccountsList" style="display:flex; flex-direction:column; gap:8px; max-width:600px;">
         ${cfg.current_accounts.map((acc, idx) => `
-          <div style="display:flex; gap:6px;">
-            <input type="text" value="${acc}" onchange="window.budgetApp.renameCurrentAccount(${idx}, this.value)">
+          <div style="display:flex; align-items:center; gap:6px;">
+            <input type="text" value="${acc}" onchange="window.budgetApp.renameCurrentAccount(${idx}, this.value)" style="flex:1;">
+            ${isMulti ? `
+              <select onchange="window.budgetApp.updateAccountOwner('current', '${acc}', this.value)" style="width:130px; font-size:11px; padding:4px 6px;" title="Account Owner">
+                <option value="Joint" ${getAccountOwner('current', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('current', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+              </select>
+            ` : ''}
             ${cfg.current_accounts.length > 1 ? `<button class="del-btn" style="width:30px;" onclick="window.budgetApp.deleteCurrentAccountFromSettings(${idx})">&times;</button>` : ''}
           </div>
         `).join('')}
@@ -5648,12 +5868,18 @@ function renderSettingsView(container) {
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addCurrentAccountInSettings()">+ Add Current Account</button>
 
       <h3 style="margin-top:24px;">Credit Cards & Auto-Pay</h3>
-      <div id="creditAccountsList" style="display:flex; flex-direction:column; gap:12px; max-width:650px;">
+      <div id="creditAccountsList" style="display:flex; flex-direction:column; gap:12px; max-width:700px;">
         ${cfg.credit_accounts.map((c, idx) => `
           <div class="card-settings-box" style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:12px; margin-bottom:8px;">
-            <div style="display:grid; grid-template-columns: 1fr 130px 30px; gap:8px; margin-bottom:8px;">
-              <input type="text" value="${c.name}" onchange="window.budgetApp.editCreditAccount(${idx}, 'name', this.value)">
+            <div style="display:grid; grid-template-columns: 1fr 120px ${isMulti ? '130px' : ''} 30px; gap:8px; margin-bottom:8px; align-items:center;">
+              <input type="text" value="${c.name}" onchange="window.budgetApp.editCreditAccount(${idx}, 'name', this.value)" placeholder="Card Name">
               <input type="number" step="100" value="${c.limit}" onchange="window.budgetApp.editCreditAccount(${idx}, 'limit', this.value)" placeholder="Credit Limit">
+              ${isMulti ? `
+                <select onchange="window.budgetApp.updateAccountOwner('credit', '${c.name}', this.value)" style="font-size:11px; padding:4px 6px;" title="Card Owner">
+                  <option value="Joint" ${getAccountOwner('credit', c.name) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                  ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('credit', c.name) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                </select>
+              ` : ''}
               <button class="del-btn" onclick="window.budgetApp.deleteCreditAccountFromSettings(${idx})">&times;</button>
             </div>
 
@@ -5699,16 +5925,22 @@ function renderSettingsView(container) {
       <div style="margin-bottom:8px;">
         <label style="font-size:12px; cursor:pointer; font-weight:600;"><input type="checkbox" id="cfg-tracksavings" ${cfg.track_savings ? 'checked' : ''}> Enable Savings Accounts & Portfolio Tracking</label>
       </div>
-      <div id="savingsList" style="display:flex; flex-direction:column; gap:8px; max-width:550px; margin-top:8px;">
+      <div id="savingsList" style="display:flex; flex-direction:column; gap:8px; max-width:650px; margin-top:8px;">
         ${cfg.savings_accounts.map((acc, idx) => {
           const conf = (typeof getAccountConfig === 'function') ? getAccountConfig('savings', acc) : { savings_predict_mode: 'planned' };
           return `
-            <div style="display:grid; grid-template-columns: 1fr 190px 30px; gap:6px; align-items:center;">
+            <div style="display:grid; grid-template-columns: 1fr 190px ${isMulti ? '130px' : ''} 30px; gap:6px; align-items:center;">
               <input type="text" value="${acc}" onchange="window.budgetApp.renameSavingsAccount(${idx}, this.value)">
               <select onchange="window.budgetApp.setSavingsPredictMode('${acc}', this.value)" style="font-size:11px; padding:4px 6px;" title="Choose whether future months predict pure planned payments in or roll forward from actuals">
                 <option value="planned" ${conf.savings_predict_mode !== 'actual' ? 'selected' : ''}>📈 Planned Cashflow</option>
                 <option value="actual" ${conf.savings_predict_mode === 'actual' ? 'selected' : ''}>🔄 Roll Forward from Actuals</option>
               </select>
+              ${isMulti ? `
+                <select onchange="window.budgetApp.updateAccountOwner('savings', '${acc}', this.value)" style="font-size:11px; padding:4px 6px;" title="Savings Account Owner">
+                  <option value="Joint" ${getAccountOwner('savings', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                  ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('savings', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                </select>
+              ` : ''}
               ${cfg.savings_accounts.length > 1 ? `<button class="del-btn" style="width:30px;" onclick="window.budgetApp.deleteSavingsAccountFromSettings(${idx})">&times;</button>` : ''}
             </div>
           `;
@@ -5716,11 +5948,17 @@ function renderSettingsView(container) {
       </div>
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addSavingsAccountInSettings()">+ Add Savings Account</button>
 
-      <h3 style="margin-top:24px;">Household Members</h3>
-      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:400px;">
+      <h3 style="margin-top:24px;">Household Members & Privacy</h3>
+      <p style="font-size:12px; color:var(--text-muted);">Manage household members and per-user salary visibility:</p>
+      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:600px;">
         ${cfg.people.map((p, idx) => `
-          <div style="display:flex; gap:6px;">
-            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)">
+          <div style="display:flex; align-items:center; gap:8px; background:var(--card-bg); border:1px solid var(--border); padding:6px 10px; border-radius:6px;">
+            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)" style="flex:1;">
+            ${isMulti ? `
+              <label style="font-size:11.5px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0;">
+                <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.updatePersonSalaryPrivacy(${idx}, this.checked)"> 🔒 Hide Salary in Overview
+              </label>
+            ` : ''}
             ${cfg.people.length > 1 ? `<button class="del-btn" style="width:30px;" onclick="window.budgetApp.removePerson(${idx})">&times;</button>` : ''}
           </div>
         `).join('')}
@@ -7766,6 +8004,8 @@ window.budgetApp = {
       const trk = document.getElementById(`m_trk_c_${idx}`)?.value || 'weekly';
       const net = document.getElementById(`m_net_c_${idx}`)?.checked !== false;
       configs.current[acc] = { tracking: trk, include_in_net: net };
+      const own = document.getElementById(`m_own_c_${idx}`)?.value;
+      if (own) setAccountOwner('current', acc, own);
 
       const openVal = document.getElementById(`m_open_c_${idx}`)?.value;
       if (!md.current_data[acc]) md.current_data[acc] = {};
@@ -7782,6 +8022,8 @@ window.budgetApp = {
       const trk = document.getElementById(`m_trk_cr_${idx}`)?.value || 'weekly';
       const net = document.getElementById(`m_net_cr_${idx}`)?.checked !== false;
       configs.credit[c.name] = { tracking: trk, include_in_net: net };
+      const own = document.getElementById(`m_own_cr_${idx}`)?.value;
+      if (own) setAccountOwner('credit', c.name, own);
 
       const spentVal = document.getElementById(`m_open_cr_${idx}`)?.value;
       if (!md.credit_data[c.name]) md.credit_data[c.name] = {};
@@ -7800,6 +8042,8 @@ window.budgetApp = {
         const net = document.getElementById(`m_net_s_${idx}`)?.checked !== false;
         const predMode = document.getElementById(`m_pred_s_${idx}`)?.value || 'planned';
         configs.savings[s] = { tracking: trk, include_in_net: net, savings_predict_mode: predMode };
+        const own = document.getElementById(`m_own_s_${idx}`)?.value;
+        if (own) setAccountOwner('savings', s, own);
 
         const savVal = document.getElementById(`m_open_s_${idx}`)?.value;
         if (!md.savings_data[s]) md.savings_data[s] = {};
@@ -7909,8 +8153,22 @@ window.budgetApp = {
   obAddPerson() { obAddPerson(); },
   obUpdatePerson(idx, val) {
     if (!getSettings().people) getSettings().people = [];
-    getSettings().people[idx] = val;
+    const oldName = getSettings().people[idx];
+    const newName = (val || '').trim();
+    getSettings().people[idx] = newName;
+    if (oldName && oldName !== newName) {
+      if (!getSettings().people_settings) getSettings().people_settings = {};
+      getSettings().people_settings[newName] = getSettings().people_settings[oldName] || { hide_salary: false };
+      delete getSettings().people_settings[oldName];
+    }
     obRenderLists();
+  },
+  obUpdatePersonPrivacy(idx, hide) {
+    if (!getSettings().people) getSettings().people = [];
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonSalaryPrivacy(p, hide);
+    }
   },
   obDelPerson(idx) {
     if (getSettings().people) getSettings().people.splice(idx, 1);
@@ -7919,8 +8177,27 @@ window.budgetApp = {
   obAddCurrent() { obAddCurrent(); },
   obUpdateCurrent(idx, val) {
     if (!getSettings().current_accounts) getSettings().current_accounts = [];
-    getSettings().current_accounts[idx] = val;
+    const oldName = getSettings().current_accounts[idx];
+    const newName = (val || '').trim();
+    getSettings().current_accounts[idx] = newName;
+    if (oldName && oldName !== newName) {
+      const owner = getAccountOwner('current', oldName);
+      setAccountOwner('current', newName, owner);
+    }
     obRenderLists();
+  },
+  obUpdateAccountOwner(accType, idx, owner) {
+    let accName = '';
+    if (accType === 'current' && getSettings().current_accounts) {
+      accName = getSettings().current_accounts[idx];
+    } else if (accType === 'credit' && getSettings().credit_accounts) {
+      accName = getSettings().credit_accounts[idx]?.name;
+    } else if (accType === 'savings' && getSettings().savings_accounts) {
+      accName = getSettings().savings_accounts[idx];
+    }
+    if (accName) {
+      setAccountOwner(accType, accName, owner);
+    }
   },
   obDelCurrent(idx) {
     if (getSettings().current_accounts) getSettings().current_accounts.splice(idx, 1);
@@ -8906,11 +9183,13 @@ window.budgetApp = {
     const holidayEl = document.getElementById('cfg-holiday');
     const themeEl = document.getElementById('cfg-theme');
     const trackSavEl = document.getElementById('cfg-tracksavings');
+    const multiUsersEl = document.getElementById('cfg-multiusers');
 
     if (currEl) cfg.currency = currEl.value;
     if (pdayEl) cfg.payday_day = parseInt(pdayEl.value, 10) || 26;
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
+    if (multiUsersEl) cfg.enable_multi_user = multiUsersEl.checked;
     if (themeEl) {
       cfg.theme = themeEl.value;
       applyTheme(themeEl.value);
@@ -8931,9 +9210,50 @@ window.budgetApp = {
     alert("Settings saved successfully!");
   },
 
+  async toggleMultiUserModeInSettings(enabled) {
+    getSettings().enable_multi_user = !!enabled;
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  async updatePersonSalaryPrivacy(idx, hide) {
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonSalaryPrivacy(p, hide);
+      calculateAndSyncRollovers();
+      renderContent();
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+  },
+
+  async updateAccountOwner(accType, accName, owner) {
+    setAccountOwner(accType, accName, owner);
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  setUserFilter(filterName) {
+    appState.selectedUserFilter = filterName;
+    renderContent();
+  },
+
+  toggleSalaryReveal(person) {
+    if (!appState.unmaskedSalaries) appState.unmaskedSalaries = {};
+    appState.unmaskedSalaries[person] = !appState.unmaskedSalaries[person];
+    renderContent();
+  },
+
   async renameCurrentAccount(idx, newName) {
-    if (newName) {
-      getSettings().current_accounts[idx] = newName.trim();
+    if (newName && newName.trim()) {
+      const oldName = getSettings().current_accounts[idx];
+      const name = newName.trim();
+      getSettings().current_accounts[idx] = name;
+      if (oldName && oldName !== name) {
+        const owner = getAccountOwner('current', oldName);
+        setAccountOwner('current', name, owner);
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -9030,8 +9350,15 @@ window.budgetApp = {
   },
 
   async updatePersonNameInSettings(idx, val) {
-    if (val) {
-      getSettings().people[idx] = val.trim();
+    if (val && val.trim()) {
+      const oldName = getSettings().people[idx];
+      const newName = val.trim();
+      getSettings().people[idx] = newName;
+      if (oldName && oldName !== newName) {
+        if (!getSettings().people_settings) getSettings().people_settings = {};
+        getSettings().people_settings[newName] = getSettings().people_settings[oldName] || { hide_salary: false };
+        delete getSettings().people_settings[oldName];
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }

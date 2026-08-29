@@ -12,7 +12,7 @@ function formatCheckInTimestamp(isoStr) {
   return `${d.getDate()} ${months[d.getMonth()]} ${hours}:${mins}`;
 }
 
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner } from '../state.js';
 import { calculateMonthSchedule, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek } from '../calculations.js';
 
 export function renderOverviewView(container) {
@@ -506,6 +506,17 @@ export function renderOverviewView(container) {
         </div>
       </div>
 
+      ${isMulti ? `
+        <div class="user-filter-bar" style="display:flex; align-items:center; gap:6px; margin:0 0 14px 0; padding:8px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap;">
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Filter Weekly Perspective:</span>
+          <button class="btn ${selectedUserFilter === 'all' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('all')">🌐 All Accounts</button>
+          <button class="btn ${selectedUserFilter === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('Joint')">👥 Joint Only</button>
+          ${cfg.people.map(p => `
+            <button class="btn ${selectedUserFilter === p ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('${p}')">👤 ${p}</button>
+          `).join('')}
+        </div>
+      ` : ''}
+
       <div class="weeks-container">
         ${schedule.weeks.map((wObj, wIdx) => {
           const w = wObj.name;
@@ -521,11 +532,14 @@ export function renderOverviewView(container) {
           const columns = [];
           cfg.current_accounts.forEach(acc => {
             const trkWeekly = isAccountTrackedWeekly('current', acc);
-            if (trkWeekly || isFinalWeek) {
+            const owner = getAccountOwner('current', acc);
+            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'current',
                 name: acc,
                 label: `🏦 ${acc}`,
+                owner: owner,
                 isMonthlyOnly: !trkWeekly && isFinalWeek
               });
             }
@@ -533,12 +547,15 @@ export function renderOverviewView(container) {
 
           cfg.credit_accounts.forEach(c => {
             const trkWeekly = isAccountTrackedWeekly('credit', c.name);
-            if (trkWeekly || isFinalWeek) {
+            const owner = getAccountOwner('credit', c.name);
+            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'credit',
                 name: c.name,
                 label: `💳 ${c.name}`,
                 limit: c.limit,
+                owner: owner,
                 isMonthlyOnly: !trkWeekly && isFinalWeek
               });
             }
@@ -547,11 +564,14 @@ export function renderOverviewView(container) {
           if (cfg.track_savings) {
             cfg.savings_accounts.forEach(s => {
               const trkWeekly = isAccountTrackedWeekly('savings', s);
-              if (trkWeekly || isFinalWeek) {
+              const owner = getAccountOwner('savings', s);
+              const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+              if ((trkWeekly || isFinalWeek) && matchesFilter) {
                 columns.push({
                   type: 'savings',
                   name: s,
                   label: `📈 ${s}`,
+                  owner: owner,
                   isMonthlyOnly: !trkWeekly && isFinalWeek
                 });
               }
@@ -658,6 +678,7 @@ export function renderOverviewView(container) {
                           <div class="week-column-header">
                             <span style="color:${col.type === 'current' ? 'var(--curr-border)' : (col.type === 'credit' ? 'var(--amber)' : 'var(--purple)')};">
                               ${col.label} ${col.isMonthlyOnly ? '<span style="font-size:9px; color:var(--text-muted); font-weight:normal;">(Monthly)</span>' : ''}
+                              ${isMulti && col.owner ? `<span class="badge" style="font-size:9px; background:rgba(255,255,255,0.08); color:var(--text-muted); margin-left:3px;">${col.owner === 'Joint' ? '👥 Joint' : '👤 ' + col.owner}</span>` : ''}
                             </span>
                             <div style="text-align:right;">
                               <span style="color:${colTotalNet >= 0 ? 'var(--green)' : 'var(--text)'}; font-size:12px; font-weight:600;">
@@ -853,7 +874,25 @@ export function renderOverviewView(container) {
           <button class="btn secondary" style="font-size:11px; padding:2px 8px;" onclick="window.budgetApp.propagateDeductions('${activeTab}')" title="Copy this month's salaries and deductions to all following months in ${appState.currentYear}">📋 Propagate to Future Months</button>
         </div>
         <table class="table">
-          <thead><tr><th>Category</th><th>Transfer Destination</th>${cfg.people.map(p => `<th class="text-right">${p}</th>`).join('')}${globalEditMode ? '<th></th>' : ''}</tr></thead>
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Transfer Destination</th>
+              ${cfg.people.map(p => `
+                <th class="text-right">
+                  <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
+                    <span>${p}</span>
+                    ${isMulti && isPersonSalaryHidden(p) ? `
+                      <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? 'Hide salary' : 'Reveal salary'}">
+                        ${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? '🙈' : '👁️'}
+                      </button>
+                    ` : ''}
+                  </div>
+                </th>
+              `).join('')}
+              ${globalEditMode ? '<th></th>' : ''}
+            </tr>
+          </thead>
           <tbody>
             ${deducts.map((d, idx) => `
               <tr>
@@ -869,13 +908,28 @@ export function renderOverviewView(container) {
                     </select>
                   ` : (d.target_account !== 'none' ? `<span style="color:var(--curr-border); font-weight:600;">➔ ${d.target_account}</span>` : '<span style="color:var(--text-muted);">-</span>')}
                 </td>
-                ${cfg.people.map(p => `
-                  <td class="text-right">
-                    ${globalEditMode ? `
-                      <input class="table-input text-right" type="number" step="0.01" value="${(d.amounts && d.amounts[p]) || 0}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
-                    ` : `${curr}${Number((d.amounts && d.amounts[p]) || 0).toFixed(2)}`}
-                  </td>
-                `).join('')}
+                ${cfg.people.map(p => {
+                  const val = (d.amounts && d.amounts[p]) || 0;
+                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                  return `
+                    <td class="text-right">
+                      ${globalEditMode ? (
+                        isHidden ? `
+                          <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
+                            <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)" style="letter-spacing:2px; width:70px;">
+                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Reveal">👁️</button>
+                          </div>
+                        ` : `
+                          <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
+                        `
+                      ) : (
+                        isHidden ? `
+                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted);" title="Salary hidden for privacy (click 👁️ to reveal)">••••••</span>
+                        ` : `${curr}${Number(val).toFixed(2)}`
+                      )}
+                    </td>
+                  `;
+                }).join('')}
                 ${globalEditMode ? `<td class="text-right"><button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteSalaryDeduction(${idx})">&times;</button></td>` : ''}
               </tr>
             `).join('')}
@@ -886,6 +940,10 @@ export function renderOverviewView(container) {
               <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
               ${cfg.people.map(p => {
                 const bal = personTotals[p] ? personTotals[p].leftover : 0;
+                const isHidden = isMulti && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                if (isHidden) {
+                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px;">••••••</td>`;
+                }
                 return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
               }).join('')}
               ${globalEditMode ? '<td></td>' : ''}

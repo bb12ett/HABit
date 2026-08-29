@@ -20,5 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scheduled & Recurring Bills**: Monthly direct debits, transfers to savings, and annual bills.
 - **Year Overview & Analytics**: Annual dashboard with interactive Chart.js charts and projections.
 - **Data Management**: Full JSON data export/import, year archiving, and Home Assistant backup integration.
+- **Multi-User / Household Mode**: Toggle multi-user mode in onboarding and global settings to support individual household members with assigned personal accounts.
+- **Per-User Salary Privacy & Masking**: Mask salary figures with `••••••` on shared dashboard screens with instant eye (`👁️` / `🙈`) reveal toggles, while preserving 100% calculation accuracy behind the scenes.
+- **Personal Account & Credit Card Weekly Tracking**: Assign bank accounts and credit cards to specific household members or joint finances with interactive user filtering (`All`, `Joint`, `Person 1`, `Person 2`) and visual owner tags in the weekly view.
 - **Multi-Architecture Support**: Official compatibility for `aarch64`, `amd64`, `armhf`, `armv7`, and `i386`.
 - **Ingress Cache Buster**: Built-in cache-busting headers, build stamping, and `Clear-Site-Data` response handling.

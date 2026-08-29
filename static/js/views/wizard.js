@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, months, applyTheme } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, months, applyTheme, isMultiUserEnabled, isPersonSalaryHidden, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner } from '../state.js';
 import { calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -39,6 +39,8 @@ export function startOnboarding() {
   }
   const trackSavEl = document.getElementById('ob-tracksavings');
   if (trackSavEl) trackSavEl.checked = !!cfg.track_savings;
+  const multiUserEl = document.getElementById('ob-multiusers');
+  if (multiUserEl) multiUserEl.checked = !!cfg.enable_multi_user;
 
   applyTheme(theme);
   nextObStep(1);
@@ -61,6 +63,8 @@ export function nextObStep(step) {
     if (themeEl) cfg.theme = themeEl.value;
     const trackSavEl = document.getElementById('ob-tracksavings');
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
+    const multiUserEl = document.getElementById('ob-multiusers');
+    if (multiUserEl) cfg.enable_multi_user = multiUserEl.checked;
     
     applyTheme(cfg.theme || 'grey_dark');
     obRenderLists();
@@ -72,13 +76,19 @@ export function nextObStep(step) {
 export function obRenderLists() {
   const cfg = getSettings();
   const curr = cfg.currency || '£';
+  const isMulti = !!cfg.enable_multi_user;
 
   // Step 2 People List
   const pList = document.getElementById('obPeopleList');
   if (pList) {
     pList.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border);">
+        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0 4px;">
+            <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide Salary
+          </label>
+        ` : ''}
         ${(cfg.people || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelPerson(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -88,8 +98,14 @@ export function obRenderLists() {
   const cList = document.getElementById('obCurrentList');
   if (cList) {
     cList.innerHTML = (cfg.current_accounts || []).map((acc, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <select onchange="window.budgetApp.obUpdateAccountOwner('current', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+            <option value="Joint" ${getAccountOwner('current', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+            ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('current', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+          </select>
+        ` : ''}
         ${(cfg.current_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCurrent(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -99,8 +115,14 @@ export function obRenderLists() {
   const sList = document.getElementById('obSavingsList');
   if (sList) {
     sList.innerHTML = (cfg.savings_accounts || []).map((acc, idx) => `
-      <div style="display:flex; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)" style="flex:1;">
+        ${isMulti ? `
+          <select onchange="window.budgetApp.obUpdateAccountOwner('savings', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+            <option value="Joint" ${getAccountOwner('savings', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+            ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('savings', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+          </select>
+        ` : ''}
         ${(cfg.savings_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelSavings(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
@@ -111,9 +133,15 @@ export function obRenderLists() {
   if (crList) {
     crList.innerHTML = (cfg.credit_accounts || []).map((c, idx) => `
       <div style="background:rgba(0,0,0,0.15); padding:8px; border-radius:8px; border:1px solid var(--border);">
-        <div style="display:flex; gap:6px; margin-bottom:4px;">
-          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name">
+        <div style="display:flex; gap:6px; margin-bottom:4px; align-items:center;">
+          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name" style="flex:1;">
           <input type="number" value="${c.limit}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'limit', this.value)" placeholder="Limit" style="width:90px;">
+          ${isMulti ? `
+            <select onchange="window.budgetApp.obUpdateAccountOwner('credit', ${idx}, this.value)" style="width:115px; font-size:11px; padding:3px 4px;" title="Card Owner">
+              <option value="Joint" ${getAccountOwner('credit', c.name) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+              ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('credit', c.name) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+            </select>
+          ` : ''}
           <button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCredit(${idx})">&times;</button>
         </div>
         <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
