@@ -11,8 +11,8 @@ const DEFAULT_SETTINGS = {
   enable_multi_user: false,
   people: ["Person 1", "Person 2"],
   people_settings: {
-    "Person 1": { hide_salary: false },
-    "Person 2": { hide_salary: false }
+    "Person 1": { hide_salary: false, pin: "" },
+    "Person 2": { hide_salary: false, pin: "" }
   },
   account_owners: {
     "Joint Account": "Joint",
@@ -91,6 +91,8 @@ const appState = {
   globalEditMode: false,
   draggedItemInfo: null,
   activeChart: null,
+  activeUser: 'Joint',
+  unlockedUsers: {},
   selectedUserFilter: 'all',
   unmaskedSalaries: {}
 };
@@ -309,7 +311,8 @@ function getPersonSettings(personName) {
   if (!cfg.people_settings) cfg.people_settings = {};
   if (!cfg.people_settings[personName]) {
     cfg.people_settings[personName] = {
-      hide_salary: false
+      hide_salary: false,
+      pin: ""
     };
   }
   return cfg.people_settings[personName];
@@ -319,6 +322,54 @@ function isPersonSalaryHidden(personName) {
   if (!isMultiUserEnabled()) return false;
   const pConf = getPersonSettings(personName);
   return !!pConf.hide_salary;
+}
+
+function getPersonPin(personName) {
+  const pConf = getPersonSettings(personName);
+  return (pConf && pConf.pin) ? String(pConf.pin).trim() : "";
+}
+
+function setPersonPin(personName, pin) {
+  const pConf = getPersonSettings(personName);
+  pConf.pin = pin ? String(pin).trim() : "";
+}
+
+function hasPersonPin(personName) {
+  return !!getPersonPin(personName);
+}
+
+function isUserUnlocked(personName) {
+  if (!personName || personName === 'Joint') return true;
+  if (!hasPersonPin(personName)) return true;
+  return !!(appState.unlockedUsers && appState.unlockedUsers[personName]);
+}
+
+function unlockUser(personName, pin) {
+  if (!hasPersonPin(personName)) {
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[personName] = true;
+    return true;
+  }
+  const expected = getPersonPin(personName);
+  if (String(pin).trim() === expected) {
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[personName] = true;
+    return true;
+  }
+  return false;
+}
+
+function lockAllUsers() {
+  appState.unlockedUsers = {};
+  appState.activeUser = 'Joint';
+}
+
+function getActiveUser() {
+  return appState.activeUser || 'Joint';
+}
+
+function setActiveUser(user) {
+  appState.activeUser = user || 'Joint';
 }
 
 function getAccountOwner(accType, accName) {
@@ -365,6 +416,14 @@ if (typeof window !== 'undefined') {
   window.isMultiUserEnabled = isMultiUserEnabled;
   window.getPersonSettings = getPersonSettings;
   window.isPersonSalaryHidden = isPersonSalaryHidden;
+  window.getPersonPin = getPersonPin;
+  window.setPersonPin = setPersonPin;
+  window.hasPersonPin = hasPersonPin;
+  window.isUserUnlocked = isUserUnlocked;
+  window.unlockUser = unlockUser;
+  window.lockAllUsers = lockAllUsers;
+  window.getActiveUser = getActiveUser;
+  window.setActiveUser = setActiveUser;
   window.getAccountOwner = getAccountOwner;
   window.setAccountOwner = setAccountOwner;
   window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;
@@ -3181,6 +3240,82 @@ function openScheduledBillsModal(activeFilter = 'all') {
   });
 }
 
+function openPinUnlockModal(person, callback) {
+  window.pendingPinCallback = callback;
+  showModal({
+    title: `🔒 Enter PIN: ${person}`,
+    body: `
+      <div style="text-align:center; padding:10px 0;">
+        <p style="font-size:12.5px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;">
+          Enter the 4-digit PIN for <strong>${person}</strong> to unlock personal accounts and view private salary.
+        </p>
+
+        <div style="margin-bottom:14px;">
+          <input type="password" id="user-pin-input" maxlength="6" inputmode="numeric" placeholder="••••" style="font-size:24px; text-align:center; letter-spacing:8px; width:160px; padding:6px 12px; font-weight:bold;" autofocus onkeydown="if(event.key==='Enter') window.budgetApp.submitPinUnlock('${person}')">
+          <div id="pin-error-msg" style="color:var(--red); font-size:11.5px; margin-top:6px; min-height:16px; font-weight:600;"></div>
+        </div>
+
+        <!-- ON-SCREEN NUMPAD -->
+        <div style="display:grid; grid-template-columns:repeat(3, 56px); gap:8px; justify-content:center; margin-top:10px;">
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `
+            <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('${n}', '${person}')">${n}</button>
+          `).join('')}
+          <button class="btn secondary" style="font-size:11px; height:44px; justify-content:center; color:var(--text-muted);" onclick="window.budgetApp.clearPinInput()">Clear</button>
+          <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('0', '${person}')">0</button>
+          <button class="btn secondary" style="font-size:16px; height:44px; justify-content:center;" onclick="window.budgetApp.backspacePinInput()">⌫</button>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.submitPinUnlock('${person}')">Unlock 🔓</button>
+    `
+  });
+
+  setTimeout(() => {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+function openSetPinModal(person) {
+  const currentPin = getPersonPin(person);
+  const hasPin = !!currentPin;
+
+  showModal({
+    title: `🔒 Configure Security PIN: ${person}`,
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0;">
+          Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.
+        </p>
+
+        <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:12px;">
+          Status: <strong>${hasPin ? '🔒 PIN Protection Active' : '🔓 No PIN Configured (Open Access)'}</strong>
+        </div>
+
+        <div>
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">New 4-to-6 Digit PIN</label>
+          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+        </div>
+
+        <div>
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Confirm PIN</label>
+          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+        </div>
+
+        <div id="set-pin-error" style="color:var(--red); font-size:11px; font-weight:600; min-height:16px;"></div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      ${hasPin ? `<button class="btn red" onclick="window.budgetApp.removePersonPin('${person}')">Remove PIN</button>` : ''}
+      <button class="btn green" onclick="window.budgetApp.savePersonPin('${person}')">Save PIN</button>
+    `
+  });
+}
+
+
 // --- static/js/views/wizard.js ---
 
 
@@ -3266,9 +3401,10 @@ function obRenderLists() {
   const pList = document.getElementById('obPeopleList');
   if (pList) {
     pList.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border);">
-        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1;">
+      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border); flex-wrap:wrap;">
+        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1; min-width:110px;">
         ${isMulti ? `
+          <input type="password" maxlength="6" inputmode="numeric" placeholder="PIN" value="${getPersonPin(p)}" onchange="window.budgetApp.obUpdatePersonPin(${idx}, this.value)" style="width:60px; font-size:11px; padding:3px 4px; text-align:center;" title="Optional PIN for ${p}">
           <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0 4px;">
             <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide Salary
           </label>
@@ -4136,12 +4272,22 @@ function renderOverviewView(container) {
 
       ${isMulti ? `
         <div class="user-filter-bar" style="display:flex; align-items:center; gap:6px; margin:0 0 14px 0; padding:8px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap;">
-          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Filter Weekly Perspective:</span>
-          <button class="btn ${selectedUserFilter === 'all' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('all')">🌐 All Accounts</button>
-          <button class="btn ${selectedUserFilter === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('Joint')">👥 Joint Only</button>
-          ${cfg.people.map(p => `
-            <button class="btn ${selectedUserFilter === p ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('${p}')">👤 ${p}</button>
-          `).join('')}
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Active Perspective:</span>
+          <button class="btn ${appState.activeUser === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.switchActiveUser('Joint')">👥 Joint / Household</button>
+          ${cfg.people.map(p => {
+            const hasPin = hasPersonPin(p);
+            const unlocked = isUserUnlocked(p);
+            const isActive = appState.activeUser === p;
+            return `
+              <button class="btn ${isActive ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px; display:inline-flex; align-items:center; gap:4px;" onclick="window.budgetApp.switchActiveUser('${p}')">
+                <span>👤 ${p}</span>
+                ${hasPin ? `<span style="font-size:9px;">${unlocked ? '🔓' : '🔒'}</span>` : ''}
+              </button>
+            `;
+          }).join('')}
+          ${appState.activeUser !== 'Joint' ? `
+            <button class="btn secondary" style="font-size:10px; padding:3px 8px; margin-left:auto; color:var(--text-muted);" onclick="window.budgetApp.lockAllProfiles()" title="Lock session & return to Joint Shared view">🔒 Lock</button>
+          ` : ''}
         </div>
       ` : ''}
 
@@ -4152,6 +4298,7 @@ function renderOverviewView(container) {
           const isFinalWeek = (wIdx === schedule.weeks.length - 1);
           const items = getWeekItems(activeTab, w);
           const actuals = getWeekActuals(activeTab, w);
+          const activeUser = appState.activeUser || 'Joint';
 
           const wEndDateInclusive = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
           const isPast = isViewingCurrentMonth && (now.getTime() > wEndDateInclusive.getTime());
@@ -4161,7 +4308,7 @@ function renderOverviewView(container) {
           cfg.current_accounts.forEach(acc => {
             const trkWeekly = isAccountTrackedWeekly('current', acc);
             const owner = getAccountOwner('current', acc);
-            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'current',
@@ -4176,7 +4323,7 @@ function renderOverviewView(container) {
           cfg.credit_accounts.forEach(c => {
             const trkWeekly = isAccountTrackedWeekly('credit', c.name);
             const owner = getAccountOwner('credit', c.name);
-            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'credit',
@@ -4193,7 +4340,7 @@ function renderOverviewView(container) {
             cfg.savings_accounts.forEach(s => {
               const trkWeekly = isAccountTrackedWeekly('savings', s);
               const owner = getAccountOwner('savings', s);
-              const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+              const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
               if ((trkWeekly || isFinalWeek) && matchesFilter) {
                 columns.push({
                   type: 'savings',
@@ -4506,18 +4653,22 @@ function renderOverviewView(container) {
             <tr>
               <th>Category</th>
               <th>Transfer Destination</th>
-              ${cfg.people.map(p => `
-                <th class="text-right">
-                  <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
-                    <span>${p}</span>
-                    ${isMulti && isPersonSalaryHidden(p) ? `
-                      <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? 'Hide salary' : 'Reveal salary'}">
-                        ${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? '🙈' : '👁️'}
-                      </button>
-                    ` : ''}
-                  </div>
-                </th>
-              `).join('')}
+              ${cfg.people.map(p => {
+                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                const isRevealed = isUnlockedForUser || (appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                return `
+                  <th class="text-right">
+                    <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
+                      <span>${p}</span>
+                      ${isMulti && isPersonSalaryHidden(p) ? `
+                        <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${isRevealed ? 'Hide salary' : 'Unlock / Reveal salary'}">
+                          ${isRevealed ? '🙈' : '👁️'}
+                        </button>
+                      ` : ''}
+                    </div>
+                  </th>
+                `;
+              }).join('')}
               ${globalEditMode ? '<th></th>' : ''}
             </tr>
           </thead>
@@ -4538,21 +4689,22 @@ function renderOverviewView(container) {
                 </td>
                 ${cfg.people.map(p => {
                   const val = (d.amounts && d.amounts[p]) || 0;
-                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                  const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
                   return `
                     <td class="text-right">
                       ${globalEditMode ? (
                         isHidden ? `
                           <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
                             <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)" style="letter-spacing:2px; width:70px;">
-                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Reveal">👁️</button>
+                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Unlock / Reveal">👁️</button>
                           </div>
                         ` : `
                           <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
                         `
                       ) : (
                         isHidden ? `
-                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted);" title="Salary hidden for privacy (click 👁️ to reveal)">••••••</span>
+                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Salary hidden for privacy (click to unlock/reveal)">••••••</span>
                         ` : `${curr}${Number(val).toFixed(2)}`
                       )}
                     </td>
@@ -4568,9 +4720,10 @@ function renderOverviewView(container) {
               <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
               ${cfg.people.map(p => {
                 const bal = personTotals[p] ? personTotals[p].leftover : 0;
-                const isHidden = isMulti && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                const isHidden = isMulti && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
                 if (isHidden) {
-                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px;">••••••</td>`;
+                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px; cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Click to unlock/reveal">••••••</td>`;
                 }
                 return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
               }).join('')}
@@ -5948,13 +6101,16 @@ function renderSettingsView(container) {
       </div>
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addSavingsAccountInSettings()">+ Add Savings Account</button>
 
-      <h3 style="margin-top:24px;">Household Members & Privacy</h3>
-      <p style="font-size:12px; color:var(--text-muted);">Manage household members and per-user salary visibility:</p>
-      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:600px;">
+      <h3 style="margin-top:24px;">Household Members & Security</h3>
+      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and security PINs:</p>
+      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:650px;">
         ${cfg.people.map((p, idx) => `
-          <div style="display:flex; align-items:center; gap:8px; background:var(--card-bg); border:1px solid var(--border); padding:6px 10px; border-radius:6px;">
-            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)" style="flex:1;">
+          <div style="display:flex; align-items:center; gap:8px; background:var(--card-bg); border:1px solid var(--border); padding:6px 10px; border-radius:6px; flex-wrap:wrap;">
+            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)" style="flex:1; min-width:120px;">
             ${isMulti ? `
+              <button class="btn secondary" style="font-size:11px; padding:3px 8px; white-space:nowrap;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
+                ${hasPersonPin(p) ? '🔒 PIN Active' : '🔑 Set PIN'}
+              </button>
               <label style="font-size:11.5px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0;">
                 <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.updatePersonSalaryPrivacy(${idx}, this.checked)"> 🔒 Hide Salary in Overview
               </label>
@@ -6864,8 +7020,52 @@ function renderYearMenu() {
   }
 }
 
+function renderUserProfileNav() {
+  const profileDropdown = document.getElementById('userProfileDropdown');
+  const userDisp = document.getElementById('currentUserDisplay');
+  if (!profileDropdown) return;
+
+  if (!isMultiUserEnabled()) {
+    profileDropdown.style.display = 'none';
+    return;
+  }
+
+  profileDropdown.style.display = 'inline-block';
+  const activeUser = getActiveUser();
+  if (userDisp) {
+    userDisp.innerText = activeUser === 'Joint' ? 'Joint' : activeUser;
+  }
+
+  const optionsEl = document.getElementById('userProfileDropdownOptions');
+  if (optionsEl) {
+    const cfg = getSettings();
+    let optsHtml = `
+      <button onclick="window.budgetApp.switchActiveUser('Joint')">
+        ${activeUser === 'Joint' ? '✓ ' : ''}👥 Joint / Household (Shared)
+      </button>
+    `;
+    (cfg.people || []).forEach(p => {
+      const pinActive = hasPersonPin(p);
+      const unlocked = isUserUnlocked(p);
+      const isSelected = activeUser === p;
+      optsHtml += `
+        <button onclick="window.budgetApp.switchActiveUser('${p}')">
+          ${isSelected ? '✓ ' : ''}👤 ${p} ${pinActive ? (unlocked ? '🔓' : '🔒') : ''}
+        </button>
+      `;
+    });
+    optsHtml += `
+      <div style="border-top:1px solid var(--border); margin-top:4px;">
+        <button onclick="window.budgetApp.lockAllProfiles()">🔒 Lock All Profiles / Switch to Joint</button>
+      </div>
+    `;
+    optionsEl.innerHTML = optsHtml;
+  }
+}
+
 function renderNav() {
   updateTopBarTitle();
+  renderUserProfileNav();
   const yData = getYearData();
   const cfg = getSettings();
   let html = months.map(m => {
@@ -6885,6 +7085,7 @@ function renderNav() {
 function renderContent() {
   try {
     updateTopBarTitle();
+    renderUserProfileNav();
     const container = document.getElementById('appBody');
     const metaBar = document.getElementById('monthMetaBar');
     if (!container) return;
@@ -8170,6 +8371,13 @@ window.budgetApp = {
       setPersonSalaryPrivacy(p, hide);
     }
   },
+  obUpdatePersonPin(idx, val) {
+    if (!getSettings().people) getSettings().people = [];
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonPin(p, val);
+    }
+  },
   obDelPerson(idx) {
     if (getSettings().people) getSettings().people.splice(idx, 1);
     obRenderLists();
@@ -9234,13 +9442,154 @@ window.budgetApp = {
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
-  setUserFilter(filterName) {
-    appState.selectedUserFilter = filterName;
+  toggleUserDropdown(event) {
+    if (event) event.stopPropagation();
+    const drop = document.getElementById('userProfileDropdown');
+    if (drop) {
+      drop.classList.toggle('open');
+    }
+  },
+
+  switchActiveUser(targetUser) {
+    document.getElementById('userProfileDropdown')?.classList.remove('open');
+    if (!targetUser || targetUser === 'Joint') {
+      setActiveUser('Joint');
+      renderUserProfileNav();
+      renderContent();
+      return;
+    }
+
+    if (hasPersonPin(targetUser) && !isUserUnlocked(targetUser)) {
+      openPinUnlockModal(targetUser, () => {
+        setActiveUser(targetUser);
+        renderUserProfileNav();
+        renderContent();
+      });
+      return;
+    }
+
+    setActiveUser(targetUser);
+    renderUserProfileNav();
+    renderContent();
+  },
+
+  submitPinUnlock(person) {
+    const inp = document.getElementById('user-pin-input');
+    const errEl = document.getElementById('pin-error-msg');
+    const enteredPin = (inp ? inp.value : '').trim();
+
+    if (!unlockUser(person, enteredPin)) {
+      if (errEl) errEl.innerText = "Incorrect PIN. Please try again.";
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      return;
+    }
+
+    closeModal();
+    if (typeof window.pendingPinCallback === 'function') {
+      const cb = window.pendingPinCallback;
+      window.pendingPinCallback = null;
+      cb();
+    } else {
+      setActiveUser(person);
+      renderUserProfileNav();
+      renderContent();
+    }
+  },
+
+  appendPinDigit(digit, person) {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) {
+      inp.value += digit;
+      const expectedPin = getPersonPin(person);
+      if (expectedPin && inp.value.length === expectedPin.length) {
+        this.submitPinUnlock(person);
+      }
+    }
+  },
+
+  clearPinInput() {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) inp.value = '';
+    const errEl = document.getElementById('pin-error-msg');
+    if (errEl) errEl.innerText = '';
+  },
+
+  backspacePinInput() {
+    const inp = document.getElementById('user-pin-input');
+    if (inp && inp.value.length > 0) {
+      inp.value = inp.value.slice(0, -1);
+    }
+  },
+
+  openSetPinModal(person) {
+    openSetPinModal(person);
+  },
+
+  async savePersonPin(person) {
+    const newInp = document.getElementById('new-pin-input');
+    const confInp = document.getElementById('confirm-pin-input');
+    const errEl = document.getElementById('set-pin-error');
+    const p1 = (newInp ? newInp.value : '').trim();
+    const p2 = (confInp ? confInp.value : '').trim();
+
+    if (!p1) {
+      if (errEl) errEl.innerText = "Please enter a PIN code (4-6 digits).";
+      return;
+    }
+    if (p1.length < 4 || p1.length > 6 || isNaN(p1)) {
+      if (errEl) errEl.innerText = "PIN must be between 4 and 6 numeric digits.";
+      return;
+    }
+    if (p1 !== p2) {
+      if (errEl) errEl.innerText = "PINs do not match. Please check and try again.";
+      return;
+    }
+
+    setPersonPin(person, p1);
+    closeModal();
+    renderUserProfileNav();
+    renderContent();
+    if (getSettings().onboarding_complete) {
+      await saveBudget(appState.data);
+    }
+    alert(`Security PIN set successfully for ${person}!`);
+  },
+
+  async removePersonPin(person) {
+    if (confirm(`Remove security PIN for ${person}? Anyone will be able to switch to this profile without authentication.`)) {
+      setPersonPin(person, '');
+      closeModal();
+      renderUserProfileNav();
+      renderContent();
+      if (getSettings().onboarding_complete) {
+        await saveBudget(appState.data);
+      }
+      alert(`Security PIN removed for ${person}.`);
+    }
+  },
+
+  lockAllProfiles() {
+    lockAllUsers();
+    renderUserProfileNav();
     renderContent();
   },
 
   toggleSalaryReveal(person) {
+    const isHidden = isPersonSalaryHidden(person);
+    const isUnlocked = isUserUnlocked(person);
     if (!appState.unmaskedSalaries) appState.unmaskedSalaries = {};
+
+    if (isHidden && hasPersonPin(person) && !isUnlocked && !appState.unmaskedSalaries[person]) {
+      openPinUnlockModal(person, () => {
+        appState.unmaskedSalaries[person] = true;
+        renderContent();
+      });
+      return;
+    }
+
     appState.unmaskedSalaries[person] = !appState.unmaskedSalaries[person];
     renderContent();
   },

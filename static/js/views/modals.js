@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser } from '../state.js';
 import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -1346,3 +1346,79 @@ export function openScheduledBillsModal(activeFilter = 'all') {
     `
   });
 }
+
+export function openPinUnlockModal(person, callback) {
+  window.pendingPinCallback = callback;
+  showModal({
+    title: `🔒 Enter PIN: ${person}`,
+    body: `
+      <div style="text-align:center; padding:10px 0;">
+        <p style="font-size:12.5px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;">
+          Enter the 4-digit PIN for <strong>${person}</strong> to unlock personal accounts and view private salary.
+        </p>
+
+        <div style="margin-bottom:14px;">
+          <input type="password" id="user-pin-input" maxlength="6" inputmode="numeric" placeholder="••••" style="font-size:24px; text-align:center; letter-spacing:8px; width:160px; padding:6px 12px; font-weight:bold;" autofocus onkeydown="if(event.key==='Enter') window.budgetApp.submitPinUnlock('${person}')">
+          <div id="pin-error-msg" style="color:var(--red); font-size:11.5px; margin-top:6px; min-height:16px; font-weight:600;"></div>
+        </div>
+
+        <!-- ON-SCREEN NUMPAD -->
+        <div style="display:grid; grid-template-columns:repeat(3, 56px); gap:8px; justify-content:center; margin-top:10px;">
+          ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `
+            <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('${n}', '${person}')">${n}</button>
+          `).join('')}
+          <button class="btn secondary" style="font-size:11px; height:44px; justify-content:center; color:var(--text-muted);" onclick="window.budgetApp.clearPinInput()">Clear</button>
+          <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('0', '${person}')">0</button>
+          <button class="btn secondary" style="font-size:16px; height:44px; justify-content:center;" onclick="window.budgetApp.backspacePinInput()">⌫</button>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.submitPinUnlock('${person}')">Unlock 🔓</button>
+    `
+  });
+
+  setTimeout(() => {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) inp.focus();
+  }, 100);
+}
+
+export function openSetPinModal(person) {
+  const currentPin = getPersonPin(person);
+  const hasPin = !!currentPin;
+
+  showModal({
+    title: `🔒 Configure Security PIN: ${person}`,
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0;">
+          Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.
+        </p>
+
+        <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:12px;">
+          Status: <strong>${hasPin ? '🔒 PIN Protection Active' : '🔓 No PIN Configured (Open Access)'}</strong>
+        </div>
+
+        <div>
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">New 4-to-6 Digit PIN</label>
+          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+        </div>
+
+        <div>
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Confirm PIN</label>
+          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+        </div>
+
+        <div id="set-pin-error" style="color:var(--red); font-size:11px; font-weight:600; min-height:16px;"></div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      ${hasPin ? `<button class="btn red" onclick="window.budgetApp.removePersonPin('${person}')">Remove PIN</button>` : ''}
+      <button class="btn green" onclick="window.budgetApp.savePersonPin('${person}')">Save PIN</button>
+    `
+  });
+}
+

@@ -8,8 +8,8 @@ export const DEFAULT_SETTINGS = {
   enable_multi_user: false,
   people: ["Person 1", "Person 2"],
   people_settings: {
-    "Person 1": { hide_salary: false },
-    "Person 2": { hide_salary: false }
+    "Person 1": { hide_salary: false, pin: "" },
+    "Person 2": { hide_salary: false, pin: "" }
   },
   account_owners: {
     "Joint Account": "Joint",
@@ -88,6 +88,8 @@ export const appState = {
   globalEditMode: false,
   draggedItemInfo: null,
   activeChart: null,
+  activeUser: 'Joint',
+  unlockedUsers: {},
   selectedUserFilter: 'all',
   unmaskedSalaries: {}
 };
@@ -306,7 +308,8 @@ export function getPersonSettings(personName) {
   if (!cfg.people_settings) cfg.people_settings = {};
   if (!cfg.people_settings[personName]) {
     cfg.people_settings[personName] = {
-      hide_salary: false
+      hide_salary: false,
+      pin: ""
     };
   }
   return cfg.people_settings[personName];
@@ -316,6 +319,54 @@ export function isPersonSalaryHidden(personName) {
   if (!isMultiUserEnabled()) return false;
   const pConf = getPersonSettings(personName);
   return !!pConf.hide_salary;
+}
+
+export function getPersonPin(personName) {
+  const pConf = getPersonSettings(personName);
+  return (pConf && pConf.pin) ? String(pConf.pin).trim() : "";
+}
+
+export function setPersonPin(personName, pin) {
+  const pConf = getPersonSettings(personName);
+  pConf.pin = pin ? String(pin).trim() : "";
+}
+
+export function hasPersonPin(personName) {
+  return !!getPersonPin(personName);
+}
+
+export function isUserUnlocked(personName) {
+  if (!personName || personName === 'Joint') return true;
+  if (!hasPersonPin(personName)) return true;
+  return !!(appState.unlockedUsers && appState.unlockedUsers[personName]);
+}
+
+export function unlockUser(personName, pin) {
+  if (!hasPersonPin(personName)) {
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[personName] = true;
+    return true;
+  }
+  const expected = getPersonPin(personName);
+  if (String(pin).trim() === expected) {
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[personName] = true;
+    return true;
+  }
+  return false;
+}
+
+export function lockAllUsers() {
+  appState.unlockedUsers = {};
+  appState.activeUser = 'Joint';
+}
+
+export function getActiveUser() {
+  return appState.activeUser || 'Joint';
+}
+
+export function setActiveUser(user) {
+  appState.activeUser = user || 'Joint';
 }
 
 export function getAccountOwner(accType, accName) {
@@ -362,6 +413,14 @@ if (typeof window !== 'undefined') {
   window.isMultiUserEnabled = isMultiUserEnabled;
   window.getPersonSettings = getPersonSettings;
   window.isPersonSalaryHidden = isPersonSalaryHidden;
+  window.getPersonPin = getPersonPin;
+  window.setPersonPin = setPersonPin;
+  window.hasPersonPin = hasPersonPin;
+  window.isUserUnlocked = isUserUnlocked;
+  window.unlockUser = unlockUser;
+  window.lockAllUsers = lockAllUsers;
+  window.getActiveUser = getActiveUser;
+  window.setActiveUser = setActiveUser;
   window.getAccountOwner = getAccountOwner;
   window.setAccountOwner = setAccountOwner;
   window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;

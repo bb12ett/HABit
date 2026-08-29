@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, months, applyTheme, isMultiUserEnabled, isPersonSalaryHidden, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, months, applyTheme, isMultiUserEnabled, isPersonSalaryHidden, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner, getPersonPin, setPersonPin } from '../state.js';
 import { calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -82,9 +82,10 @@ export function obRenderLists() {
   const pList = document.getElementById('obPeopleList');
   if (pList) {
     pList.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border);">
-        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1;">
+      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border); flex-wrap:wrap;">
+        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1; min-width:110px;">
         ${isMulti ? `
+          <input type="password" maxlength="6" inputmode="numeric" placeholder="PIN" value="${getPersonPin(p)}" onchange="window.budgetApp.obUpdatePersonPin(${idx}, this.value)" style="width:60px; font-size:11px; padding:3px 4px; text-align:center;" title="Optional PIN for ${p}">
           <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0 4px;">
             <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide Salary
           </label>

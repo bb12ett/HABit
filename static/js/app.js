@@ -13,7 +13,15 @@ import {
   isMultiUserEnabled,
   setPersonSalaryPrivacy,
   getAccountOwner,
-  setAccountOwner
+  setAccountOwner,
+  getPersonPin,
+  setPersonPin,
+  hasPersonPin,
+  isUserUnlocked,
+  unlockUser,
+  lockAllUsers,
+  getActiveUser,
+  setActiveUser
 } from './state.js';
 
 import {
@@ -62,7 +70,9 @@ import {
   openArchiveManagerModal,
   openQuickCheckInModal,
   openQuickWeeklyExpenseModal,
-  openQuickBudgetTxModal
+  openQuickBudgetTxModal,
+  openPinUnlockModal,
+  openSetPinModal
 } from './views/modals.js';
 
 import { renderOverviewView } from './views/overview.js';
@@ -156,8 +166,52 @@ export function renderYearMenu() {
   }
 }
 
+export function renderUserProfileNav() {
+  const profileDropdown = document.getElementById('userProfileDropdown');
+  const userDisp = document.getElementById('currentUserDisplay');
+  if (!profileDropdown) return;
+
+  if (!isMultiUserEnabled()) {
+    profileDropdown.style.display = 'none';
+    return;
+  }
+
+  profileDropdown.style.display = 'inline-block';
+  const activeUser = getActiveUser();
+  if (userDisp) {
+    userDisp.innerText = activeUser === 'Joint' ? 'Joint' : activeUser;
+  }
+
+  const optionsEl = document.getElementById('userProfileDropdownOptions');
+  if (optionsEl) {
+    const cfg = getSettings();
+    let optsHtml = `
+      <button onclick="window.budgetApp.switchActiveUser('Joint')">
+        ${activeUser === 'Joint' ? '✓ ' : ''}👥 Joint / Household (Shared)
+      </button>
+    `;
+    (cfg.people || []).forEach(p => {
+      const pinActive = hasPersonPin(p);
+      const unlocked = isUserUnlocked(p);
+      const isSelected = activeUser === p;
+      optsHtml += `
+        <button onclick="window.budgetApp.switchActiveUser('${p}')">
+          ${isSelected ? '✓ ' : ''}👤 ${p} ${pinActive ? (unlocked ? '🔓' : '🔒') : ''}
+        </button>
+      `;
+    });
+    optsHtml += `
+      <div style="border-top:1px solid var(--border); margin-top:4px;">
+        <button onclick="window.budgetApp.lockAllProfiles()">🔒 Lock All Profiles / Switch to Joint</button>
+      </div>
+    `;
+    optionsEl.innerHTML = optsHtml;
+  }
+}
+
 export function renderNav() {
   updateTopBarTitle();
+  renderUserProfileNav();
   const yData = getYearData();
   const cfg = getSettings();
   let html = months.map(m => {
@@ -177,6 +231,7 @@ export function renderNav() {
 export function renderContent() {
   try {
     updateTopBarTitle();
+    renderUserProfileNav();
     const container = document.getElementById('appBody');
     const metaBar = document.getElementById('monthMetaBar');
     if (!container) return;
@@ -1462,6 +1517,13 @@ window.budgetApp = {
       setPersonSalaryPrivacy(p, hide);
     }
   },
+  obUpdatePersonPin(idx, val) {
+    if (!getSettings().people) getSettings().people = [];
+    const p = getSettings().people[idx];
+    if (p) {
+      setPersonPin(p, val);
+    }
+  },
   obDelPerson(idx) {
     if (getSettings().people) getSettings().people.splice(idx, 1);
     obRenderLists();
@@ -2526,13 +2588,154 @@ window.budgetApp = {
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
-  setUserFilter(filterName) {
-    appState.selectedUserFilter = filterName;
+  toggleUserDropdown(event) {
+    if (event) event.stopPropagation();
+    const drop = document.getElementById('userProfileDropdown');
+    if (drop) {
+      drop.classList.toggle('open');
+    }
+  },
+
+  switchActiveUser(targetUser) {
+    document.getElementById('userProfileDropdown')?.classList.remove('open');
+    if (!targetUser || targetUser === 'Joint') {
+      setActiveUser('Joint');
+      renderUserProfileNav();
+      renderContent();
+      return;
+    }
+
+    if (hasPersonPin(targetUser) && !isUserUnlocked(targetUser)) {
+      openPinUnlockModal(targetUser, () => {
+        setActiveUser(targetUser);
+        renderUserProfileNav();
+        renderContent();
+      });
+      return;
+    }
+
+    setActiveUser(targetUser);
+    renderUserProfileNav();
+    renderContent();
+  },
+
+  submitPinUnlock(person) {
+    const inp = document.getElementById('user-pin-input');
+    const errEl = document.getElementById('pin-error-msg');
+    const enteredPin = (inp ? inp.value : '').trim();
+
+    if (!unlockUser(person, enteredPin)) {
+      if (errEl) errEl.innerText = "Incorrect PIN. Please try again.";
+      if (inp) {
+        inp.value = '';
+        inp.focus();
+      }
+      return;
+    }
+
+    closeModal();
+    if (typeof window.pendingPinCallback === 'function') {
+      const cb = window.pendingPinCallback;
+      window.pendingPinCallback = null;
+      cb();
+    } else {
+      setActiveUser(person);
+      renderUserProfileNav();
+      renderContent();
+    }
+  },
+
+  appendPinDigit(digit, person) {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) {
+      inp.value += digit;
+      const expectedPin = getPersonPin(person);
+      if (expectedPin && inp.value.length === expectedPin.length) {
+        this.submitPinUnlock(person);
+      }
+    }
+  },
+
+  clearPinInput() {
+    const inp = document.getElementById('user-pin-input');
+    if (inp) inp.value = '';
+    const errEl = document.getElementById('pin-error-msg');
+    if (errEl) errEl.innerText = '';
+  },
+
+  backspacePinInput() {
+    const inp = document.getElementById('user-pin-input');
+    if (inp && inp.value.length > 0) {
+      inp.value = inp.value.slice(0, -1);
+    }
+  },
+
+  openSetPinModal(person) {
+    openSetPinModal(person);
+  },
+
+  async savePersonPin(person) {
+    const newInp = document.getElementById('new-pin-input');
+    const confInp = document.getElementById('confirm-pin-input');
+    const errEl = document.getElementById('set-pin-error');
+    const p1 = (newInp ? newInp.value : '').trim();
+    const p2 = (confInp ? confInp.value : '').trim();
+
+    if (!p1) {
+      if (errEl) errEl.innerText = "Please enter a PIN code (4-6 digits).";
+      return;
+    }
+    if (p1.length < 4 || p1.length > 6 || isNaN(p1)) {
+      if (errEl) errEl.innerText = "PIN must be between 4 and 6 numeric digits.";
+      return;
+    }
+    if (p1 !== p2) {
+      if (errEl) errEl.innerText = "PINs do not match. Please check and try again.";
+      return;
+    }
+
+    setPersonPin(person, p1);
+    closeModal();
+    renderUserProfileNav();
+    renderContent();
+    if (getSettings().onboarding_complete) {
+      await saveBudget(appState.data);
+    }
+    alert(`Security PIN set successfully for ${person}!`);
+  },
+
+  async removePersonPin(person) {
+    if (confirm(`Remove security PIN for ${person}? Anyone will be able to switch to this profile without authentication.`)) {
+      setPersonPin(person, '');
+      closeModal();
+      renderUserProfileNav();
+      renderContent();
+      if (getSettings().onboarding_complete) {
+        await saveBudget(appState.data);
+      }
+      alert(`Security PIN removed for ${person}.`);
+    }
+  },
+
+  lockAllProfiles() {
+    lockAllUsers();
+    renderUserProfileNav();
     renderContent();
   },
 
   toggleSalaryReveal(person) {
+    const isHidden = isPersonSalaryHidden(person);
+    const isUnlocked = isUserUnlocked(person);
     if (!appState.unmaskedSalaries) appState.unmaskedSalaries = {};
+
+    if (isHidden && hasPersonPin(person) && !isUnlocked && !appState.unmaskedSalaries[person]) {
+      openPinUnlockModal(person, () => {
+        appState.unmaskedSalaries[person] = true;
+        renderContent();
+      });
+      return;
+    }
+
     appState.unmaskedSalaries[person] = !appState.unmaskedSalaries[person];
     renderContent();
   },

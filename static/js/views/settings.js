@@ -1,4 +1,4 @@
-import { appState, getSettings, getAccountConfig, ALL_AVAILABLE_WIDGETS, isMultiUserEnabled, isPersonSalaryHidden, getPersonSettings, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner } from '../state.js';
+import { appState, getSettings, getAccountConfig, ALL_AVAILABLE_WIDGETS, isMultiUserEnabled, isPersonSalaryHidden, getPersonSettings, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner, hasPersonPin } from '../state.js';
 
 export function renderSettingsView(container) {
   const cfg = getSettings();
@@ -177,13 +177,16 @@ export function renderSettingsView(container) {
       </div>
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addSavingsAccountInSettings()">+ Add Savings Account</button>
 
-      <h3 style="margin-top:24px;">Household Members & Privacy</h3>
-      <p style="font-size:12px; color:var(--text-muted);">Manage household members and per-user salary visibility:</p>
-      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:600px;">
+      <h3 style="margin-top:24px;">Household Members & Security</h3>
+      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and security PINs:</p>
+      <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; max-width:650px;">
         ${cfg.people.map((p, idx) => `
-          <div style="display:flex; align-items:center; gap:8px; background:var(--card-bg); border:1px solid var(--border); padding:6px 10px; border-radius:6px;">
-            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)" style="flex:1;">
+          <div style="display:flex; align-items:center; gap:8px; background:var(--card-bg); border:1px solid var(--border); padding:6px 10px; border-radius:6px; flex-wrap:wrap;">
+            <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${idx}, this.value)" style="flex:1; min-width:120px;">
             ${isMulti ? `
+              <button class="btn secondary" style="font-size:11px; padding:3px 8px; white-space:nowrap;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
+                ${hasPersonPin(p) ? '🔒 PIN Active' : '🔑 Set PIN'}
+              </button>
               <label style="font-size:11.5px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0;">
                 <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.updatePersonSalaryPrivacy(${idx}, this.checked)"> 🔒 Hide Salary in Overview
               </label>

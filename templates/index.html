@@ -501,6 +501,11 @@
         </div>
 
         <div class="top-nav-right">
+          <!-- USER PROFILE DROPDOWN (Shown when multi-user enabled) -->
+          <div class="dropdown" id="userProfileDropdown" style="display:none;">
+            <button id="userProfileBtn" class="btn secondary" onclick="window.budgetApp.toggleUserDropdown(event)" title="Active User Profile"><span class="btn-icon">&#128100;</span><span class="btn-text"> <span id="currentUserDisplay">Joint</span> &#9662;</span></button>
+            <div id="userProfileDropdownOptions" class="dropdown-content"></div>
+          </div>
           <div class="dropdown">
             <button id="yearDropdownBtn" class="btn secondary" onclick="window.budgetApp.toggleYearDropdown(event)" title="Select Year"><span class="btn-icon">&#128197;</span><span class="btn-text"> <span id="currentYearDisplay">2026</span> &#9662;</span></button>
             <div class="dropdown-content">

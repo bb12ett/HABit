@@ -12,7 +12,7 @@ function formatCheckInTimestamp(isoStr) {
   return `${d.getDate()} ${months[d.getMonth()]} ${hours}:${mins}`;
 }
 
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner, isUserUnlocked, hasPersonPin, getActiveUser } from '../state.js';
 import { calculateMonthSchedule, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek } from '../calculations.js';
 
 export function renderOverviewView(container) {
@@ -508,12 +508,22 @@ export function renderOverviewView(container) {
 
       ${isMulti ? `
         <div class="user-filter-bar" style="display:flex; align-items:center; gap:6px; margin:0 0 14px 0; padding:8px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap;">
-          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Filter Weekly Perspective:</span>
-          <button class="btn ${selectedUserFilter === 'all' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('all')">🌐 All Accounts</button>
-          <button class="btn ${selectedUserFilter === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('Joint')">👥 Joint Only</button>
-          ${cfg.people.map(p => `
-            <button class="btn ${selectedUserFilter === p ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setUserFilter('${p}')">👤 ${p}</button>
-          `).join('')}
+          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Active Perspective:</span>
+          <button class="btn ${appState.activeUser === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.switchActiveUser('Joint')">👥 Joint / Household</button>
+          ${cfg.people.map(p => {
+            const hasPin = hasPersonPin(p);
+            const unlocked = isUserUnlocked(p);
+            const isActive = appState.activeUser === p;
+            return `
+              <button class="btn ${isActive ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px; display:inline-flex; align-items:center; gap:4px;" onclick="window.budgetApp.switchActiveUser('${p}')">
+                <span>👤 ${p}</span>
+                ${hasPin ? `<span style="font-size:9px;">${unlocked ? '🔓' : '🔒'}</span>` : ''}
+              </button>
+            `;
+          }).join('')}
+          ${appState.activeUser !== 'Joint' ? `
+            <button class="btn secondary" style="font-size:10px; padding:3px 8px; margin-left:auto; color:var(--text-muted);" onclick="window.budgetApp.lockAllProfiles()" title="Lock session & return to Joint Shared view">🔒 Lock</button>
+          ` : ''}
         </div>
       ` : ''}
 
@@ -524,6 +534,7 @@ export function renderOverviewView(container) {
           const isFinalWeek = (wIdx === schedule.weeks.length - 1);
           const items = getWeekItems(activeTab, w);
           const actuals = getWeekActuals(activeTab, w);
+          const activeUser = appState.activeUser || 'Joint';
 
           const wEndDateInclusive = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
           const isPast = isViewingCurrentMonth && (now.getTime() > wEndDateInclusive.getTime());
@@ -533,7 +544,7 @@ export function renderOverviewView(container) {
           cfg.current_accounts.forEach(acc => {
             const trkWeekly = isAccountTrackedWeekly('current', acc);
             const owner = getAccountOwner('current', acc);
-            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'current',
@@ -548,7 +559,7 @@ export function renderOverviewView(container) {
           cfg.credit_accounts.forEach(c => {
             const trkWeekly = isAccountTrackedWeekly('credit', c.name);
             const owner = getAccountOwner('credit', c.name);
-            const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'credit',
@@ -565,7 +576,7 @@ export function renderOverviewView(container) {
             cfg.savings_accounts.forEach(s => {
               const trkWeekly = isAccountTrackedWeekly('savings', s);
               const owner = getAccountOwner('savings', s);
-              const matchesFilter = !isMulti || selectedUserFilter === 'all' || (selectedUserFilter === 'Joint' && owner === 'Joint') || (selectedUserFilter !== 'all' && selectedUserFilter !== 'Joint' && (owner === selectedUserFilter || owner === 'Joint'));
+              const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
               if ((trkWeekly || isFinalWeek) && matchesFilter) {
                 columns.push({
                   type: 'savings',
@@ -878,18 +889,22 @@ export function renderOverviewView(container) {
             <tr>
               <th>Category</th>
               <th>Transfer Destination</th>
-              ${cfg.people.map(p => `
-                <th class="text-right">
-                  <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
-                    <span>${p}</span>
-                    ${isMulti && isPersonSalaryHidden(p) ? `
-                      <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? 'Hide salary' : 'Reveal salary'}">
-                        ${(appState.unmaskedSalaries && appState.unmaskedSalaries[p]) ? '🙈' : '👁️'}
-                      </button>
-                    ` : ''}
-                  </div>
-                </th>
-              `).join('')}
+              ${cfg.people.map(p => {
+                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                const isRevealed = isUnlockedForUser || (appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                return `
+                  <th class="text-right">
+                    <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
+                      <span>${p}</span>
+                      ${isMulti && isPersonSalaryHidden(p) ? `
+                        <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${isRevealed ? 'Hide salary' : 'Unlock / Reveal salary'}">
+                          ${isRevealed ? '🙈' : '👁️'}
+                        </button>
+                      ` : ''}
+                    </div>
+                  </th>
+                `;
+              }).join('')}
               ${globalEditMode ? '<th></th>' : ''}
             </tr>
           </thead>
@@ -910,21 +925,22 @@ export function renderOverviewView(container) {
                 </td>
                 ${cfg.people.map(p => {
                   const val = (d.amounts && d.amounts[p]) || 0;
-                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                  const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
                   return `
                     <td class="text-right">
                       ${globalEditMode ? (
                         isHidden ? `
                           <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
                             <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)" style="letter-spacing:2px; width:70px;">
-                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Reveal">👁️</button>
+                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Unlock / Reveal">👁️</button>
                           </div>
                         ` : `
                           <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
                         `
                       ) : (
                         isHidden ? `
-                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted);" title="Salary hidden for privacy (click 👁️ to reveal)">••••••</span>
+                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Salary hidden for privacy (click to unlock/reveal)">••••••</span>
                         ` : `${curr}${Number(val).toFixed(2)}`
                       )}
                     </td>
@@ -940,9 +956,10 @@ export function renderOverviewView(container) {
               <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
               ${cfg.people.map(p => {
                 const bal = personTotals[p] ? personTotals[p].leftover : 0;
-                const isHidden = isMulti && isPersonSalaryHidden(p) && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+                const isHidden = isMulti && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
                 if (isHidden) {
-                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px;">••••••</td>`;
+                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px; cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Click to unlock/reveal">••••••</td>`;
                 }
                 return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
               }).join('')}

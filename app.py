@@ -56,8 +56,8 @@ DEFAULT_SETTINGS = {
     "enable_multi_user": False,
     "people": ["Person 1", "Person 2"],
     "people_settings": {
-        "Person 1": {"hide_salary": False},
-        "Person 2": {"hide_salary": False}
+        "Person 1": {"hide_salary": False, "pin": ""},
+        "Person 2": {"hide_salary": False, "pin": ""}
     },
     "account_owners": {
         "Joint Account": "Joint",
