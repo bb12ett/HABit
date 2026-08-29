@@ -128,27 +128,28 @@ import {
 export function updateTopBarTitle() {
   const titleEl = document.getElementById('topBarMonthTitle');
   if (!titleEl) return;
+  const yr = `'${String(appState.currentYear).slice(-2)}`;
   if (months.includes(appState.activeTab)) {
-    titleEl.innerText = `${appState.activeTab} ${appState.currentYear}`;
+    titleEl.innerText = `${appState.activeTab} ${yr}`;
   } else if (appState.activeTab === 'Year') {
-    titleEl.innerText = `Annual ${appState.currentYear}`;
+    titleEl.innerText = `Annual ${yr}`;
   } else if (appState.activeTab === 'Budgets') {
-    titleEl.innerText = `Budgets ${appState.currentYear}`;
+    titleEl.innerText = `Budgets ${yr}`;
   } else if (appState.activeTab === 'Bills') {
-    titleEl.innerText = `Bills ${appState.currentYear}`;
+    titleEl.innerText = `Bills ${yr}`;
   } else if (appState.activeTab === 'Settings') {
     titleEl.innerText = 'Settings';
   } else if (appState.activeTab) {
-    titleEl.innerText = `${appState.activeTab} ${appState.currentYear}`;
+    titleEl.innerText = `${appState.activeTab} ${yr}`;
   } else {
-    titleEl.innerText = `Budget ${appState.currentYear}`;
+    titleEl.innerText = `Budget ${yr}`;
   }
 }
 
 export function renderYearMenu() {
   updateTopBarTitle();
   const disp = document.getElementById('currentYearDisplay');
-  if (disp) disp.innerText = appState.currentYear;
+  if (disp) disp.innerText = `'${String(appState.currentYear).slice(-2)}`;
   const yData = getYearData();
   const archiveBtn = document.getElementById('archiveYearActionBtn');
   if (archiveBtn) {
@@ -179,7 +180,9 @@ export function renderUserProfileNav() {
   profileDropdown.style.display = 'inline-block';
   const activeUser = getActiveUser();
   if (userDisp) {
-    userDisp.innerText = activeUser === 'Joint' ? 'Joint' : activeUser;
+    const displayName = activeUser === 'Joint' ? 'Joint' : activeUser;
+    userDisp.innerText = displayName;
+    userDisp.title = `Active Profile: ${displayName}`;
   }
 
   const optionsEl = document.getElementById('userProfileDropdownOptions');
@@ -201,12 +204,94 @@ export function renderUserProfileNav() {
       `;
     });
     optsHtml += `
-      <div style="border-top:1px solid var(--border); margin-top:4px;">
+      <div style="border-top:1px solid var(--border); margin-top:4px; padding-top:4px;">
+        <button onclick="window.budgetApp.showProfileSelectionScreen()" style="color:var(--curr-border); font-weight:600;">👤 Switch User Profile</button>
         <button onclick="window.budgetApp.lockAllProfiles()">🔒 Lock All Profiles / Switch to Joint</button>
       </div>
     `;
     optionsEl.innerHTML = optsHtml;
   }
+}
+
+export function showProfileSelectionScreen() {
+  const overlay = document.getElementById('profileSelectionOverlay');
+  const grid = document.getElementById('profileAvatarGrid');
+  if (!overlay || !grid) return;
+
+  const cfg = getSettings();
+  const palettes = [
+    { bg: 'linear-gradient(135deg, #059669, #0d9488)', icon: '👥' }, // Joint
+    { bg: 'linear-gradient(135deg, #2563eb, #4f46e5)', icon: '👤' }, // Person 1
+    { bg: 'linear-gradient(135deg, #e11d48, #db2777)', icon: '👤' }, // Person 2
+    { bg: 'linear-gradient(135deg, #d97706, #b45309)', icon: '👤' }, // Person 3
+    { bg: 'linear-gradient(135deg, #0891b2, #0284c7)', icon: '👤' }, // Person 4
+    { bg: 'linear-gradient(135deg, #7c3aed, #9333ea)', icon: '👤' }  // Person 5
+  ];
+
+  let cardsHtml = '';
+
+  // 1. Joint Household Profile Card
+  cardsHtml += `
+    <button class="profile-card" onclick="window.budgetApp.selectUserProfile('Joint')">
+      <div class="profile-avatar-box" style="background: ${palettes[0].bg};">
+        <span class="profile-avatar-icon">${palettes[0].icon}</span>
+      </div>
+      <span class="profile-card-name">Joint Household</span>
+    </button>
+  `;
+
+  // 2. Member Profile Cards
+  (cfg.people || []).forEach((p, idx) => {
+    const pal = palettes[((idx % (palettes.length - 1)) + 1)];
+    const pinSet = hasPersonPin(p);
+    const unlocked = isUserUnlocked(p);
+    cardsHtml += `
+      <button class="profile-card" onclick="window.budgetApp.selectUserProfile('${p}')">
+        <div class="profile-avatar-box" style="background: ${pal.bg};">
+          <span class="profile-avatar-icon">${pal.icon}</span>
+          ${pinSet ? `
+            <div class="profile-lock-badge" title="${unlocked ? 'Unlocked for this session' : 'PIN Protected'}">
+              ${unlocked ? '🔓' : '🔒'}
+            </div>
+          ` : ''}
+        </div>
+        <span class="profile-card-name">${p}</span>
+      </button>
+    `;
+  });
+
+  grid.innerHTML = cardsHtml;
+  overlay.style.display = 'flex';
+}
+
+export function hideProfileSelectionScreen() {
+  const overlay = document.getElementById('profileSelectionOverlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+export function selectUserProfile(person) {
+  if (person === 'Joint') {
+    setActiveUser('Joint');
+    hideProfileSelectionScreen();
+    renderUserProfileNav();
+    renderContent();
+    return;
+  }
+
+  if (hasPersonPin(person) && !isUserUnlocked(person)) {
+    openPinUnlockModal(person, () => {
+      setActiveUser(person);
+      hideProfileSelectionScreen();
+      renderUserProfileNav();
+      renderContent();
+    });
+    return;
+  }
+
+  setActiveUser(person);
+  hideProfileSelectionScreen();
+  renderUserProfileNav();
+  renderContent();
 }
 
 export function renderNav() {
@@ -399,7 +484,9 @@ export async function init() {
       renderNav();
       renderContent();
 
-      // Month is auto-selected, current week remains highlighted without auto-scroll
+      if (isMultiUserEnabled()) {
+        showProfileSelectionScreen();
+      }
     }
   } catch (err) {
     console.error("Initialization error:", err);
@@ -2061,7 +2148,11 @@ window.budgetApp = {
     const d = md.deductions_list[dIdx];
     if (d) {
       if (!d.amounts) d.amounts = {};
-      d.amounts[person] = parseFloat(val) || 0;
+      const num = parseFloat(val) || 0;
+      d.amounts[person] = num;
+      if (d.person === person || !d.person) {
+        d.amount = num;
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -2088,6 +2179,63 @@ window.budgetApp = {
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
     }
+  },
+
+  async editDeductionFrequency(dIdx, newFreq) {
+    const md = getMonthData(appState.activeTab);
+    const d = md.deductions_list[dIdx];
+    if (d) {
+      d.frequency = newFreq;
+      calculateAndSyncRollovers();
+      renderContent();
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+  },
+
+  async editDeductionAnchorDate(dIdx, newDate) {
+    const md = getMonthData(appState.activeTab);
+    const d = md.deductions_list[dIdx];
+    if (d) {
+      d.anchor_date = newDate;
+      calculateAndSyncRollovers();
+      renderContent();
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+  },
+
+  async addSalaryDeductionForPerson(person) {
+    const nameEl = document.getElementById(`new-deduct-name-${person}`);
+    const targetEl = document.getElementById(`new-deduct-target-${person}`);
+    const amtEl = document.getElementById(`new-deduct-amt-${person}`);
+    const isSalaryEl = document.getElementById(`new-deduct-issalary-${person}`);
+    const isSalary = isSalaryEl ? isSalaryEl.checked : false;
+
+    if (!nameEl || !amtEl) return;
+    const name = nameEl.value.trim();
+    const amt = parseFloat(amtEl.value) || 0;
+    const target = targetEl ? targetEl.value : 'none';
+    if (!name) return;
+
+    const md = getMonthData(appState.activeTab);
+    if (!md.deductions_list) md.deductions_list = [];
+
+    const amounts = {};
+    amounts[person] = amt;
+
+    md.deductions_list.push({
+      name,
+      target_account: target,
+      person,
+      amount: amt,
+      amounts,
+      is_salary: isSalary
+    });
+
+    nameEl.value = '';
+    amtEl.value = '';
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
   async addSalaryDeduction() {
@@ -2515,32 +2663,149 @@ window.budgetApp = {
     }
   },
 
-  // Settings Handlers
+  // Settings Handlers & Widget Ordering
+  getAllWidgetOrder() {
+    const cfg = getSettings();
+    const currentWidgets = cfg.enabled_widgets || ["current_projected", "credit_projected", "savings_projected", "net_position", "total_outgoings"];
+    let order = cfg.all_widget_order;
+    if (!order || !Array.isArray(order) || order.length === 0) {
+      const remaining = ALL_AVAILABLE_WIDGETS.map(w => w.id).filter(id => !currentWidgets.includes(id));
+      order = [...currentWidgets, ...remaining];
+    } else {
+      const missing = ALL_AVAILABLE_WIDGETS.map(w => w.id).filter(id => !order.includes(id));
+      order = [...order, ...missing];
+    }
+    cfg.all_widget_order = order;
+    return order;
+  },
+
+  moveWidgetOrder(idx, direction) {
+    const cfg = getSettings();
+    const allIds = this.getAllWidgetOrder();
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= allIds.length) return;
+
+    const temp = allIds[idx];
+    allIds[idx] = allIds[targetIdx];
+    allIds[targetIdx] = temp;
+    cfg.all_widget_order = allIds;
+
+    // Synchronize enabled_widgets order with current checkboxes
+    const enabled = [];
+    allIds.forEach(id => {
+      const chk = document.getElementById(`w_chk_${id}`);
+      if (chk) {
+        if (chk.checked) enabled.push(id);
+      } else if (cfg.enabled_widgets && cfg.enabled_widgets.includes(id)) {
+        enabled.push(id);
+      }
+    });
+    cfg.enabled_widgets = enabled;
+
+    renderContent();
+  },
+
+  onWidgetDragStart(e, idx) {
+    if (e.dataTransfer) {
+      e.dataTransfer.setData('text/plain', String(idx));
+      e.dataTransfer.effectAllowed = 'move';
+    }
+  },
+
+  onWidgetDragOver(e) {
+    e.preventDefault();
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'move';
+    }
+  },
+
+  onWidgetDrop(e, targetIdx) {
+    e.preventDefault();
+    const fromIdx = parseInt(e.dataTransfer.getData('text/plain'), 10);
+    if (isNaN(fromIdx) || fromIdx === targetIdx) return;
+    const cfg = getSettings();
+    const allIds = this.getAllWidgetOrder();
+    const [moved] = allIds.splice(fromIdx, 1);
+    allIds.splice(targetIdx, 0, moved);
+    cfg.all_widget_order = allIds;
+
+    const enabled = [];
+    allIds.forEach(id => {
+      const chk = document.getElementById(`w_chk_${id}`);
+      if (chk) {
+        if (chk.checked) enabled.push(id);
+      } else if (cfg.enabled_widgets && cfg.enabled_widgets.includes(id)) {
+        enabled.push(id);
+      }
+    });
+    cfg.enabled_widgets = enabled;
+
+    renderContent();
+  },
+
   toggleWidgetSelection(widgetId, isChecked) {
     const cfg = getSettings();
+    const allOrder = this.getAllWidgetOrder();
     if (!cfg.enabled_widgets) cfg.enabled_widgets = [];
+    
     if (isChecked) {
-      if (!cfg.enabled_widgets.includes(widgetId)) cfg.enabled_widgets.push(widgetId);
+      if (!cfg.enabled_widgets.includes(widgetId)) {
+        cfg.enabled_widgets = allOrder.filter(id => id === widgetId || cfg.enabled_widgets.includes(id));
+      }
     } else {
       cfg.enabled_widgets = cfg.enabled_widgets.filter(id => id !== widgetId);
     }
+    renderContent();
   },
 
   async saveSettingsForm() {
     await this.saveSettings();
   },
 
+  onPayFrequencyChange(freq) {
+    const mBox = document.getElementById('cfg-payday-monthly-box');
+    const smBox = document.getElementById('cfg-payday-semimonthly-box');
+    const bwBox = document.getElementById('cfg-payday-biweekly-box');
+    const wBox = document.getElementById('cfg-payday-weekly-box');
+
+    if (mBox) mBox.style.display = (freq === 'monthly') ? 'block' : 'none';
+    if (smBox) smBox.style.display = (freq === 'semi_monthly') ? 'block' : 'none';
+    if (bwBox) bwBox.style.display = (freq === 'biweekly' || freq === 'four_weekly') ? 'block' : 'none';
+    if (wBox) wBox.style.display = (freq === 'weekly') ? 'block' : 'none';
+  },
+
+  onObPayFrequencyChange(freq) {
+    const mBox = document.getElementById('ob-pday-monthly-box');
+    const bwBox = document.getElementById('ob-pday-biweekly-box');
+
+    if (mBox) mBox.style.display = (freq === 'monthly' || freq === 'semi_monthly') ? 'block' : 'none';
+    if (bwBox) bwBox.style.display = (freq === 'biweekly' || freq === 'four_weekly' || freq === 'weekly') ? 'block' : 'none';
+  },
+
   async saveSettings() {
     const cfg = getSettings();
     const currEl = document.getElementById('cfg-curr');
+    const payfreqEl = document.getElementById('cfg-payfreq');
     const pdayEl = document.getElementById('cfg-pday');
+    const pdayLastWorkEl = document.getElementById('cfg-pday-lastwork');
+    const pdayFirstEl = document.getElementById('cfg-pday-first');
+    const pdaySecondEl = document.getElementById('cfg-pday-second');
+    const pdayAnchorEl = document.getElementById('cfg-pday-anchor');
+    const pdayWeekdayEl = document.getElementById('cfg-pday-weekday');
     const holidayEl = document.getElementById('cfg-holiday');
     const themeEl = document.getElementById('cfg-theme');
     const trackSavEl = document.getElementById('cfg-tracksavings');
     const multiUsersEl = document.getElementById('cfg-multiusers');
 
     if (currEl) cfg.currency = currEl.value;
+    if (payfreqEl) cfg.pay_frequency = payfreqEl.value;
     if (pdayEl) cfg.payday_day = parseInt(pdayEl.value, 10) || 26;
+    if (pdayLastWorkEl) cfg.payday_is_last_working_day = pdayLastWorkEl.checked;
+    if (pdayFirstEl) cfg.payday_first_day = parseInt(pdayFirstEl.value, 10) || 15;
+    if (pdaySecondEl) cfg.payday_second_day = pdaySecondEl.value;
+    if (pdayAnchorEl) cfg.payday_anchor_date = pdayAnchorEl.value;
+    if (pdayWeekdayEl) cfg.payday_weekday = parseInt(pdayWeekdayEl.value, 10) || 5;
+
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
     if (multiUsersEl) cfg.enable_multi_user = multiUsersEl.checked;
@@ -2549,10 +2814,13 @@ window.budgetApp = {
       applyTheme(themeEl.value);
     }
 
+    const allOrder = this.getAllWidgetOrder();
     const selectedWidgets = [];
-    document.querySelectorAll('.widget-checkbox-card input[type="checkbox"]').forEach(chk => {
-      if (chk.checked) {
-        const id = chk.id.replace('w_chk_', '');
+    allOrder.forEach(id => {
+      const chk = document.getElementById(`w_chk_${id}`);
+      if (chk) {
+        if (chk.checked) selectedWidgets.push(id);
+      } else if (cfg.enabled_widgets && cfg.enabled_widgets.includes(id)) {
         selectedWidgets.push(id);
       }
     });
@@ -2717,10 +2985,92 @@ window.budgetApp = {
     }
   },
 
+  showProfileSelectionScreen() {
+    const overlay = document.getElementById('profileSelectionOverlay');
+    const grid = document.getElementById('profileAvatarGrid');
+    if (!overlay || !grid) return;
+
+    const cfg = getSettings();
+    const palettes = [
+      { bg: 'linear-gradient(135deg, #059669, #0d9488)', icon: '👥' }, // Joint
+      { bg: 'linear-gradient(135deg, #2563eb, #4f46e5)', icon: '👤' }, // Person 1
+      { bg: 'linear-gradient(135deg, #e11d48, #db2777)', icon: '👤' }, // Person 2
+      { bg: 'linear-gradient(135deg, #d97706, #b45309)', icon: '👤' }, // Person 3
+      { bg: 'linear-gradient(135deg, #0891b2, #0284c7)', icon: '👤' }, // Person 4
+      { bg: 'linear-gradient(135deg, #7c3aed, #9333ea)', icon: '👤' }  // Person 5
+    ];
+
+    let cardsHtml = '';
+
+    // 1. Joint Household Profile Card
+    cardsHtml += `
+      <button class="profile-card" onclick="window.budgetApp.selectUserProfile('Joint')">
+        <div class="profile-avatar-box" style="background: ${palettes[0].bg};">
+          <span class="profile-avatar-icon">${palettes[0].icon}</span>
+        </div>
+        <span class="profile-card-name">Joint Household</span>
+      </button>
+    `;
+
+    // 2. Member Profile Cards
+    (cfg.people || []).forEach((p, idx) => {
+      const pal = palettes[((idx % (palettes.length - 1)) + 1)];
+      const pinSet = hasPersonPin(p);
+      const unlocked = isUserUnlocked(p);
+      cardsHtml += `
+        <button class="profile-card" onclick="window.budgetApp.selectUserProfile('${p}')">
+          <div class="profile-avatar-box" style="background: ${pal.bg};">
+            <span class="profile-avatar-icon">${pal.icon}</span>
+            ${pinSet ? `
+              <div class="profile-lock-badge" title="${unlocked ? 'Unlocked for this session' : 'PIN Protected'}">
+                ${unlocked ? '🔓' : '🔒'}
+              </div>
+            ` : ''}
+          </div>
+          <span class="profile-card-name">${p}</span>
+        </button>
+      `;
+    });
+
+    grid.innerHTML = cardsHtml;
+    overlay.style.display = 'flex';
+  },
+
+  hideProfileSelectionScreen() {
+    const overlay = document.getElementById('profileSelectionOverlay');
+    if (overlay) overlay.style.display = 'none';
+  },
+
+  selectUserProfile(person) {
+    if (person === 'Joint') {
+      setActiveUser('Joint');
+      this.hideProfileSelectionScreen();
+      renderUserProfileNav();
+      renderContent();
+      return;
+    }
+
+    if (hasPersonPin(person) && !isUserUnlocked(person)) {
+      openPinUnlockModal(person, () => {
+        setActiveUser(person);
+        this.hideProfileSelectionScreen();
+        renderUserProfileNav();
+        renderContent();
+      });
+      return;
+    }
+
+    setActiveUser(person);
+    this.hideProfileSelectionScreen();
+    renderUserProfileNav();
+    renderContent();
+  },
+
   lockAllProfiles() {
     lockAllUsers();
     renderUserProfileNav();
     renderContent();
+    this.showProfileSelectionScreen();
   },
 
   toggleSalaryReveal(person) {
@@ -2794,7 +3144,11 @@ window.budgetApp = {
   async addCurrentAccountInSettings() {
     const name = prompt("Enter current account name:");
     if (name && name.trim()) {
-      getSettings().current_accounts.push(name.trim());
+      const trimmed = name.trim();
+      getSettings().current_accounts.push(trimmed);
+      if (isMultiUserEnabled() && appState.activeUser && appState.activeUser !== 'Joint') {
+        setAccountOwner('current', trimmed, appState.activeUser);
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -2804,15 +3158,19 @@ window.budgetApp = {
   async addCreditAccountInSettings() {
     const name = prompt("Enter credit card name:");
     if (name && name.trim()) {
+      const trimmed = name.trim();
+      const owner = (isMultiUserEnabled() && appState.activeUser && appState.activeUser !== 'Joint') ? appState.activeUser : 'Joint';
       getSettings().credit_accounts.push({
-        name: name.trim(),
+        name: trimmed,
         limit: 0,
+        owner: owner,
         autopay_enabled: false,
         autopay_from: getSettings().current_accounts[0] || "",
         autopay_when: "week_1",
         autopay_type: "full",
         autopay_fixed_amt: 0.00
       });
+      setAccountOwner('credit', trimmed, owner);
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -2822,7 +3180,11 @@ window.budgetApp = {
   async addSavingsAccountInSettings() {
     const name = prompt("Enter savings account name:");
     if (name && name.trim()) {
-      getSettings().savings_accounts.push(name.trim());
+      const trimmed = name.trim();
+      getSettings().savings_accounts.push(trimmed);
+      if (isMultiUserEnabled() && appState.activeUser && appState.activeUser !== 'Joint') {
+        setAccountOwner('savings', trimmed, appState.activeUser);
+      }
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }

@@ -156,7 +156,7 @@ export function renderBillsView(container) {
       </div>
 
       <!-- TABLE -->
-      <div style="overflow-x:auto;">
+      <div class="table-responsive">
         <table class="table" style="width:100%; margin:0;">
           <thead>
             <tr>

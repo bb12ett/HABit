@@ -1,41 +1,30 @@
 <div align="center">
 
-# 💰 HABit — Household Budget Planner
+<img src="logo.png" alt="HABit Logo" width="180" style="margin-bottom: 12px;" />
+
+# HABit — Household Budget Planner
 
 ### *A private, payday-anchored household cashflow and budget manager for Home Assistant*
 
-[![Home Assistant Add-on](https://img.shields.io/badge/Home%20Assistant-Add--on-blue.svg?logo=home-assistant&logoColor=white)](https://www.home-assistant.io/)
-[![Beta Release](https://img.shields.io/badge/version-0.1.0--beta-yellow.svg)](https://github.com/bb12ett/HABit/releases)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Ingress](https://img.shields.io/badge/ingress-supported-success.svg)](#)
-[![Privacy](https://img.shields.io/badge/privacy-100%25%20local-brightgreen.svg)](#)
-[![Architectures](https://img.shields.io/badge/arch-aarch64%20%7C%20amd64%20%7C%20armhf%20%7C%20armv7%20%7C%20i386-orange.svg)](#)
-
-<br/>
-
-[![Open your Home Assistant instance and show the add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badge/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbb12ett%2FHABit)
+[![Open your Home Assistant instance and show the add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbb12ett%2FHABit)
 
 </div>
 
 ---
 
-> [!NOTE]
-> **HABit is currently in Public Beta (`v0.1.0-beta`)**. Feedback, feature suggestions, and bug reports are warmly welcomed on [GitHub Issues](https://github.com/bb12ett/HABit/issues)!
-
----
-
 ## 🌟 Why HABit?
 
-Most traditional budgeting tools force you into rigid 1st-to-31st calendar months. But real life doesn't work that way — **most households budget from payday to payday**.
+Most traditional budgeting apps force you into rigid 1st-to-31st calendar months. But real life doesn't work that way — **most households budget from payday to payday**.
 
-**HABit** is built from the ground up to reflect how you actually manage money:
-- **Anchored to your Payday**: Every monthly cycle starts on the day your salary arrives.
-- **Dynamic 4 or 5-Week Breakdown**: Accurately accounts for varying week counts per pay period with exact date ranges.
-- **Multi-Account Projections**: Tracks Current Accounts, Credit Cards, and Savings/ISAs in real time.
-- **Credit Card Autopay Intelligence**: Automatically computes scheduled card payoffs (full balance or fixed amounts) from your current account in designated weeks.
-- **Bank Holiday Smart Shifts**: Direct debits and recurring bills automatically shift forward or backward when falling on weekends or public holidays (UK England & Wales, UK Scotland, US Federal).
-- **Interactive Financial Calculator**: Press `Alt+C` for a floating on-screen calculator with an interactive **Value Picker** that lets you click any number on your budget to calculate with it!
-- **100% Local & Private**: No cloud accounts, no subscription fees, no bank API scraping, and zero telemetry. All data stays strictly on your Home Assistant machine.
+**HABit** is designed from the ground up to reflect how you actually manage your money:
+- **Anchored to your Payday**: Every budget cycle aligns with your real payday rather than artificial calendar months.
+- **Flexible Pay Frequencies**: Full native support for **Monthly**, **Semi-Monthly** (twice a month), **Bi-Weekly** (every 2 weeks / 26 paychecks), **4-Weekly** (NHS / 28-day cycle / 13 paychecks), and **Weekly** (52 paychecks) schedules.
+- **Household & Multi-User Privacy**: Switch between individual user profiles and joint household views. Protect personal checking accounts and salary figures with a secure 4-digit PIN.
+- **Multi-Account Projections**: Live balance tracking for Current Accounts, Credit Cards, and Savings Pots / ISAs.
+- **Credit Card Auto-Pay Intelligence**: Automatically schedules credit card statement payoffs (full balance or fixed monthly amounts) from your chosen current account in the right week.
+- **Bank Holiday Smart Shifts**: Direct debits and scheduled bills automatically shift forward or backward when falling on weekends or public holidays (UK England & Wales, UK Scotland, US Federal).
+- **Interactive Financial Calculator**: Press `Alt+C` anytime for a floating calculator with an interactive **Value Picker** that lets you click any number on your budget to calculate with it!
+- **100% Local & Private**: No cloud accounts, no subscriptions, no bank connections, and zero tracking. All your financial data stays securely on your Home Assistant system.
 
 ---
 
@@ -43,16 +32,16 @@ Most traditional budgeting tools force you into rigid 1st-to-31st calendar month
 
 | Feature | Description |
 | :--- | :--- |
-| 📅 **Payday Schedules** | Automatically generates monthly cycles anchored to your custom payday day (e.g. the 26th) with dynamic 4/5 week splits. |
-| 💳 **Multi-Account Tracking** | Live tracking of Current Accounts, Credit Cards (with credit limits and autopay rules), and Savings / Investment accounts. |
-| 🧾 **Scheduled Bills & Direct Debits** | Manage recurring monthly and yearly bills with holiday shift rules (Previous/Following working day) and direct transfers to savings accounts. |
-| 🛒 **Weekly Variable Envelopes** | Plan weekly allowances (Groceries, Fuel, Misc, Cash), log actual spends, and move items across weeks with ease. |
-| 🎂 **Birthdays & Occasions** | Dedicated gift planner with per-person budgets, gift notes, and status tracking. |
-| 📊 **Year Overview & Analytics** | Interactive Chart.js charts comparing annual income, fixed commitments, weekly spend, and savings growth. |
-| 🧮 **Built-in Calculator (`Alt+C`)** | Draggable, minimizable calculator featuring parentheses, percentages, history log, and a click-to-pick **Value Picker**. |
-| ⚡ **Speed-Dial Floating Action Button** | Bottom-corner FAB menu for instant balance check-ins, quick expense logging, and birthday purchases. |
-| 🎨 **4 Elegant Themes** | Switch between Dark Charcoal, Navy Dark, Light, and High Contrast themes without reload flashes. |
-| 🛡️ **Zero Ingress Caching Issues** | Strict cache-busting headers, build stamping, and `Clear-Site-Data` ensure your updates always display instantly on mobile and desktop. |
+| 📅 **Payday Schedules** | Automatically builds cashflow cycles anchored to your payday frequency (Monthly, Semi-Monthly, Bi-Weekly, 4-Weekly, or Weekly) with dynamic 4/5-week breakdowns. |
+| 👥 **Multi-User & Privacy PINs** | Manage joint household finances and individual personal accounts. Set security PINs to keep personal accounts and salary details private. |
+| 💳 **Multi-Account Tracking** | Real-time tracking of Current Accounts, Credit Cards (with credit limits and autopay rules), and Savings / Investment accounts. |
+| 🧾 **Scheduled Bills & Inflows** | Manage recurring monthly, yearly, and periodic bills with bank holiday shift rules and automatic savings transfers. |
+| 🛒 **Weekly Living Envelopes** | Plan weekly allowances (Groceries, Fuel, Misc, Cash), log actual spends, and move items across weeks with ease. |
+| 🎂 **Birthdays & Occasions** | Dedicated gift planner with per-person budgets, gift notes, and purchase status tracking. |
+| 📊 **Year Overview & Trends** | Visual charts and summary tables comparing annual income, fixed commitments, weekly spend, and savings growth. |
+| 🧮 **Built-in Calculator (`Alt+C`)** | Draggable, minimizable on-screen calculator featuring calculation history and a click-to-pick **Value Picker**. |
+| ⚡ **Speed-Dial Action Button** | Bottom-corner quick action button for instant balance check-ins, quick expense logging, and birthday purchases. |
+| 🎨 **4 Visual Themes** | Choose between Dark Charcoal, Navy Dark, Clean Light, and High Contrast modes. |
 
 ---
 
@@ -61,10 +50,10 @@ Most traditional budgeting tools force you into rigid 1st-to-31st calendar month
 ### Option 1: 1-Click Install via "My Home Assistant" (Recommended)
 Click the button below to add this repository directly to your Home Assistant instance:
 
-[![Add Repository to My Home Assistant](https://my.home-assistant.io/badge/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbb12ett%2FHABit)
+[![Open your Home Assistant instance and show the add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbb12ett%2FHABit)
 
 ### Option 2: Manual Installation via Add-on Store
-1. Open your Home Assistant dashboard.
+1. Open your **Home Assistant** dashboard.
 2. Go to **Settings** > **Add-ons** > **Add-on Store**.
 3. Click the three vertical dots (**⋮**) in the top-right corner and select **Repositories**.
 4. Paste the repository URL into the field:
@@ -80,77 +69,42 @@ Click the button below to add this repository directly to your Home Assistant in
 
 ## 🧙 First-Time Setup Wizard
 
-When you open HABit for the first time, a 5-step setup wizard will guide you through:
-1. **Appearance & Regional Settings**: Choose your theme, currency symbol (`£`, `$`, `€`, etc.), payday date, and bank holiday calendar.
-2. **Household & Accounts**: Add household members, current accounts, credit cards, and savings pots.
-3. **Monthly Direct Debits**: Add regular monthly commitments (Rent, Utilities, Council Tax, Subscriptions).
-4. **Annual / Yearly Bills**: Add recurring annual bills (Insurance, TV licence, Subscriptions).
-5. **Weekly Allowances**: Set baseline living budgets for food, fuel, and discretionary spending.
+When you open HABit for the first time, a guided setup wizard will walk you through your budget in 5 simple steps:
+1. **Appearance & Regional Settings**: Choose your visual theme, currency symbol (`£`, `$`, `€`, etc.), payday frequency, and bank holiday calendar.
+2. **Household & Accounts**: Add household members, checking accounts, credit cards, and savings pots.
+3. **Monthly Direct Debits**: Add regular monthly commitments (Mortgage/Rent, Utilities, Council Tax, Subscriptions).
+4. **Annual & Periodic Bills**: Add bills that occur once or twice a year (Car Insurance, TV Licence, Subscriptions) and assign them to specific months.
+5. **Weekly Living Allowances**: Set baseline living budgets for groceries, transport, fuel, and discretionary spending.
 
-You can relaunch the setup wizard anytime or adjust individual settings in **Settings (☰)**.
+You can relaunch the setup wizard at any time or adjust settings directly from **Settings (☰)**.
 
 ---
 
 ## 🧮 Interactive Calculator & Value Picker
 
 HABit includes an integrated financial calculator designed for budgeting workflows:
-- **Shortcut**: Press **`Alt + C`** anywhere to toggle the calculator.
-- **Value Picker Mode**: Click **"Pick Value"** in the calculator header, then click any budget figure on the screen. The number will be instantly typed into the calculator!
-- **Calculation History**: Review past expressions and re-use results with a single click.
-- **Minimize to Badge**: Minimize the calculator to keep it ready while scrolling through weeks.
+- **Shortcut**: Press **`Alt + C`** anywhere to open the calculator.
+- **Value Picker Mode**: Click **"Pick Value"** in the calculator header, then click any budget figure on your screen to instantly input that number into your calculation!
+- **Calculation History**: Review past calculations and re-use results with a single click.
+- **Minimize to Badge**: Minimize the calculator to a discreet floating badge while you scroll and navigate through weeks.
 
 ---
 
-## 🔒 Privacy & Data Storage
+## 🔒 Privacy & Data Backups
 
-- **Storage Location**: All configuration, account data, and budget history are saved to `/data/budget.json` inside the add-on container.
-- **Persistent & Isolated**: The `/data` partition is managed by Home Assistant Supervisor and persists across add-on updates, container rebuilds, and system reboots.
-- **Manual Backups**: You can export a standalone `.json` backup file anytime via **Settings (☰) > Export Data**, or restore an existing one with **Import Data**.
-- **Home Assistant Backups**: Full and partial Home Assistant supervisor backups automatically include all your HABit data.
-
----
-
-## 🛠️ Architecture & Tech Stack
-
-- **Backend**: Python 3.11, Flask, RESTful JSON API
-- **Frontend**: Vanilla JavaScript (ES6+ modular architecture), CSS Grid & Flexbox, Chart.js
-- **Container**: Lightweight Alpine Linux container with multi-arch support (`aarch64`, `amd64`, `armhf`, `armv7`, `i386`)
-- **Integration**: Native Home Assistant Ingress with sidebar panel support
+- **100% Local**: All budget information, accounts, and history stay strictly on your local Home Assistant system.
+- **Persistent Storage**: All data persists automatically across add-on updates and system reboots.
+- **Manual Backups**: Export a standalone `.json` backup file anytime via **Settings (☰) > Export Data**, or restore an existing backup with **Import Data**.
+- **Home Assistant Backups**: Standard Home Assistant backups (full or partial) automatically protect and backup all your HABit data.
 
 ---
 
-## 💻 Local Development / Standalone Execution
+## 🤝 Feedback & Support
 
-You can also run HABit locally outside of Home Assistant for development:
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/bb12ett/HABit.git
-cd HABit
-
-# 2. Install dependencies
-pip install flask
-
-# 3. Start the application
-python app.py
-
-# 4. Open in browser
-# http://localhost:8099
-```
+Questions, feature suggestions, or bug reports?
+- Open an issue on our [GitHub Issues](https://github.com/bb12ett/HABit/issues) page.
 
 ---
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome!
-- Feel free to check the [issues page](https://github.com/bb12ett/HABit/issues).
-- Fork the repository, create your feature branch (`git checkout -b feature/amazing-feature`), and submit a Pull Request.
-
----
-
-## 📄 License
-
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for more information.
 
 <div align="center">
   <sub>Built with ❤️ for the Home Assistant Community by bb12ett</sub>

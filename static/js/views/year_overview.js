@@ -144,7 +144,7 @@ export function renderYearOverviewView(container) {
           <h3 style="margin:0;">📈 Savings Accounts: Planned Target vs. Actual Growth</h3>
           <span style="font-size:11px; color:var(--purple); font-weight:600;">Planned Cashflow Tracking</span>
         </div>
-        <div style="overflow-x:auto;">
+        <div class="table-responsive">
           <table class="table">
             <thead>
               <tr>
@@ -184,7 +184,7 @@ export function renderYearOverviewView(container) {
 
     <div class="panel">
       <h3>📅 12-Month Financial Summary</h3>
-      <div style="overflow-x:auto;">
+      <div class="table-responsive">
         <table class="table">
           <thead>
             <tr>

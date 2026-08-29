@@ -18,15 +18,46 @@
       justify-content: space-between !important;
       align-items: center !important;
       width: 100% !important;
-      gap: 8px !important;
-      padding: 4px 0 !important;
+      gap: 10px !important;
+      padding: 6px 0 !important;
       box-sizing: border-box !important;
+      flex-wrap: nowrap !important;
     }
     .top-nav-left {
       display: flex !important;
       align-items: center !important;
-      gap: 8px !important;
-      flex: 0 0 auto !important;
+      gap: 10px !important;
+      flex: 1 1 auto !important;
+      min-width: 0 !important;
+      overflow: hidden !important;
+    }
+    .logo {
+      display: flex !important;
+      align-items: center !important;
+      gap: 10px !important;
+      min-width: 0 !important;
+      overflow: hidden !important;
+      flex: 1 1 auto !important;
+    }
+    .topbar-logo-img {
+      height: 38px !important;
+      width: auto !important;
+      max-width: 48px !important;
+      object-fit: contain !important;
+      border-radius: 6px !important;
+      vertical-align: middle !important;
+      flex-shrink: 0 !important;
+    }
+    #topBarMonthTitle {
+      font-size: 20px !important;
+      font-weight: 800 !important;
+      color: var(--heading, #f8fafc) !important;
+      white-space: nowrap !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      min-width: 0 !important;
+      letter-spacing: -0.3px !important;
+      line-height: 1.2 !important;
     }
     .top-nav-right {
       display: flex !important;
@@ -34,6 +65,8 @@
       gap: 6px !important;
       flex: 0 0 auto !important;
       margin-left: auto !important;
+      flex-wrap: nowrap !important;
+      flex-shrink: 0 !important;
     }
     .payday-meta-bar {
       display: flex !important;
@@ -58,27 +91,80 @@
       white-space: nowrap !important;
       flex-shrink: 0 !important;
     }
+    .badge {
+      display: inline-flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      gap: 4px !important;
+      padding: 3px 8px !important;
+      border-radius: 6px !important;
+      white-space: nowrap !important;
+      line-height: 1.2 !important;
+      box-sizing: border-box !important;
+      vertical-align: middle !important;
+      flex-shrink: 0 !important;
+    }
     @media (max-width: 600px) {
+      .top-nav-bar {
+        gap: 6px !important;
+        padding: 4px 0 !important;
+      }
+      .top-nav-left {
+        gap: 8px !important;
+        flex: 1 1 auto !important;
+        min-width: 0 !important;
+        max-width: none !important;
+        overflow: hidden !important;
+      }
+      .logo {
+        gap: 8px !important;
+      }
+      .topbar-logo-img {
+        height: 32px !important;
+        width: auto !important;
+        max-width: 42px !important;
+        flex-shrink: 0 !important;
+      }
+      #topBarMonthTitle {
+        font-size: 18px !important;
+        font-weight: 800 !important;
+        color: var(--heading, #f8fafc) !important;
+        max-width: none !important;
+        letter-spacing: -0.2px !important;
+        line-height: 1.2 !important;
+      }
       .top-nav-bar .btn-text,
       .top-nav-right .btn-text,
       .payday-meta-bar .btn-text {
         display: none !important;
       }
+      .top-nav-right {
+        gap: 4px !important;
+        flex-shrink: 0 !important;
+        flex: 0 0 auto !important;
+        margin-left: auto !important;
+      }
       .top-nav-bar .btn,
       .top-nav-right .btn {
-        padding: 6px 10px !important;
-        font-size: 15px !important;
-        min-width: 38px !important;
-        min-height: 34px !important;
+        padding: 4px !important;
+        font-size: 14px !important;
+        width: 32px !important;
+        min-width: 32px !important;
+        max-width: 32px !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        max-height: 32px !important;
         justify-content: center !important;
         display: inline-flex !important;
         align-items: center !important;
+        flex-shrink: 0 !important;
+        border-radius: 6px !important;
       }
       .payday-meta-bar .btn {
-        padding: 4px 8px !important;
-        font-size: 14px !important;
-        min-width: 34px !important;
-        min-height: 30px !important;
+        padding: 3px 6px !important;
+        font-size: 12px !important;
+        min-width: 28px !important;
+        min-height: 26px !important;
         justify-content: center !important;
         display: inline-flex !important;
         align-items: center !important;
@@ -594,22 +680,44 @@
 
   <!-- ONBOARDING WIZARD MODAL -->
   <div id="onboardingWizard" class="modal-overlay" style="display:none;">
-    <div class="modal-box" style="max-width:650px; position:relative;">
-      <button class="modal-close-btn" onclick="window.budgetApp.closeOnboarding()" title="Close Wizard" style="position:absolute; top:14px; right:14px; z-index:10; font-size:20px; cursor:pointer;">&times;</button>
+    <div class="modal-box" style="max-width:680px; width:100%;">
       
+      <!-- MODAL HEADER -->
+      <div class="modal-title" style="margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">🪄</span>
+          <h3 style="margin:0; font-size:16px;">Initial Setup Wizard</h3>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator" style="padding:2px 8px; font-size:12px; height:28px; min-height:28px; display:inline-flex; align-items:center; gap:4px;">
+            <span>🧮</span> <span class="btn-text" style="font-size:11px;">Calculator</span>
+          </button>
+          <button class="modal-close-btn" onclick="window.budgetApp.closeOnboarding()" title="Close Wizard">&times;</button>
+        </div>
+      </div>
+
+      <!-- STEP PROGRESS PILLS -->
+      <div class="wizard-progress-bar" id="obProgressBar">
+        <div class="wizard-step-pill active" id="obStepPill1" onclick="window.budgetApp.nextObStep(1)">1. Preferences</div>
+        <div class="wizard-step-pill" id="obStepPill2" onclick="window.budgetApp.nextObStep(2)">2. Accounts</div>
+        <div class="wizard-step-pill" id="obStepPill3" onclick="window.budgetApp.nextObStep(3)">3. Deductions</div>
+        <div class="wizard-step-pill" id="obStepPill4" onclick="window.budgetApp.nextObStep(4)">4. Bills</div>
+        <div class="wizard-step-pill" id="obStepPill5" onclick="window.budgetApp.nextObStep(5)">5. Baselines</div>
+      </div>
+
       <!-- STEP 1: PREFERENCES -->
       <div id="obStep1" class="wizard-step">
-        <h2 style="color:var(--heading); font-size:18px;">&#128075; Welcome to Household Budget Planner</h2>
-        <p style="color:var(--text-muted); font-size:12px; margin:4px 0 16px 0;">Customize your regional preferences and visual appearance.</p>
+        <h3 style="color:var(--heading); font-size:16px; margin-bottom:4px;">⚙️ Step 1: Regional & Payday Preferences</h3>
+        <p style="color:var(--text-muted); font-size:12px; margin:0 0 14px 0;">Customize your appearance, currency, and household pay schedule.</p>
         
-        <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap:12px;">
           <div>
             <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Appearance Theme</label>
             <select id="ob-theme" onchange="window.budgetApp.changeTheme(this.value)" style="width:100%; margin-top:4px;">
-              <option value="grey_dark">&#127770; Dark Mode (Charcoal)</option>
-              <option value="navy_dark">&#127769; Navy Dark Mode (Deep Blue)</option>
-              <option value="light">&#9728;&#65039; Light Mode</option>
-              <option value="contrast">&#11035; High Contrast</option>
+              <option value="grey_dark">🌑 Dark Mode (Charcoal)</option>
+              <option value="navy_dark">🌙 Navy Dark Mode (Deep Blue)</option>
+              <option value="light">☀️ Light Mode</option>
+              <option value="contrast">⬛ High Contrast</option>
             </select>
           </div>
           <div>
@@ -617,9 +725,22 @@
             <input type="text" id="ob-curr" value="&pound;" maxlength="4" style="width:100%; margin-top:4px;">
           </div>
           <div>
-            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Payday Day of Month</label>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Pay Frequency</label>
+            <select id="ob-payfreq" onchange="window.budgetApp.onObPayFrequencyChange(this.value)" style="width:100%; margin-top:4px;">
+              <option value="monthly">📅 Monthly (Once per Month)</option>
+              <option value="semi_monthly">🗓️ Semi-Monthly (Twice per Month)</option>
+              <option value="biweekly">🔄 Bi-Weekly (Every 2 Weeks / 26 Paychecks)</option>
+              <option value="four_weekly">🏥 4-Weekly (NHS / 28 Days)</option>
+              <option value="weekly">⚡ Weekly (52 Paychecks)</option>
+            </select>
+          </div>
+          <div id="ob-pday-monthly-box">
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Payday Day of Month (1-31)</label>
             <input type="number" id="ob-pday" value="26" min="1" max="31" style="width:100%; margin-top:4px;">
-            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Weekly schedules anchor to this day or the closest working Monday.</div>
+          </div>
+          <div id="ob-pday-biweekly-box" style="display:none;">
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Anchor Payday Date</label>
+            <input type="date" id="ob-pday-anchor" value="2026-01-09" style="width:100%; margin-top:4px;">
           </div>
           <div>
             <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Bank Holiday Region</label>
@@ -630,19 +751,22 @@
               <option value="none">None (Weekends Only)</option>
             </select>
           </div>
-          <div style="margin-top:6px;">
-            <label style="font-size:12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:6px;">
-              <input type="checkbox" id="ob-tracksavings" checked> Enable Savings Accounts & Portfolio Tracking
+        </div>
+
+        <div style="margin-top:14px; display:flex; flex-direction:column; gap:8px;">
+          <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px;">
+            <label style="font-size:12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="ob-tracksavings" checked> 📈 Enable Savings Accounts & Portfolio Tracking
             </label>
           </div>
-          <div style="margin-top:2px;">
-            <label style="font-size:12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:6px; color:var(--curr-border);">
-              <input type="checkbox" id="ob-multiusers"> 👥 Enable Multi-User Mode (Track personal accounts & salary privacy)
+          <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px;">
+            <label style="font-size:12px; cursor:pointer; font-weight:600; display:flex; align-items:center; gap:8px; color:var(--curr-border);">
+              <input type="checkbox" id="ob-multiusers"> 👥 Enable Multi-User Mode (Track personal accounts & PIN privacy)
             </label>
           </div>
         </div>
 
-        <div style="margin-top:24px; display:flex; justify-content:space-between; align-items:center;">
+        <div style="margin-top:24px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
           <button class="btn secondary" onclick="window.budgetApp.closeOnboarding()">Skip / Close</button>
           <button id="obNext1" class="btn green" onclick="window.budgetApp.nextObStep(2)">Next: Household & Accounts &#10140;</button>
         </div>
@@ -650,24 +774,34 @@
 
       <!-- STEP 2: HOUSEHOLD & ACCOUNTS -->
       <div id="obStep2" class="wizard-step" style="display:none;">
-        <h3 style="color:var(--heading);">Step 2: Household & Accounts</h3>
-        <h4 style="margin:16px 0 6px 0; color:var(--text);">Household Members</h4>
-        <div id="obPeopleList" style="display:flex; flex-direction:column; gap:6px;"></div>
-        <button id="obAddPersonBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddPerson()">+ Add Household Member</button>
+        <h3 style="color:var(--heading); font-size:16px; margin-bottom:4px;">👥 Step 2: Household Members & Accounts</h3>
+        <p style="color:var(--text-muted); font-size:12px; margin:0 0 14px 0;">Define who is in the household and what bank accounts are tracked.</p>
+        
+        <div class="wizard-section-card">
+          <h4>👥 Household Members</h4>
+          <div id="obPeopleList" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button id="obAddPersonBtn" class="btn secondary" style="font-size:11px; margin-top:8px;" onclick="window.budgetApp.obAddPerson()">+ Add Member</button>
+        </div>
 
-        <h4 style="margin:16px 0 6px 0; color:var(--curr-border);">Current Accounts</h4>
-        <div id="obCurrentList" style="display:flex; flex-direction:column; gap:6px;"></div>
-        <button id="obAddCurrentBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddCurrent()">+ Add Current Account</button>
+        <div class="wizard-section-card">
+          <h4 style="color:var(--curr-border);">🏦 Current Accounts</h4>
+          <div id="obCurrentList" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button id="obAddCurrentBtn" class="btn secondary" style="font-size:11px; margin-top:8px;" onclick="window.budgetApp.obAddCurrent()">+ Add Current Account</button>
+        </div>
 
-        <h4 style="margin:16px 0 6px 0; color:var(--purple);">Savings Accounts</h4>
-        <div id="obSavingsList" style="display:flex; flex-direction:column; gap:6px;"></div>
-        <button id="obAddSavingsBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddSavings()">+ Add Savings Account</button>
+        <div class="wizard-section-card">
+          <h4 style="color:var(--purple);">📈 Savings Accounts</h4>
+          <div id="obSavingsList" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button id="obAddSavingsBtn" class="btn secondary" style="font-size:11px; margin-top:8px;" onclick="window.budgetApp.obAddSavings()">+ Add Savings Account</button>
+        </div>
 
-        <h4 style="margin:16px 0 6px 0; color:var(--amber);">Credit Cards</h4>
-        <div id="obCreditList" style="display:flex; flex-direction:column; gap:6px;"></div>
-        <button id="obAddCreditBtn" class="btn secondary" style="margin-top:6px;" onclick="window.budgetApp.obAddCredit()">+ Add Credit Card</button>
+        <div class="wizard-section-card">
+          <h4 style="color:var(--amber);">💳 Credit Cards</h4>
+          <div id="obCreditList" style="display:flex; flex-direction:column; gap:6px;"></div>
+          <button id="obAddCreditBtn" class="btn secondary" style="font-size:11px; margin-top:8px;" onclick="window.budgetApp.obAddCredit()">+ Add Credit Card</button>
+        </div>
 
-        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+        <div style="margin-top:24px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
           <button id="obBack2" class="btn secondary" onclick="window.budgetApp.nextObStep(1)">&#11013; Back</button>
           <button id="obNext2" class="btn green" onclick="window.budgetApp.nextObStep(3)">Next: Salaries & Deductions &#10140;</button>
         </div>
@@ -675,23 +809,29 @@
 
       <!-- STEP 3: SALARIES & DEDUCTIONS -->
       <div id="obStep3" class="wizard-step" style="display:none;">
-        <h3 style="color:var(--heading);">Step 3: Salaries & Deductions</h3>
-        <p style="color:var(--text-muted); font-size:12px;">Add salaries and personal deductions (e.g. individual phone bills). Assign amounts per person and select transfer destinations.</p>
+        <h3 style="color:var(--heading); font-size:16px; margin-bottom:4px;">💰 Step 3: Salaries & Deductions</h3>
+        <p style="color:var(--text-muted); font-size:12px; margin:0 0 14px 0;">Add baseline salaries and personal deductions with designated destination accounts.</p>
         
-        <div id="obDeductList" style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto; margin-bottom:8px;"></div>
-        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
-          <div style="display:flex; gap:4px; margin-bottom:4px;">
-            <input type="text" id="ob-deduct-name" placeholder="Item Name (e.g. Salary, Phone Bill)" style="flex:1;">
-            <select id="ob-deduct-target" title="Transfer Destination" style="width:140px;"></select>
-          </div>
-          <div id="obDeductPeopleInputs" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(100px, 1fr)); gap:4px;"></div>
-          <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
-            <label style="font-size:12px; cursor:pointer; color:var(--green); font-weight:bold;"><input type="checkbox" id="ob-deduct-issalary" checked> Is Salary / Income?</label>
-            <button id="obAddDeductBtn" class="btn green" onclick="window.budgetApp.obAddDeduction()">+ Add Item</button>
+        <div class="wizard-section-card">
+          <h4>Active Salaries & Deductions</h4>
+          <div id="obDeductList" style="display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; margin-bottom:8px;"></div>
+          
+          <div style="background:var(--card-bg); padding:12px; border-radius:8px; border:1px dashed var(--border); margin-top:8px;">
+            <div style="display:flex; gap:8px; margin-bottom:8px; flex-wrap:wrap;">
+              <input type="text" id="ob-deduct-name" placeholder="Item Name (e.g. Main Salary, Phone Bill)" style="flex:1; min-width:140px;">
+              <select id="ob-deduct-target" title="Transfer Destination" style="width:140px;"></select>
+            </div>
+            <div id="obDeductPeopleInputs" style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 110px), 1fr)); gap:6px; margin-bottom:8px;"></div>
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+              <label style="font-size:12px; cursor:pointer; color:var(--green); font-weight:bold; display:inline-flex; align-items:center; gap:4px;">
+                <input type="checkbox" id="ob-deduct-issalary" checked> Is Salary / Income
+              </label>
+              <button id="obAddDeductBtn" class="btn green" onclick="window.budgetApp.obAddDeduction()">+ Add Item</button>
+            </div>
           </div>
         </div>
 
-        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+        <div style="margin-top:24px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
           <button id="obBack3" class="btn secondary" onclick="window.budgetApp.nextObStep(2)">&#11013; Back</button>
           <button id="obNext3" class="btn green" onclick="window.budgetApp.nextObStep(4)">Next: Scheduled Bills &#10140;</button>
         </div>
@@ -699,45 +839,77 @@
 
       <!-- STEP 4: SCHEDULED BILLS -->
       <div id="obStep4" class="wizard-step" style="display:none;">
-        <h3 style="color:var(--heading);">Step 4: Scheduled Bills</h3>
-        <p style="color:var(--text-muted); font-size:12px;">Add your monthly Direct Debits and annual recurring bills.</p>
+        <h3 style="color:var(--heading); font-size:16px; margin-bottom:4px;">📅 Step 4: Scheduled Recurring Bills</h3>
+        <p style="color:var(--text-muted); font-size:12px; margin:0 0 14px 0;">Add your standard monthly direct debits and annual recurring bills.</p>
         
-        <h4 style="margin:16px 0 6px 0; color:var(--curr-border);">Monthly Direct Debits</h4>
-        <div id="obDDList" style="display:flex; flex-direction:column; gap:6px; max-height:150px; overflow-y:auto;"></div>
-        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
-          <div style="display:grid; grid-template-columns:1fr 60px 80px; gap:4px; margin-bottom:4px;">
-            <input type="text" id="ob-dd-desc" placeholder="Bill Description">
-            <input type="number" id="ob-dd-day" placeholder="Day (1-31)">
-            <input type="number" step="0.01" id="ob-dd-amt" placeholder="Amount">
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 1fr 40px; gap:4px;">
-            <select id="ob-dd-acc" title="Paid From Account"></select>
-            <select id="ob-dd-transfer" title="Transfer Destination"></select>
-            <button id="obAddDDBtn" class="btn green" onclick="window.budgetApp.obAddDD()">+</button>
-          </div>
-        </div>
-
-        <h4 style="margin:24px 0 6px 0; color:var(--amber);">Annual Recurring Bills</h4>
-        <div id="obYearlyList" style="display:flex; flex-direction:column; gap:6px; max-height:120px; overflow-y:auto;"></div>
-        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
-          <div style="display:grid; grid-template-columns:1fr 70px 60px 80px; gap:4px; margin-bottom:4px;">
-            <input type="text" id="ob-yb-desc" placeholder="Bill Description">
-            <select id="ob-yb-m">
-              <option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option>
-              <option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option>
-              <option value="Jul">Jul</option><option value="Aug">Aug</option><option value="Sep">Sep</option>
-              <option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option>
-            </select>
-            <input type="number" id="ob-yb-day" placeholder="Day">
-            <input type="number" step="0.01" id="ob-yb-amt" placeholder="Amount">
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 40px; gap:4px;">
-            <select id="ob-yb-acc" title="Paid From Account"></select>
-            <button id="obAddYearlyBtn" class="btn green" onclick="window.budgetApp.obAddYearly()">+</button>
+        <div class="wizard-section-card">
+          <h4 style="color:var(--curr-border);">Monthly Direct Debits</h4>
+          <div id="obDDList" style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto; margin-bottom:10px;"></div>
+          
+          <div style="background:var(--card-bg); padding:12px; border-radius:8px; border:1px dashed var(--border);">
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+              <div>
+                <input type="text" id="ob-dd-desc" placeholder="Bill Description (e.g. Council Tax, Energy)" style="width:100%;">
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:110px;">
+                  <input type="number" id="ob-dd-day" placeholder="Due Day (1-31)" min="1" max="31" style="width:100%;">
+                </div>
+                <div style="flex:1; min-width:110px;">
+                  <input type="number" step="0.01" id="ob-dd-amt" placeholder="Amount (£)" style="width:100%;">
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:130px;">
+                  <select id="ob-dd-acc" title="Paid From Account" style="width:100%;"></select>
+                </div>
+                <div style="flex:1; min-width:130px;">
+                  <select id="ob-dd-transfer" title="Transfer Destination" style="width:100%;"></select>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button id="obAddDDBtn" class="btn green" onclick="window.budgetApp.obAddDD()" style="padding:6px 14px;">+ Add Direct Debit</button>
+            </div>
           </div>
         </div>
 
-        <div style="margin-top:24px; display:flex; justify-content:space-between;">
+        <div class="wizard-section-card">
+          <h4 style="color:var(--amber);">Annual Recurring Bills</h4>
+          <div id="obYearlyList" style="display:flex; flex-direction:column; gap:4px; max-height:140px; overflow-y:auto; margin-bottom:10px;"></div>
+          
+          <div style="background:var(--card-bg); padding:12px; border-radius:8px; border:1px dashed var(--border);">
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+              <div>
+                <input type="text" id="ob-yb-desc" placeholder="Bill Description (e.g. Car Insurance, TV License)" style="width:100%;">
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:100px;">
+                  <select id="ob-yb-m" style="width:100%;">
+                    <option value="Jan">Jan</option><option value="Feb">Feb</option><option value="Mar">Mar</option>
+                    <option value="Apr">Apr</option><option value="May">May</option><option value="Jun">Jun</option>
+                    <option value="Jul">Jul</option><option value="Aug">Aug</option><option value="Sep">Sep</option>
+                    <option value="Oct">Oct</option><option value="Nov">Nov</option><option value="Dec">Dec</option>
+                  </select>
+                </div>
+                <div style="flex:1; min-width:90px;">
+                  <input type="number" id="ob-yb-day" placeholder="Day (1-31)" min="1" max="31" style="width:100%;">
+                </div>
+                <div style="flex:1; min-width:100px;">
+                  <input type="number" step="0.01" id="ob-yb-amt" placeholder="Amount (£)" style="width:100%;">
+                </div>
+              </div>
+              <div>
+                <select id="ob-yb-acc" title="Paid From Account" style="width:100%;"></select>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button id="obAddYearlyBtn" class="btn green" onclick="window.budgetApp.obAddYearly()" style="padding:6px 14px;">+ Add Annual Bill</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:24px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
           <button id="obBack4" class="btn secondary" onclick="window.budgetApp.nextObStep(3)">&#11013; Back</button>
           <button id="obNext4" class="btn green" onclick="window.budgetApp.nextObStep(5)">Next: Weekly Expense Baselines &#10140;</button>
         </div>
@@ -745,23 +917,44 @@
 
       <!-- STEP 5: WEEKLY EXPENSE BASELINES -->
       <div id="obStep5" class="wizard-step" style="display:none;">
-        <h3 style="color:var(--heading);">Step 5: Weekly Expense Baselines</h3>
-        <p style="color:var(--text-muted); font-size:12px;">Set up default weekly allowances (e.g. Groceries, Fuel) that populate automatically every week.</p>
+        <h3 style="color:var(--heading); font-size:16px; margin-bottom:4px;">⚡ Step 5: Weekly Expense Baselines</h3>
+        <p style="color:var(--text-muted); font-size:12px; margin:0 0 14px 0;">Set up default weekly allowances (e.g. Groceries, Fuel) that automatically populate every week.</p>
         
-        <div id="obWeeklyList" style="display:flex; flex-direction:column; gap:6px; max-height:200px; overflow-y:auto;"></div>
-        <div style="background:rgba(0,0,0,0.15); padding:10px; border-radius:6px; margin-top:8px; border:1px dashed var(--border);">
-          <div style="display:grid; grid-template-columns:85px 1fr 80px; gap:4px; margin-bottom:4px;">
-            <select id="ob-wk-type"><option value="expense">- Expense</option><option value="income">+ Income</option></select>
-            <input type="text" id="ob-wk-desc" placeholder="Category (e.g. Food / Groceries)">
-            <input type="number" step="0.01" id="ob-wk-amt" placeholder="Amount">
-          </div>
-          <div style="display:grid; grid-template-columns:1fr 40px; gap:4px;">
-            <select id="ob-wk-acc" title="Account"></select>
-            <button id="obAddWeeklyBtn" class="btn green" onclick="window.budgetApp.obAddWeekly()">+</button>
+        <div class="wizard-section-card">
+          <h4>Active Weekly Allowances</h4>
+          <div id="obWeeklyList" style="display:flex; flex-direction:column; gap:4px; max-height:160px; overflow-y:auto; margin-bottom:10px;"></div>
+          
+          <div style="background:var(--card-bg); padding:12px; border-radius:8px; border:1px dashed var(--border);">
+            <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:10px;">
+              <!-- Row 1: Type & Description -->
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:140px;">
+                  <select id="ob-wk-type" style="width:100%;">
+                    <option value="expense">- Expense Allowance</option>
+                    <option value="income">+ Weekly Income</option>
+                  </select>
+                </div>
+                <div style="flex:2; min-width:160px;">
+                  <input type="text" id="ob-wk-desc" placeholder="Category (e.g. Food / Groceries)" style="width:100%;">
+                </div>
+              </div>
+              <!-- Row 2: Amount & Account -->
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <div style="flex:1; min-width:110px;">
+                  <input type="number" step="0.01" id="ob-wk-amt" placeholder="Amount (£)" style="width:100%;">
+                </div>
+                <div style="flex:2; min-width:140px;">
+                  <select id="ob-wk-acc" title="Account" style="width:100%;"></select>
+                </div>
+              </div>
+            </div>
+            <div style="display:flex; justify-content:flex-end;">
+              <button id="obAddWeeklyBtn" class="btn green" onclick="window.budgetApp.obAddWeekly()" style="padding:6px 14px;">+ Add Weekly Baseline</button>
+            </div>
           </div>
         </div>
 
-        <div style="margin-top:32px; display:flex; justify-content:space-between;">
+        <div style="margin-top:24px; padding-top:14px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
           <button id="obBack5" class="btn secondary" onclick="window.budgetApp.nextObStep(4)">&#11013; Back</button>
           <button id="obFinishBtn" class="btn green" onclick="window.budgetApp.obFinish()">Complete Setup &#127881;</button>
         </div>
@@ -775,7 +968,12 @@
     <div class="modal-box">
       <div class="modal-title">
         <h3 id="modalTitle">Modal</h3>
-        <button id="modalCloseBtn" class="modal-close-btn">&times;</button>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button id="modalCalculatorBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator" style="padding:2px 8px; font-size:12px; height:28px; min-height:28px; display:inline-flex; align-items:center; gap:4px;">
+            <span style="font-size:14px;">🧮</span> <span class="btn-text" style="font-size:11px;">Calculator</span>
+          </button>
+          <button id="modalCloseBtn" class="modal-close-btn">&times;</button>
+        </div>
       </div>
       <div id="modalBody" class="modal-body"></div>
       <div id="modalActions" class="modal-actions"></div>
@@ -923,6 +1121,26 @@
 
         <button class="calc-btn calc-btn-num calc-btn-zero" onclick="window.budgetApp.calcInputDigit(0)">0</button>
         <button class="calc-btn calc-btn-num" onclick="window.budgetApp.calcInputDecimal()">.</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- USER PROFILE SELECTION SCREEN -->
+  <div id="profileSelectionOverlay" class="profile-selection-overlay" style="display:none;">
+    <div class="profile-selection-content">
+      <div class="profile-selection-header">
+        <h1 class="profile-selection-title">Who's budgeting?</h1>
+        <p class="profile-selection-subtitle">Select your profile to view your personal accounts and budget</p>
+      </div>
+
+      <div id="profileAvatarGrid" class="profile-avatar-grid">
+        <!-- Avatars rendered dynamically by JS -->
+      </div>
+
+      <div class="profile-selection-actions">
+        <button class="btn secondary profile-guest-btn" onclick="window.budgetApp.selectUserProfile('Joint')">
+          👥 Continue as Joint / Household
+        </button>
       </div>
     </div>
   </div>

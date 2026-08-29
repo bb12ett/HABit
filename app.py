@@ -25,7 +25,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.1.0")
+    return os.environ.get("APP_VERSION", "0.1.1")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -50,7 +50,13 @@ DEFAULT_SETTINGS = {
     "currency": "\u00a3",
     "theme": "grey_dark",
     "country_holidays": "uk_ew",
+    "pay_frequency": "monthly",
     "payday_day": 26,
+    "payday_weekday": 5,
+    "payday_anchor_date": "2026-01-09",
+    "payday_first_day": 15,
+    "payday_second_day": "last_day",
+    "payday_is_last_working_day": False,
     "track_savings": True,
     "enable_yearly_budgets": True,
     "enable_multi_user": False,

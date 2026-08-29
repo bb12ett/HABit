@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser } from '../state.js';
 import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -10,11 +10,15 @@ export function showModal(opts) {
   const title = document.getElementById('modalTitle');
   const body = document.getElementById('modalBody');
   const actions = document.getElementById('modalActions');
+  const calcBtn = document.getElementById('modalCalculatorBtn');
   if (!modal || !title || !body || !actions) return;
 
   title.innerText = opts.title || 'Modal';
   body.innerHTML = opts.body || '';
   actions.innerHTML = opts.actions || `<button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`;
+  if (calcBtn) {
+    calcBtn.style.display = opts.hideCalc ? 'none' : 'inline-flex';
+  }
   modal.style.display = 'flex';
 }
 
@@ -22,6 +26,10 @@ export function closeModal() {
   const modal = document.getElementById('genericModal');
   if (modal) modal.style.display = 'none';
   window.pendingModalAction = null;
+  if (window._pinKeydownHandler) {
+    window.removeEventListener('keydown', window._pinKeydownHandler);
+    window._pinKeydownHandler = null;
+  }
 }
 
 export function openDateOverrideModal(mName, onComplete) {
@@ -239,6 +247,8 @@ export function openAccountTrackingModal() {
   const curr = cfg.currency;
   const activeTab = appState.activeTab;
   const mData = getMonthData(activeTab);
+  const isMulti = isMultiUserEnabled();
+  const activeUser = appState.activeUser || 'Joint';
 
   showModal({
     title: `⚙️ Accounts & Tracking Setup (${activeTab})`,
@@ -253,11 +263,11 @@ export function openAccountTrackingModal() {
           <h5 style="color:var(--curr-border); margin:0 0 10px 0; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">🏦 Current Accounts</h5>
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${cfg.current_accounts.map((a, idx) => {
+              if (!isAccountVisibleToActiveUser('current', a)) return '';
               const conf = getAccountConfig('current', a);
               const isEdited = mData.current_data[a] && mData.current_data[a].user_edited;
               const bal = (mData.current_data[a] && mData.current_data[a].opening !== undefined) ? mData.current_data[a].opening : '';
               const owner = getAccountOwner('current', a);
-              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -281,7 +291,9 @@ export function openAccountTrackingModal() {
                           <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
                           <select id="m_own_c_${idx}" style="padding:3px 6px; font-size:11px;">
                             <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
-                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                            ${activeUser !== 'Joint' ? `
+                              <option value="${activeUser}" ${owner === activeUser ? 'selected' : ''}>👤 ${activeUser}</option>
+                            ` : (cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
                           </select>
                         </div>
                       ` : ''}
@@ -301,11 +313,11 @@ export function openAccountTrackingModal() {
           <h5 style="color:var(--amber); margin:0 0 10px 0; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">💳 Credit Cards</h5>
           <div style="display:flex; flex-direction:column; gap:8px;">
             ${cfg.credit_accounts.map((c, idx) => {
+              if (!isAccountVisibleToActiveUser('credit', c.name)) return '';
               const conf = getAccountConfig('credit', c.name);
               const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
               const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
               const owner = getAccountOwner('credit', c.name);
-              const isMulti = isMultiUserEnabled();
               return `
                 <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -332,7 +344,9 @@ export function openAccountTrackingModal() {
                           <label style="font-size:11px; color:var(--text-muted);">Owner:</label>
                           <select id="m_own_cr_${idx}" style="padding:3px 6px; font-size:11px;">
                             <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
-                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                            ${activeUser !== 'Joint' ? `
+                              <option value="${activeUser}" ${owner === activeUser ? 'selected' : ''}>👤 ${activeUser}</option>
+                            ` : (cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
                           </select>
                         </div>
                       ` : ''}
@@ -353,11 +367,11 @@ export function openAccountTrackingModal() {
             <h5 style="color:var(--purple); margin:0 0 10px 0; font-size:13px; text-transform:uppercase; letter-spacing:0.5px;">📈 Savings Accounts</h5>
             <div style="display:flex; flex-direction:column; gap:8px;">
               ${cfg.savings_accounts.map((s, idx) => {
+                if (!isAccountVisibleToActiveUser('savings', s)) return '';
                 const conf = getAccountConfig('savings', s);
                 const isEdited = mData.savings_data[s] && mData.savings_data[s].user_edited;
                 const bal = (mData.savings_data[s] && mData.savings_data[s].opening !== undefined) ? mData.savings_data[s].opening : '';
                 const owner = getAccountOwner('savings', s);
-                const isMulti = isMultiUserEnabled();
                 return `
                   <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
@@ -383,7 +397,9 @@ export function openAccountTrackingModal() {
                         ${isMulti ? `
                           <select id="m_own_s_${idx}" style="padding:3px 6px; font-size:11px;">
                             <option value="Joint" ${owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
-                            ${(cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                            ${activeUser !== 'Joint' ? `
+                              <option value="${activeUser}" ${owner === activeUser ? 'selected' : ''}>👤 ${activeUser}</option>
+                            ` : (cfg.people || []).map(p => `<option value="${p}" ${owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
                           </select>
                         ` : ''}
                         <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
@@ -1136,7 +1152,7 @@ export function openRecurringPaymentsModal() {
         <h5 style="margin:0 0 10px 0; color:var(--curr-border); font-size:12px; text-transform:uppercase;">+ Add Scheduled Bill or Direct Debit</h5>
         
         <div style="display:flex; gap:8px; margin-bottom:8px;">
-          <input type="text" id="rec-desc" placeholder="e.g. Window Cleaner, Gym, Netflix" style="flex:2;">
+          <input type="text" id="rec-desc" placeholder="e.g. Window Cleaner, Gym, Streaming Service" style="flex:2;">
           <input type="number" step="0.01" id="rec-amt" placeholder="Amount (${curr})" style="flex:1;">
         </div>
 
@@ -1349,40 +1365,64 @@ export function openScheduledBillsModal(activeFilter = 'all') {
 
 export function openPinUnlockModal(person, callback) {
   window.pendingPinCallback = callback;
+
+  if (window._pinKeydownHandler) {
+    window.removeEventListener('keydown', window._pinKeydownHandler);
+    window._pinKeydownHandler = null;
+  }
+
+  window._pinKeydownHandler = (e) => {
+    if (!document.getElementById('user-pin-input')) {
+      window.removeEventListener('keydown', window._pinKeydownHandler);
+      window._pinKeydownHandler = null;
+      return;
+    }
+    if (e.key >= '0' && e.key <= '9') {
+      window.budgetApp.appendPinDigit(e.key, person);
+      e.preventDefault();
+    } else if (e.key === 'Backspace') {
+      window.budgetApp.backspacePinInput();
+      e.preventDefault();
+    } else if (e.key === 'Enter') {
+      window.budgetApp.submitPinUnlock(person);
+      e.preventDefault();
+    } else if (e.key === 'Escape') {
+      window.budgetApp.closeModal();
+      e.preventDefault();
+    }
+  };
+  window.addEventListener('keydown', window._pinKeydownHandler);
+
   showModal({
     title: `🔒 Enter PIN: ${person}`,
     body: `
-      <div style="text-align:center; padding:10px 0;">
+      <div style="text-align:center; padding:6px 0;">
         <p style="font-size:12.5px; color:var(--text-muted); margin:0 0 16px 0; line-height:1.4;">
           Enter the 4-digit PIN for <strong>${person}</strong> to unlock personal accounts and view private salary.
         </p>
 
         <div style="margin-bottom:14px;">
-          <input type="password" id="user-pin-input" maxlength="6" inputmode="numeric" placeholder="••••" style="font-size:24px; text-align:center; letter-spacing:8px; width:160px; padding:6px 12px; font-weight:bold;" autofocus onkeydown="if(event.key==='Enter') window.budgetApp.submitPinUnlock('${person}')">
+          <input type="password" id="user-pin-input" readonly inputmode="none" maxlength="6" placeholder="••••" style="font-size:26px; text-align:center; letter-spacing:10px; width:170px; padding:6px 12px; font-weight:bold; background:var(--panel-bg); cursor:default; user-select:none;">
           <div id="pin-error-msg" style="color:var(--red); font-size:11.5px; margin-top:6px; min-height:16px; font-weight:600;"></div>
         </div>
 
         <!-- ON-SCREEN NUMPAD -->
-        <div style="display:grid; grid-template-columns:repeat(3, 56px); gap:8px; justify-content:center; margin-top:10px;">
+        <div style="display:grid; grid-template-columns:repeat(3, 58px); gap:8px; justify-content:center; margin-top:10px;">
           ${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `
-            <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('${n}', '${person}')">${n}</button>
+            <button class="btn secondary" style="font-size:17px; height:46px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('${n}', '${person}')">${n}</button>
           `).join('')}
-          <button class="btn secondary" style="font-size:11px; height:44px; justify-content:center; color:var(--text-muted);" onclick="window.budgetApp.clearPinInput()">Clear</button>
-          <button class="btn secondary" style="font-size:16px; height:44px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('0', '${person}')">0</button>
-          <button class="btn secondary" style="font-size:16px; height:44px; justify-content:center;" onclick="window.budgetApp.backspacePinInput()">⌫</button>
+          <button class="btn secondary" style="font-size:11.5px; height:46px; justify-content:center; color:var(--text-muted);" onclick="window.budgetApp.clearPinInput()">Clear</button>
+          <button class="btn secondary" style="font-size:17px; height:46px; font-weight:bold; justify-content:center;" onclick="window.budgetApp.appendPinDigit('0', '${person}')">0</button>
+          <button class="btn secondary" style="font-size:16px; height:46px; justify-content:center;" onclick="window.budgetApp.backspacePinInput()">⌫</button>
         </div>
       </div>
     `,
     actions: `
       <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
       <button class="btn green" onclick="window.budgetApp.submitPinUnlock('${person}')">Unlock 🔓</button>
-    `
+    `,
+    hideCalc: true
   });
-
-  setTimeout(() => {
-    const inp = document.getElementById('user-pin-input');
-    if (inp) inp.focus();
-  }, 100);
 }
 
 export function openSetPinModal(person) {

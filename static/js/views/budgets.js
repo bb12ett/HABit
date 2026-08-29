@@ -72,34 +72,34 @@ export function renderBudgetsView(container) {
       </div>
 
       <!-- BIRTHDAY KPI SUMMARY -->
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-bottom:16px;">
-        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px;">
-          <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:bold;">Total Gift Budget</div>
-          <div style="font-size:18px; font-weight:bold; color:var(--heading); margin-top:2px;">${curr}${totalBirthdayBudget.toFixed(2)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">${birthdays.length} Annual Occasions</div>
+      <div class="mini-kpi-grid">
+        <div class="mini-kpi-card">
+          <div class="mini-kpi-title">Total Gift Budget</div>
+          <div class="mini-kpi-val">${curr}${totalBirthdayBudget.toFixed(2)}</div>
+          <div class="mini-kpi-sub">${birthdays.length} Annual Occasions</div>
         </div>
 
-        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px;">
-          <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:bold;">Total Gifts Spent</div>
-          <div style="font-size:18px; font-weight:bold; color:var(--purple); margin-top:2px;">${curr}${totalBirthdaySpent.toFixed(2)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">${totalBirthdayBudget > 0 ? Math.round((totalBirthdaySpent / totalBirthdayBudget) * 100) : 0}% Allocated</div>
+        <div class="mini-kpi-card">
+          <div class="mini-kpi-title">Total Gifts Spent</div>
+          <div class="mini-kpi-val" style="color:var(--purple);">${curr}${totalBirthdaySpent.toFixed(2)}</div>
+          <div class="mini-kpi-sub">${totalBirthdayBudget > 0 ? Math.round((totalBirthdaySpent / totalBirthdayBudget) * 100) : 0}% Allocated</div>
         </div>
 
-        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px;">
-          <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:bold;">Remaining Gift Fund</div>
-          <div style="font-size:18px; font-weight:bold; color:${(totalBirthdayBudget - totalBirthdaySpent) >= 0 ? 'var(--green)' : 'var(--red)'}; margin-top:2px;">${curr}${(totalBirthdayBudget - totalBirthdaySpent).toFixed(2)}</div>
-          <div style="font-size:10px; color:var(--text-muted);">Available to spend</div>
+        <div class="mini-kpi-card">
+          <div class="mini-kpi-title">Remaining Gift Fund</div>
+          <div class="mini-kpi-val" style="color:${(totalBirthdayBudget - totalBirthdaySpent) >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${(totalBirthdayBudget - totalBirthdaySpent).toFixed(2)}</div>
+          <div class="mini-kpi-sub">Available to spend</div>
         </div>
 
-        <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:10px;">
-          <div style="font-size:11px; text-transform:uppercase; color:var(--text-muted); font-weight:bold;">Next 30 Days</div>
-          <div style="font-size:18px; font-weight:bold; color:#f472b6; margin-top:2px;">${upcomingBirthdaysCount} Upcoming</div>
-          <div style="font-size:10px; color:var(--text-muted);">Coming up soon</div>
+        <div class="mini-kpi-card">
+          <div class="mini-kpi-title">Next 30 Days</div>
+          <div class="mini-kpi-val" style="color:#f472b6;">${upcomingBirthdaysCount} Upcoming</div>
+          <div class="mini-kpi-sub">Coming up soon</div>
         </div>
       </div>
 
       <!-- BIRTHDAYS GRID -->
-      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap:12px;">
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap:12px;">
         ${enrichedBirthdays.length === 0 ? `
           <div style="grid-column:1/-1; padding:20px; text-align:center; color:var(--text-muted); font-style:italic;">
             No birthdays or occasions added yet. Click "+ Add Birthday or Occasion" to set gift budgets for family and friends.

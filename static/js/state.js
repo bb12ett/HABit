@@ -2,7 +2,13 @@ export const DEFAULT_SETTINGS = {
   currency: "£",
   theme: "grey_dark",
   country_holidays: "uk_ew",
+  pay_frequency: "monthly",
   payday_day: 26,
+  payday_weekday: 5,
+  payday_anchor_date: "2026-01-09",
+  payday_first_day: 15,
+  payday_second_day: "last_day",
+  payday_is_last_working_day: false,
   track_savings: true,
   enable_yearly_budgets: true,
   enable_multi_user: false,
@@ -399,6 +405,16 @@ export function setPersonSalaryPrivacy(personName, hide) {
   pConf.hide_salary = !!hide;
 }
 
+export function isAccountVisibleToActiveUser(accType, accName) {
+  if (!isMultiUserEnabled()) return true;
+  const activeUser = appState.activeUser || 'Joint';
+  const owner = getAccountOwner(accType, accName);
+  if (activeUser === 'Joint') {
+    return owner === 'Joint';
+  }
+  return owner === 'Joint' || owner === activeUser;
+}
+
 if (typeof window !== 'undefined') {
   window.__budgetAppState = appState;
   window.appState = appState;
@@ -423,6 +439,7 @@ if (typeof window !== 'undefined') {
   window.setActiveUser = setActiveUser;
   window.getAccountOwner = getAccountOwner;
   window.setAccountOwner = setAccountOwner;
+  window.isAccountVisibleToActiveUser = isAccountVisibleToActiveUser;
   window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;
   window.months = months;
   window.applyTheme = applyTheme;

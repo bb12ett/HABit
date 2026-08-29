@@ -18,10 +18,20 @@ export function startOnboarding() {
 
   const currEl = document.getElementById('ob-curr');
   if (currEl) currEl.value = cfg.currency || '£';
+  const payfreqEl = document.getElementById('ob-payfreq');
+  if (payfreqEl) payfreqEl.value = cfg.pay_frequency || 'monthly';
   const pdayEl = document.getElementById('ob-pday');
   if (pdayEl) pdayEl.value = cfg.payday_day || 26;
+  const pdayAnchorEl = document.getElementById('ob-pday-anchor');
+  if (pdayAnchorEl) pdayAnchorEl.value = cfg.payday_anchor_date || '2026-01-09';
   const holidayEl = document.getElementById('ob-holiday');
   if (holidayEl) holidayEl.value = cfg.country_holidays || 'uk_ew';
+
+  const freq = cfg.pay_frequency || 'monthly';
+  const mBox = document.getElementById('ob-pday-monthly-box');
+  const bwBox = document.getElementById('ob-pday-biweekly-box');
+  if (mBox) mBox.style.display = (freq === 'monthly' || freq === 'semi_monthly') ? 'block' : 'none';
+  if (bwBox) bwBox.style.display = (freq === 'biweekly' || freq === 'four_weekly' || freq === 'weekly') ? 'block' : 'none';
   
   const obSel = document.getElementById('ob-theme');
   if (obSel) {
@@ -50,13 +60,23 @@ export function nextObStep(step) {
   for (let i = 1; i <= 5; i++) {
     const el = document.getElementById(`obStep${i}`);
     if (el) el.style.display = (i === step) ? 'block' : 'none';
+    const pill = document.getElementById(`obStepPill${i}`);
+    if (pill) {
+      pill.classList.remove('active', 'completed');
+      if (i === step) pill.classList.add('active');
+      else if (i < step) pill.classList.add('completed');
+    }
   }
   if (step === 2) {
     const cfg = getSettings();
     const currEl = document.getElementById('ob-curr');
     if (currEl) cfg.currency = currEl.value.trim() || '£';
+    const payfreqEl = document.getElementById('ob-payfreq');
+    if (payfreqEl) cfg.pay_frequency = payfreqEl.value || 'monthly';
     const pdayEl = document.getElementById('ob-pday');
     if (pdayEl) cfg.payday_day = parseInt(pdayEl.value, 10) || 26;
+    const pdayAnchorEl = document.getElementById('ob-pday-anchor');
+    if (pdayAnchorEl) cfg.payday_anchor_date = pdayAnchorEl.value || '2026-01-09';
     const holidayEl = document.getElementById('ob-holiday');
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     const themeEl = document.getElementById('ob-theme');
@@ -82,15 +102,15 @@ export function obRenderLists() {
   const pList = document.getElementById('obPeopleList');
   if (pList) {
     pList.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div style="display:flex; align-items:center; gap:6px; background:rgba(0,0,0,0.12); padding:4px 6px; border-radius:6px; border:1px solid var(--border); flex-wrap:wrap;">
-        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1; min-width:110px;">
+      <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); padding:6px 10px; border-radius:8px; border:1px solid var(--border); margin-bottom:6px; flex-wrap:wrap;">
+        <input type="text" value="${p}" onchange="window.budgetApp.obUpdatePerson(${idx}, this.value)" style="flex:1; min-width:120px;" placeholder="Member Name">
         ${isMulti ? `
-          <input type="password" maxlength="6" inputmode="numeric" placeholder="PIN" value="${getPersonPin(p)}" onchange="window.budgetApp.obUpdatePersonPin(${idx}, this.value)" style="width:60px; font-size:11px; padding:3px 4px; text-align:center;" title="Optional PIN for ${p}">
-          <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0 4px;">
-            <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide Salary
+          <input type="password" maxlength="6" inputmode="numeric" placeholder="PIN" value="${getPersonPin(p)}" onchange="window.budgetApp.obUpdatePersonPin(${idx}, this.value)" style="width:65px; font-size:11px; padding:6px 8px; text-align:center;" title="Optional 4-digit PIN for ${p}">
+          <label style="font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted);">
+            <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.obUpdatePersonPrivacy(${idx}, this.checked)"> 🔒 Hide
           </label>
         ` : ''}
-        ${(cfg.people || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelPerson(${idx})">&times;</button>` : ''}
+        ${(cfg.people || []).length > 1 ? `<button class="del-btn" style="width:28px; height:28px; border-radius:6px;" onclick="window.budgetApp.obDelPerson(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
   }
@@ -99,15 +119,15 @@ export function obRenderLists() {
   const cList = document.getElementById('obCurrentList');
   if (cList) {
     cList.innerHTML = (cfg.current_accounts || []).map((acc, idx) => `
-      <div style="display:flex; align-items:center; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)" style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); padding:6px 10px; border-radius:8px; border:1px solid var(--border); margin-bottom:6px; flex-wrap:wrap;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateCurrent(${idx}, this.value)" style="flex:1; min-width:140px;" placeholder="Account Name">
         ${isMulti ? `
-          <select onchange="window.budgetApp.obUpdateAccountOwner('current', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+          <select onchange="window.budgetApp.obUpdateAccountOwner('current', ${idx}, this.value)" style="width:120px; font-size:11px;" title="Account Owner">
             <option value="Joint" ${getAccountOwner('current', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
             ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('current', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
           </select>
         ` : ''}
-        ${(cfg.current_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCurrent(${idx})">&times;</button>` : ''}
+        ${(cfg.current_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px; height:28px; border-radius:6px;" onclick="window.budgetApp.obDelCurrent(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
   }
@@ -116,15 +136,15 @@ export function obRenderLists() {
   const sList = document.getElementById('obSavingsList');
   if (sList) {
     sList.innerHTML = (cfg.savings_accounts || []).map((acc, idx) => `
-      <div style="display:flex; align-items:center; gap:6px;">
-        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)" style="flex:1;">
+      <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); padding:6px 10px; border-radius:8px; border:1px solid var(--border); margin-bottom:6px; flex-wrap:wrap;">
+        <input type="text" value="${acc}" onchange="window.budgetApp.obUpdateSavings(${idx}, this.value)" style="flex:1; min-width:140px;" placeholder="Account Name">
         ${isMulti ? `
-          <select onchange="window.budgetApp.obUpdateAccountOwner('savings', ${idx}, this.value)" style="width:120px; font-size:11px; padding:3px 6px;" title="Account Owner">
+          <select onchange="window.budgetApp.obUpdateAccountOwner('savings', ${idx}, this.value)" style="width:120px; font-size:11px;" title="Account Owner">
             <option value="Joint" ${getAccountOwner('savings', acc) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
             ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('savings', acc) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
           </select>
         ` : ''}
-        ${(cfg.savings_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelSavings(${idx})">&times;</button>` : ''}
+        ${(cfg.savings_accounts || []).length > 1 ? `<button class="del-btn" style="width:28px; height:28px; border-radius:6px;" onclick="window.budgetApp.obDelSavings(${idx})">&times;</button>` : ''}
       </div>
     `).join('');
   }
@@ -133,22 +153,22 @@ export function obRenderLists() {
   const crList = document.getElementById('obCreditList');
   if (crList) {
     crList.innerHTML = (cfg.credit_accounts || []).map((c, idx) => `
-      <div style="background:rgba(0,0,0,0.15); padding:8px; border-radius:8px; border:1px solid var(--border);">
-        <div style="display:flex; gap:6px; margin-bottom:4px; align-items:center;">
-          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name" style="flex:1;">
-          <input type="number" value="${c.limit}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'limit', this.value)" placeholder="Limit" style="width:90px;">
+      <div style="background:var(--panel-bg); padding:10px 12px; border-radius:8px; border:1px solid var(--border); margin-bottom:8px;">
+        <div style="display:flex; gap:8px; margin-bottom:6px; align-items:center; flex-wrap:wrap;">
+          <input type="text" value="${c.name}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'name', this.value)" placeholder="Card Name" style="flex:1; min-width:130px;">
+          <input type="number" value="${c.limit}" onchange="window.budgetApp.obUpdateCredit(${idx}, 'limit', this.value)" placeholder="Credit Limit" style="width:95px;">
           ${isMulti ? `
-            <select onchange="window.budgetApp.obUpdateAccountOwner('credit', ${idx}, this.value)" style="width:115px; font-size:11px; padding:3px 4px;" title="Card Owner">
+            <select onchange="window.budgetApp.obUpdateAccountOwner('credit', ${idx}, this.value)" style="width:120px; font-size:11px;" title="Card Owner">
               <option value="Joint" ${getAccountOwner('credit', c.name) === 'Joint' ? 'selected' : ''}>👥 Joint</option>
               ${(cfg.people || []).map(p => `<option value="${p}" ${getAccountOwner('credit', c.name) === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
             </select>
           ` : ''}
-          <button class="del-btn" style="width:28px;" onclick="window.budgetApp.obDelCredit(${idx})">&times;</button>
+          <button class="del-btn" style="width:28px; height:28px; border-radius:6px;" onclick="window.budgetApp.obDelCredit(${idx})">&times;</button>
         </div>
-        <div style="display:flex; align-items:center; gap:8px; font-size:11px;">
-          <label><input type="checkbox" ${c.autopay_enabled ? 'checked' : ''} onchange="window.budgetApp.obUpdateCredit(${idx}, 'autopay_enabled', this.checked)"> Auto-Pay</label>
+        <div style="display:flex; align-items:center; gap:8px; font-size:11px; flex-wrap:wrap; border-top:1px dashed var(--border); padding-top:6px;">
+          <label style="display:inline-flex; align-items:center; gap:4px; font-weight:600; color:var(--curr-border);"><input type="checkbox" ${c.autopay_enabled ? 'checked' : ''} onchange="window.budgetApp.obUpdateCredit(${idx}, 'autopay_enabled', this.checked)"> Auto-Pay Settlement</label>
           ${c.autopay_enabled ? `
-            <select onchange="window.budgetApp.obUpdateCredit(${idx}, 'autopay_from', this.value)" style="padding:2px 4px; font-size:11px;">
+            <select onchange="window.budgetApp.obUpdateCredit(${idx}, 'autopay_from', this.value)" style="padding:4px 6px; font-size:11px;">
               ${(cfg.current_accounts || []).map(acc => `<option value="${acc}" ${c.autopay_from === acc ? 'selected' : ''}>${acc}</option>`).join('')}
             </select>
           ` : ''}
@@ -168,17 +188,23 @@ export function obRenderLists() {
   const dPeople = document.getElementById('obDeductPeopleInputs');
   if (dPeople) {
     dPeople.innerHTML = (cfg.people || []).map((p, idx) => `
-      <div><label style="font-size:10px; color:var(--text-muted);">${p}:</label><input type="number" step="0.01" id="ob-deduct-p${idx}" placeholder="${curr}" style="width:100%;"></div>
+      <div style="display:flex; flex-direction:column; gap:2px;">
+        <label style="font-size:10.5px; font-weight:600; color:var(--text-muted);">${p}:</label>
+        <input type="number" step="0.01" id="ob-deduct-p${idx}" placeholder="${curr} 0.00" style="width:100%;">
+      </div>
     `).join('');
   }
   const dList = document.getElementById('obDeductList');
   if (dList) {
-    dList.innerHTML = (cfg.default_deductions || []).map((d, idx) => `
-      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:4px 8px; border-radius:6px; font-size:11px;">
-        <span><strong>${d.name}</strong> ${d.is_salary ? '<span style="color:var(--green);">(Salary)</span>' : ''} ➔ ${d.target_account}</span>
-        <button class="del-btn" style="height:18px; width:18px; line-height:16px;" onclick="window.budgetApp.obDelDeduct(${idx})">&times;</button>
-      </div>
-    `).join('');
+    dList.innerHTML = (cfg.default_deductions || []).map((d, idx) => {
+      const ownerStr = d.person ? `[👤 ${d.person}] ` : '';
+      return `
+        <div class="wizard-item-row">
+          <span class="wizard-item-text"><strong>${ownerStr}${d.name}</strong> ${d.is_salary ? '<span style="color:var(--green); font-weight:600;">(Salary)</span>' : ''} ➔ ${d.target_account}</span>
+          <button class="del-btn wizard-item-del" onclick="window.budgetApp.obDelDeduct(${idx})">&times;</button>
+        </div>
+      `;
+    }).join('');
   }
 
   // Step 4 Direct Debits
@@ -192,7 +218,7 @@ export function obRenderLists() {
   const ddTrans = document.getElementById('ob-dd-transfer');
   if (ddTrans) {
     ddTrans.innerHTML = `
-      <option value="none">None (Expense)</option>
+      <option value="none">None (Outgoing Bill)</option>
       <optgroup label="Savings Accounts">${(cfg.savings_accounts || []).map(s => `<option value="${s}">${s}</option>`).join('')}</optgroup>
       <optgroup label="Credit Cards">${(cfg.credit_accounts || []).map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</optgroup>
     `;
@@ -200,9 +226,9 @@ export function obRenderLists() {
   const ddList = document.getElementById('obDDList');
   if (ddList) {
     ddList.innerHTML = (cfg.default_direct_debits || []).map((d, idx) => `
-      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:4px 8px; border-radius:6px; font-size:11px;">
-        <span><strong>${d.desc}</strong> (Day ${d.due_day}) - ${curr}${d.amount} <span style="color:var(--text-muted); font-size:10px;">(${d.account || cfg.current_accounts[0]})</span></span>
-        <button class="del-btn" style="height:18px; width:18px; line-height:16px;" onclick="window.budgetApp.obDelDD(${idx})">&times;</button>
+      <div class="wizard-item-row">
+        <span class="wizard-item-text"><strong>${d.desc}</strong> (Day ${d.due_day}) • <span style="color:var(--red); font-weight:600;">-${curr}${d.amount}</span> <span style="color:var(--text-muted); font-size:10px;">(${d.account || cfg.current_accounts[0]})</span></span>
+        <button class="del-btn wizard-item-del" onclick="window.budgetApp.obDelDD(${idx})">&times;</button>
       </div>
     `).join('');
   }
@@ -219,9 +245,9 @@ export function obRenderLists() {
   const ybList = document.getElementById('obYearlyList');
   if (ybList) {
     ybList.innerHTML = (cfg.default_yearly_recurring || []).map((y, idx) => `
-      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:4px 8px; border-radius:6px; font-size:11px;">
-        <span><strong>${y.desc}</strong> (${y.month} ${y.due_day}) - ${curr}${y.amount} <span style="color:var(--text-muted); font-size:10px;">(${y.account || cfg.current_accounts[0]})</span></span>
-        <button class="del-btn" style="height:18px; width:18px; line-height:16px;" onclick="window.budgetApp.obDelYearly(${idx})">&times;</button>
+      <div class="wizard-item-row">
+        <span class="wizard-item-text"><strong>${y.desc}</strong> (${y.month} ${y.due_day}) • <span style="color:var(--red); font-weight:600;">-${curr}${y.amount}</span> <span style="color:var(--text-muted); font-size:10px;">(${y.account || cfg.current_accounts[0]})</span></span>
+        <button class="del-btn wizard-item-del" onclick="window.budgetApp.obDelYearly(${idx})">&times;</button>
       </div>
     `).join('');
   }
@@ -230,17 +256,17 @@ export function obRenderLists() {
   const wkAcc = document.getElementById('ob-wk-acc');
   if (wkAcc) {
     wkAcc.innerHTML = `
-      <optgroup label="Credit Cards">${(cfg.credit_accounts || []).map(c => `<option value="credit:${c.name}">${c.name}</option>`).join('')}</optgroup>
       <optgroup label="Current Accounts">${(cfg.current_accounts || []).map(a => `<option value="current:${a}">${a}</option>`).join('')}</optgroup>
+      ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="credit:${c.name}">${c.name}</option>`).join('')}</optgroup>` : ''}
       ${cfg.track_savings ? `<optgroup label="Savings Accounts">${(cfg.savings_accounts || []).map(s => `<option value="savings:${s}">${s}</option>`).join('')}</optgroup>` : ''}
     `;
   }
   const wkList = document.getElementById('obWeeklyList');
   if (wkList) {
     wkList.innerHTML = (cfg.default_weekly || []).map((w, idx) => `
-      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02); padding:4px 8px; border-radius:6px; font-size:11px;">
-        <span>${w.is_income ? '+' : '-'} <strong>${w.desc}</strong>: ${curr}${w.amount} (${w.account_name})</span>
-        <button class="del-btn" style="height:18px; width:18px; line-height:16px;" onclick="window.budgetApp.obDelWeekly(${idx})">&times;</button>
+      <div class="wizard-item-row">
+        <span class="wizard-item-text"><strong style="color:${w.is_income ? 'var(--green)' : 'var(--heading)'};">${w.is_income ? '+' : '-'} ${w.desc}</strong>: ${curr}${w.amount} <span style="color:var(--text-muted); font-size:10px;">(${w.account_name})</span></span>
+        <button class="del-btn wizard-item-del" onclick="window.budgetApp.obDelWeekly(${idx})">&times;</button>
       </div>
     `).join('');
   }

@@ -1,4 +1,4 @@
-import { appState, getSettings, getMonthData, getAccountConfig, isMultiUserEnabled, getAccountOwner } from '../state.js';
+import { appState, getSettings, getMonthData, getAccountConfig, isMultiUserEnabled, getAccountOwner, isAccountVisibleToActiveUser } from '../state.js';
 
 export function renderAccountsView(container) {
   const cfg = getSettings();
@@ -7,6 +7,10 @@ export function renderAccountsView(container) {
   const globalEditMode = appState.globalEditMode;
   const mData = getMonthData(activeTab);
   const isMulti = isMultiUserEnabled();
+
+  const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
+  const visibleCreditAccounts = isMulti ? cfg.credit_accounts.filter(c => isAccountVisibleToActiveUser('credit', c.name)) : cfg.credit_accounts;
+  const visibleSavingsAccounts = isMulti ? cfg.savings_accounts.filter(s => isAccountVisibleToActiveUser('savings', s)) : cfg.savings_accounts;
 
   let html = `
     <div class="panel">
@@ -24,7 +28,7 @@ export function renderAccountsView(container) {
       
       <h4 style="color:var(--curr-border); font-size:13px; margin:14px 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;">Current Accounts</h4>
       <div class="accounts-grid">
-        ${cfg.current_accounts.map(acc => {
+        ${visibleCurrentAccounts.map(acc => {
           const isEdited = mData.current_data[acc] && mData.current_data[acc].user_edited;
           const bal = (mData.current_data[acc] && mData.current_data[acc].opening !== undefined) ? mData.current_data[acc].opening : '';
           const owner = getAccountOwner('current', acc);
@@ -52,7 +56,7 @@ export function renderAccountsView(container) {
 
       <h4 style="color:var(--amber); font-size:13px; margin:20px 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;">Credit Cards</h4>
       <div class="accounts-grid">
-        ${cfg.credit_accounts.map(c => {
+        ${visibleCreditAccounts.map(c => {
           const spent = (mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent !== undefined) ? mData.credit_data[c.name].opening_spent : '';
           const isEdited = mData.credit_data[c.name] && mData.credit_data[c.name].user_edited;
           const owner = getAccountOwner('credit', c.name);
@@ -81,7 +85,7 @@ export function renderAccountsView(container) {
       ${cfg.track_savings ? `
         <h4 style="color:var(--purple); font-size:13px; margin:20px 0 8px 0; text-transform:uppercase; letter-spacing:0.5px;">Savings Accounts</h4>
         <div class="accounts-grid">
-          ${cfg.savings_accounts.map(accName => {
+          ${visibleSavingsAccounts.map(accName => {
             const isEdited = mData.savings_data[accName] && mData.savings_data[accName].user_edited;
             const bal = (mData.savings_data[accName] && mData.savings_data[accName].opening !== undefined) ? mData.savings_data[accName].opening : '';
             const conf = (typeof getAccountConfig === 'function') ? getAccountConfig('savings', accName) : { savings_predict_mode: 'planned' };

@@ -12,8 +12,8 @@ function formatCheckInTimestamp(isoStr) {
   return `${d.getDate()} ${months[d.getMonth()]} ${hours}:${mins}`;
 }
 
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner, isUserUnlocked, hasPersonPin, getActiveUser } from '../state.js';
-import { calculateMonthSchedule, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek } from '../calculations.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner, isUserUnlocked, hasPersonPin, getActiveUser, isAccountVisibleToActiveUser } from '../state.js';
+import { calculateMonthSchedule, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek, getDeductionSalaryForMonth, getPaydaysForSchedule } from '../calculations.js';
 
 export function renderOverviewView(container) {
   const cfg = getSettings();
@@ -21,6 +21,7 @@ export function renderOverviewView(container) {
   const activeTab = appState.activeTab;
   const currentYear = appState.currentYear;
   const globalEditMode = appState.globalEditMode;
+  const isMulti = isMultiUserEnabled();
 
   const mIdx = months.indexOf(activeTab);
   const schedule = calculateMonthSchedule(currentYear, mIdx);
@@ -34,9 +35,18 @@ export function renderOverviewView(container) {
 
   deducts.forEach(d => {
     cfg.people.forEach(p => {
-      const amt = Number(d.amounts && d.amounts[p]) || 0;
-      if (d.is_salary) personTotals[p].salary += amt;
-      else {
+      let amt = 0;
+      if (d.is_salary) {
+        amt = getDeductionSalaryForMonth(d, p, schedule).total;
+        personTotals[p].salary += amt;
+        if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
+        if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
+      } else {
+        if (d.amounts && typeof d.amounts[p] !== 'undefined') {
+          amt = Number(d.amounts[p]) || 0;
+        } else if (d.person) {
+          amt = (d.person === p) ? (Number(d.amount) || 0) : 0;
+        }
         personTotals[p].out += amt;
         if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
         if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
@@ -85,11 +95,11 @@ export function renderOverviewView(container) {
   });
 
   deducts.forEach(d => {
-    if (!d.is_salary && cfg.current_accounts.includes(d.target_account)) {
+    if (cfg.current_accounts.includes(d.target_account)) {
       cfg.people.forEach(p => {
-        const amount = Number(d.amounts && d.amounts[p]) || 0;
+        const amount = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
         if (runningCurrentByAcc[d.target_account] !== undefined) {
-          runningCurrentByAcc[d.target_account] += amount;
+          runningCurrentByAcc[d.target_account] += amount || 0;
         }
       });
     }
@@ -121,10 +131,10 @@ export function renderOverviewView(container) {
   });
 
   deducts.forEach(d => {
-    if (!d.is_salary && cfg.savings_accounts.includes(d.target_account)) {
+    if (cfg.savings_accounts.includes(d.target_account)) {
       cfg.people.forEach(p => {
-        const amt = Number(d.amounts && d.amounts[p]) || 0;
-        if (runningSavingsByAcc[d.target_account] !== undefined) runningSavingsByAcc[d.target_account] += amt;
+        const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        if (runningSavingsByAcc[d.target_account] !== undefined) runningSavingsByAcc[d.target_account] += amt || 0;
       });
     }
   });
@@ -443,29 +453,29 @@ export function renderOverviewView(container) {
 
   // Summary Cashflow boxes
   html += `
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:14px; margin:14px 0 20px 0;">
-      <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; padding:12px;">
-        <h4 style="color:var(--curr-border); margin-bottom:6px;">🏦 Current Accounts Cashflow</h4>
-        <div style="font-size:12px; display:flex; flex-direction:column; gap:4px;">
-          <div style="display:flex; justify-content:space-between;"><span>Opening Balances:</span><strong>${curr}${totalCurrentOpening.toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; color:var(--green);"><span>Salary / Deductions Inflow:</span><strong>+${curr}${totalCurrentInflow.toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; color:var(--red);"><span>Direct Debits:</span><strong>-${curr}${totalDD.toFixed(2)}</strong></div>
-          ${totalAutoPayMonth > 0 ? `<div style="display:flex; justify-content:space-between; color:var(--amber);"><span>Credit Auto-Pay Transfers:</span><strong>-${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>` : ''}
-          <div style="display:flex; justify-content:space-between;"><span>Weekly Current Expenses:</span><strong>-${curr}${totalWeeklyCurrentSpend.toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; border-top:1px solid var(--border); padding-top:4px; font-weight:bold; font-size:13px;">
+    <div class="summary-breakdown-grid">
+      <div class="summary-breakdown-card">
+        <h4 style="color:var(--curr-border);">🏦 Current Accounts Cashflow</h4>
+        <div class="summary-breakdown-list">
+          <div class="summary-breakdown-row"><span>Opening Balances:</span><strong>${curr}${totalCurrentOpening.toFixed(2)}</strong></div>
+          <div class="summary-breakdown-row" style="color:var(--green);"><span>Salary / Deductions Inflow:</span><strong>+${curr}${totalCurrentInflow.toFixed(2)}</strong></div>
+          <div class="summary-breakdown-row" style="color:var(--red);"><span>Direct Debits:</span><strong>-${curr}${totalDD.toFixed(2)}</strong></div>
+          ${totalAutoPayMonth > 0 ? `<div class="summary-breakdown-row" style="color:var(--amber);"><span>Credit Auto-Pay Transfers:</span><strong>-${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>` : ''}
+          <div class="summary-breakdown-row"><span>Weekly Current Expenses:</span><strong>-${curr}${totalWeeklyCurrentSpend.toFixed(2)}</strong></div>
+          <div class="summary-breakdown-total">
             <span>Projected Month-End:</span>
             <span style="color:${projectedMonthEndCurrent >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${projectedMonthEndCurrent.toFixed(2)}</span>
           </div>
         </div>
       </div>
 
-      <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; padding:12px;">
-        <h4 style="color:var(--amber); margin-bottom:6px;">💳 Credit Cards Position</h4>
-        <div style="font-size:12px; display:flex; flex-direction:column; gap:4px;">
-          <div style="display:flex; justify-content:space-between;"><span>Opening Debt:</span><strong style="color:var(--red);">-${curr}${totalCreditOpeningSpent.toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; color:var(--green);"><span>Auto-Pay Settlements:</span><strong>+${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; color:var(--red);"><span>Planned Card Expenses:</span><strong>-${curr}${(totalWeeklySpend - totalWeeklyCurrentSpend).toFixed(2)}</strong></div>
-          <div style="display:flex; justify-content:space-between; border-top:1px solid var(--border); padding-top:4px; font-weight:bold; font-size:13px;">
+      <div class="summary-breakdown-card">
+        <h4 style="color:var(--amber);">💳 Credit Cards Position</h4>
+        <div class="summary-breakdown-list">
+          <div class="summary-breakdown-row"><span>Opening Debt:</span><strong style="color:var(--red);">-${curr}${totalCreditOpeningSpent.toFixed(2)}</strong></div>
+          <div class="summary-breakdown-row" style="color:var(--green);"><span>Auto-Pay Settlements:</span><strong>+${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>
+          <div class="summary-breakdown-row" style="color:var(--red);"><span>Planned Card Expenses:</span><strong>-${curr}${(totalWeeklySpend - totalWeeklyCurrentSpend).toFixed(2)}</strong></div>
+          <div class="summary-breakdown-total">
             <span>Month-End Debt:</span>
             <span style="color:${projectedMonthEndCredit > 0 ? 'var(--red)' : 'var(--green)'};">-${curr}${projectedMonthEndCredit.toFixed(2)}</span>
           </div>
@@ -474,13 +484,13 @@ export function renderOverviewView(container) {
       </div>
 
       ${cfg.track_savings ? `
-        <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; padding:12px;">
-          <h4 style="color:var(--purple); margin-bottom:6px;">📈 Savings Portfolio Growth</h4>
-          <div style="font-size:12px; display:flex; flex-direction:column; gap:4px;">
-            <div style="display:flex; justify-content:space-between;"><span>Opening Balance:</span><strong>${curr}${totalSavingsOpening.toFixed(2)}</strong></div>
-            <div style="display:flex; justify-content:space-between; color:var(--purple);"><span>Salary Savings Inflow:</span><strong>+${curr}${totalSalarySavingsIn.toFixed(2)}</strong></div>
-            <div style="display:flex; justify-content:space-between; color:var(--purple);"><span>Direct Debit Standing Orders:</span><strong>+${curr}${Object.values(autoSavingsFromDD).reduce((s, v) => s + v, 0).toFixed(2)}</strong></div>
-            <div style="display:flex; justify-content:space-between; border-top:1px solid var(--border); padding-top:4px; font-weight:bold; font-size:13px;">
+        <div class="summary-breakdown-card">
+          <h4 style="color:var(--purple);">📈 Savings Portfolio Growth</h4>
+          <div class="summary-breakdown-list">
+            <div class="summary-breakdown-row"><span>Opening Balance:</span><strong>${curr}${totalSavingsOpening.toFixed(2)}</strong></div>
+            <div class="summary-breakdown-row" style="color:var(--purple);"><span>Salary Savings Inflow:</span><strong>+${curr}${totalSalarySavingsIn.toFixed(2)}</strong></div>
+            <div class="summary-breakdown-row" style="color:var(--purple);"><span>Direct Debit Standing Orders:</span><strong>+${curr}${Object.values(autoSavingsFromDD).reduce((s, v) => s + v, 0).toFixed(2)}</strong></div>
+            <div class="summary-breakdown-total">
               <span>Projected Portfolio:</span>
               <span style="color:var(--purple);">${curr}${projectedMonthEndSavings.toFixed(2)}</span>
             </div>
@@ -499,33 +509,15 @@ export function renderOverviewView(container) {
   html += `
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
-        <h3>📅 Weekly Cashflow & Discretionary Expenses</h3>
+        <div>
+          <h3 style="margin:0;">📅 Weekly Cashflow & Discretionary Expenses</h3>
+          <div style="font-size:11.5px; color:var(--text-muted); margin-top:2px;">Period: ${schedule.dateRangeStr} • ${schedule.numWeeks} Weeks${cfg.pay_frequency && cfg.pay_frequency !== 'monthly' ? ` • ${cfg.pay_frequency === 'biweekly' ? '🔄 Bi-Weekly Pay' : (cfg.pay_frequency === 'weekly' ? '⚡ Weekly Pay' : (cfg.pay_frequency === 'four_weekly' ? '🏥 4-Weekly Pay' : '🗓️ Semi-Monthly Pay'))}` : ''}</div>
+        </div>
         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
           <button class="btn secondary" style="font-size:12px; padding:5px 10px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.setTab('Bills')" title="Manage all scheduled direct debits, standing orders & recurring bills"><span style="font-size:13px;">📅</span> Scheduled Bills</button>
           <button class="btn secondary" style="font-size:12px; padding:5px 10px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openAccountTrackingModal()" title="Configure Baseline Balances, Weekly Column Tracking & Net Position"><span style="font-size:13px;">⚙️</span> Accounts & Tracking</button>
         </div>
       </div>
-
-      ${isMulti ? `
-        <div class="user-filter-bar" style="display:flex; align-items:center; gap:6px; margin:0 0 14px 0; padding:8px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:8px; flex-wrap:wrap;">
-          <span style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; margin-right:4px;">👤 Active Perspective:</span>
-          <button class="btn ${appState.activeUser === 'Joint' ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.switchActiveUser('Joint')">👥 Joint / Household</button>
-          ${cfg.people.map(p => {
-            const hasPin = hasPersonPin(p);
-            const unlocked = isUserUnlocked(p);
-            const isActive = appState.activeUser === p;
-            return `
-              <button class="btn ${isActive ? 'green' : 'secondary'}" style="font-size:11px; padding:3px 10px; display:inline-flex; align-items:center; gap:4px;" onclick="window.budgetApp.switchActiveUser('${p}')">
-                <span>👤 ${p}</span>
-                ${hasPin ? `<span style="font-size:9px;">${unlocked ? '🔓' : '🔒'}</span>` : ''}
-              </button>
-            `;
-          }).join('')}
-          ${appState.activeUser !== 'Joint' ? `
-            <button class="btn secondary" style="font-size:10px; padding:3px 8px; margin-left:auto; color:var(--text-muted);" onclick="window.budgetApp.lockAllProfiles()" title="Lock session & return to Joint Shared view">🔒 Lock</button>
-          ` : ''}
-        </div>
-      ` : ''}
 
       <div class="weeks-container">
         ${schedule.weeks.map((wObj, wIdx) => {
@@ -544,7 +536,7 @@ export function renderOverviewView(container) {
           cfg.current_accounts.forEach(acc => {
             const trkWeekly = isAccountTrackedWeekly('current', acc);
             const owner = getAccountOwner('current', acc);
-            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
+            const matchesFilter = isAccountVisibleToActiveUser('current', acc);
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'current',
@@ -559,7 +551,7 @@ export function renderOverviewView(container) {
           cfg.credit_accounts.forEach(c => {
             const trkWeekly = isAccountTrackedWeekly('credit', c.name);
             const owner = getAccountOwner('credit', c.name);
-            const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
+            const matchesFilter = isAccountVisibleToActiveUser('credit', c.name);
             if ((trkWeekly || isFinalWeek) && matchesFilter) {
               columns.push({
                 type: 'credit',
@@ -576,7 +568,7 @@ export function renderOverviewView(container) {
             cfg.savings_accounts.forEach(s => {
               const trkWeekly = isAccountTrackedWeekly('savings', s);
               const owner = getAccountOwner('savings', s);
-              const matchesFilter = !isMulti || (activeUser === 'Joint' ? (owner === 'Joint') : (owner === 'Joint' || owner === activeUser));
+              const matchesFilter = isAccountVisibleToActiveUser('savings', s);
               if ((trkWeekly || isFinalWeek) && matchesFilter) {
                 columns.push({
                   type: 'savings',
@@ -878,109 +870,306 @@ export function renderOverviewView(container) {
 
   // SALARIES & DEDUCTIONS + SCHEDULED BILLS PANELS
   html += `
-    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:16px;">
-      <div class="panel">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
-          <h3 style="margin:0;">Salaries & Deductions</h3>
-          <button class="btn secondary" style="font-size:11px; padding:2px 8px;" onclick="window.budgetApp.propagateDeductions('${activeTab}')" title="Copy this month's salaries and deductions to all following months in ${appState.currentYear}">📋 Propagate to Future Months</button>
-        </div>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Category</th>
-              <th>Transfer Destination</th>
-              ${cfg.people.map(p => {
-                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
-                const isRevealed = isUnlockedForUser || (appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
-                return `
-                  <th class="text-right">
-                    <div style="display:inline-flex; align-items:center; justify-content:flex-end; gap:4px;">
-                      <span>${p}</span>
-                      ${isMulti && isPersonSalaryHidden(p) ? `
-                        <button class="btn secondary" style="padding:1px 5px; font-size:10px; min-height:18px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${isRevealed ? 'Hide salary' : 'Unlock / Reveal salary'}">
-                          ${isRevealed ? '🙈' : '👁️'}
-                        </button>
-                      ` : ''}
+    <div style="display:flex; flex-direction:column; gap:16px; margin-top:4px;">
+      ${isMulti ? `
+        <div class="panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:6px;">
+            <div>
+              <h3 style="margin:0;">👥 Household Salaries & Personal Deductions</h3>
+              <span style="font-size:11.5px; color:var(--text-muted);">Manage separate income and deduction items for each individual household member.</span>
+            </div>
+            <button class="btn secondary" style="font-size:11px; padding:2px 8px;" onclick="window.budgetApp.propagateDeductions('${activeTab}')" title="Copy this month's salaries and deductions to all following months in ${appState.currentYear}">📋 Propagate to Future Months</button>
+          </div>
+
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:16px;">
+            ${cfg.people.map(p => {
+              const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
+              const isRevealed = isUnlockedForUser || (appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
+              const isHidden = isPersonSalaryHidden(p) && !isRevealed;
+              const pTotals = personTotals[p] || { salary: 0, out: 0, leftover: 0 };
+
+              const pItems = [];
+              deducts.forEach((d, origIdx) => {
+                let amt = 0;
+                let belongs = false;
+                if (d.person === p) {
+                  amt = Number(d.amount) || 0;
+                  belongs = true;
+                } else if (d.amounts && typeof d.amounts[p] !== 'undefined') {
+                  amt = Number(d.amounts[p]) || 0;
+                  if (amt > 0 || d.is_salary || !d.person) belongs = true;
+                }
+                if (belongs) {
+                  pItems.push({ d, origIdx, amt });
+                }
+              });
+
+              return `
+                <div style="background:var(--card-bg, rgba(255,255,255,0.03)); border:1px solid var(--border); border-radius:8px; padding:12px; display:flex; flex-direction:column; justify-content:space-between;">
+                  <div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border);">
+                      <div style="display:flex; align-items:center; gap:6px;">
+                        <span style="font-size:14px; font-weight:bold; color:var(--heading);">👤 ${p}'s Deductions</span>
+                        ${isPersonSalaryHidden(p) ? `
+                          <button class="btn secondary" style="padding:1px 6px; font-size:10px; min-height:20px; line-height:1;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="${isRevealed ? 'Hide salary' : 'Unlock / Reveal salary'}">
+                            ${isRevealed ? '🙈' : '👁️'}
+                          </button>
+                        ` : ''}
+                      </div>
+                      <div>
+                        <span style="font-size:11px; color:var(--text-muted);">Leftover: </span>
+                        <strong style="color:${pTotals.leftover >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:12.5px;">
+                          ${isHidden ? '••••••' : `${curr}${pTotals.leftover.toFixed(2)}`}
+                        </strong>
+                      </div>
                     </div>
-                  </th>
-                `;
-              }).join('')}
-              ${globalEditMode ? '<th></th>' : ''}
-            </tr>
-          </thead>
-          <tbody>
-            ${deducts.map((d, idx) => `
+
+                    <table class="table" style="font-size:11.5px; margin:0 0 10px 0;">
+                      <thead>
+                        <tr>
+                          <th>Item / Category</th>
+                          <th>Transfer To</th>
+                          <th class="text-right">Amount</th>
+                          ${globalEditMode ? '<th></th>' : ''}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${pItems.length === 0 ? `
+                          <tr>
+                            <td colspan="${globalEditMode ? 4 : 3}" style="text-align:center; color:var(--text-muted); font-size:11px; padding:10px;">No salary or deduction items for ${p}.</td>
+                          </tr>
+                        ` : pItems.map(item => {
+                          const d = item.d;
+                          const origIdx = item.origIdx;
+                          const val = item.amt;
+                          const itemHidden = d.is_salary && isHidden;
+                          const salInfo = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule) : null;
+                          const isMultiPay = salInfo && salInfo.count > 1;
+                          return `
+                            <tr>
+                              <td>
+                                ${globalEditMode ? `
+                                  <div style="display:flex; flex-direction:column; gap:2px;">
+                                    <input class="table-input" type="text" value="${d.name}" onchange="window.budgetApp.editDeductionName(${origIdx}, this.value)">
+                                    ${d.is_salary ? `
+                                      <select class="table-input" style="font-size:9.5px; padding:1px 2px; color:var(--text-muted);" onchange="window.budgetApp.editDeductionFrequency(${origIdx}, this.value)">
+                                        <option value="monthly" ${d.frequency === 'monthly' || !d.frequency ? 'selected' : ''}>📅 Monthly</option>
+                                        <option value="biweekly" ${d.frequency === 'biweekly' ? 'selected' : ''}>🔄 Bi-Weekly</option>
+                                        <option value="four_weekly" ${d.frequency === 'four_weekly' ? 'selected' : ''}>🏥 4-Weekly</option>
+                                        <option value="weekly" ${d.frequency === 'weekly' ? 'selected' : ''}>⚡ Weekly</option>
+                                        <option value="semi_monthly" ${d.frequency === 'semi_monthly' ? 'selected' : ''}>🗓️ Semi-Monthly</option>
+                                      </select>
+                                    ` : ''}
+                                  </div>
+                                ` : `
+                                  <div style="display:flex; flex-direction:column; gap:1px;">
+                                    <div style="display:flex; align-items:center; gap:4px;">
+                                      <span>${d.is_salary ? '💰' : '📄'}</span>
+                                      <strong>${d.name}</strong>
+                                    </div>
+                                    ${(d.is_salary && d.frequency && d.frequency !== 'monthly') ? `
+                                      <span style="font-size:9.5px; color:var(--curr-border); font-weight:600;">
+                                        ${d.frequency === 'biweekly' ? '🔄 Bi-Weekly' : (d.frequency === 'weekly' ? '⚡ Weekly' : (d.frequency === 'four_weekly' ? '🏥 4-Weekly' : '🗓️ Semi-Monthly'))} (${salInfo ? salInfo.count : 1}x this mo)
+                                      </span>
+                                    ` : ''}
+                                  </div>
+                                `}
+                              </td>
+                              <td>
+                                ${globalEditMode ? `
+                                  <select class="table-input" onchange="window.budgetApp.editDeductionTarget(${origIdx}, this.value)">
+                                    <option value="none" ${d.target_account === 'none' ? 'selected' : ''}>None (Personal)</option>
+                                    <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
+                                    <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
+                                  </select>
+                                ` : (d.target_account !== 'none' ? `<span style="color:var(--curr-border); font-weight:600;">➔ ${d.target_account}</span>` : '<span style="color:var(--text-muted);">Personal</span>')}
+                              </td>
+                              <td class="text-right">
+                                ${globalEditMode ? (
+                                  itemHidden ? `
+                                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
+                                      <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${origIdx}, '${p}', this.value)" style="letter-spacing:2px; width:65px;">
+                                      <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Reveal">👁️</button>
+                                    </div>
+                                  ` : `
+                                    <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                                      <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${origIdx}, '${p}', this.value)" style="width:70px;">
+                                      ${(d.is_salary && isMultiPay) ? `<span style="font-size:9px; color:var(--text-muted);">${curr}${salInfo.total.toFixed(2)}/mo</span>` : ''}
+                                    </div>
+                                  `
+                                ) : (
+                                  itemHidden ? `
+                                    <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Salary hidden (click to unlock/reveal)">••••••</span>
+                                  ` : `
+                                    <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                                      <strong style="color:${d.is_salary ? 'var(--green)' : 'var(--text)'};">${curr}${Number(val).toFixed(2)}${d.is_salary && d.frequency && d.frequency !== 'monthly' ? `<span style="font-size:9.5px; font-weight:normal; color:var(--text-muted);">/paycheck</span>` : ''}</strong>
+                                      ${(d.is_salary && isMultiPay) ? `<span style="font-size:9.5px; color:var(--text-muted); font-weight:600;">= ${curr}${salInfo.total.toFixed(2)} total</span>` : ''}
+                                    </div>
+                                  `
+                                )}
+                              </td>
+                              ${globalEditMode ? `<td class="text-right"><button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteSalaryDeduction(${origIdx})">&times;</button></td>` : ''}
+                            </tr>
+                          `;
+                        }).join('')}
+                      </tbody>
+                    </table>
+
+                    ${globalEditMode ? `
+                      <div style="background:rgba(255,255,255,0.02); border:1px dashed var(--border); border-radius:6px; padding:6px 8px; margin-top:6px;">
+                        <div style="font-size:10.5px; font-weight:bold; color:var(--curr-border); margin-bottom:4px;">+ Add Item for ${p}</div>
+                        <div style="display:grid; grid-template-columns: 1fr 100px 70px 26px; gap:4px; align-items:center;">
+                          <input type="text" id="new-deduct-name-${p}" placeholder="Item (e.g. Salary, Loan)" style="font-size:11px;">
+                          <select id="new-deduct-target-${p}" style="font-size:10.5px;">
+                            <option value="none">None</option>
+                            <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
+                            <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
+                          </select>
+                          <input type="number" step="0.01" id="new-deduct-amt-${p}" placeholder="${curr}" style="font-size:11px; text-align:right;">
+                          <button class="btn green" style="padding:0; height:24px; justify-content:center;" onclick="window.budgetApp.addSalaryDeductionForPerson('${p}')">+</button>
+                        </div>
+                        <div style="margin-top:3px;">
+                          <label style="font-size:10px; cursor:pointer; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px;">
+                            <input type="checkbox" id="new-deduct-issalary-${p}"> Is Salary / Income
+                          </label>
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+
+                  <div style="background:rgba(0,0,0,0.18); border-radius:6px; padding:6px 8px; margin-top:10px; font-size:11px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+                    <div>
+                      <span style="color:var(--text-muted);">Salary: </span>
+                      <strong style="color:var(--green);">${isHidden ? '••••••' : `${curr}${pTotals.salary.toFixed(2)}`}</strong>
+                      <span style="color:var(--text-muted); margin-left:6px;">Deductions: </span>
+                      <strong>${curr}${pTotals.out.toFixed(2)}</strong>
+                    </div>
+                    <div>
+                      <span style="color:var(--text-muted);">Leftover: </span>
+                      <strong style="color:${pTotals.leftover >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:12px;">
+                        ${isHidden ? '••••••' : `${curr}${pTotals.leftover.toFixed(2)}`}
+                      </strong>
+                    </div>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      ` : `
+        <div class="panel">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+            <h3 style="margin:0;">Salaries & Deductions</h3>
+            <button class="btn secondary" style="font-size:11px; padding:2px 8px;" onclick="window.budgetApp.propagateDeductions('${activeTab}')" title="Copy this month's salaries and deductions to all following months in ${appState.currentYear}">📋 Propagate to Future Months</button>
+          <div class="table-responsive">
+            <table class="table">
+            <thead>
               <tr>
-                <td>
-                  ${globalEditMode ? `<input class="table-input" type="text" value="${d.name}" onchange="window.budgetApp.editDeductionName(${idx}, this.value)">` : `<strong>${d.name}</strong>`}
-                </td>
-                <td>
-                  ${globalEditMode ? `
-                    <select class="table-input" onchange="window.budgetApp.editDeductionTarget(${idx}, this.value)">
-                      <option value="none" ${d.target_account === 'none' ? 'selected' : ''}>None (Personal)</option>
-                      <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
-                      <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
-                    </select>
-                  ` : (d.target_account !== 'none' ? `<span style="color:var(--curr-border); font-weight:600;">➔ ${d.target_account}</span>` : '<span style="color:var(--text-muted);">-</span>')}
-                </td>
-                ${cfg.people.map(p => {
-                  const val = (d.amounts && d.amounts[p]) || 0;
-                  const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
-                  const isHidden = isMulti && d.is_salary && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
-                  return `
-                    <td class="text-right">
-                      ${globalEditMode ? (
-                        isHidden ? `
-                          <div style="display:flex; align-items:center; justify-content:flex-end; gap:2px;">
-                            <input class="table-input text-right" type="password" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)" style="letter-spacing:2px; width:70px;">
-                            <button class="btn secondary" style="padding:1px 3px; font-size:9px; min-height:18px;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Unlock / Reveal">👁️</button>
+                <th>Category</th>
+                <th>Transfer Destination</th>
+                ${cfg.people.map(p => `
+                  <th class="text-right"><span>${p}</span></th>
+                `).join('')}
+                ${globalEditMode ? '<th></th>' : ''}
+              </tr>
+            </thead>
+            <tbody>
+              ${deducts.map((d, idx) => `
+                <tr>
+                  <td>
+                    ${globalEditMode ? `
+                      <div style="display:flex; flex-direction:column; gap:2px;">
+                        <input class="table-input" type="text" value="${d.name}" onchange="window.budgetApp.editDeductionName(${idx}, this.value)">
+                        ${d.is_salary ? `
+                          <select class="table-input" style="font-size:9.5px; padding:1px 2px; color:var(--text-muted);" onchange="window.budgetApp.editDeductionFrequency(${idx}, this.value)">
+                            <option value="monthly" ${d.frequency === 'monthly' || !d.frequency ? 'selected' : ''}>📅 Monthly</option>
+                            <option value="biweekly" ${d.frequency === 'biweekly' ? 'selected' : ''}>🔄 Bi-Weekly</option>
+                            <option value="four_weekly" ${d.frequency === 'four_weekly' ? 'selected' : ''}>🏥 4-Weekly</option>
+                            <option value="weekly" ${d.frequency === 'weekly' ? 'selected' : ''}>⚡ Weekly</option>
+                            <option value="semi_monthly" ${d.frequency === 'semi_monthly' ? 'selected' : ''}>🗓️ Semi-Monthly</option>
+                          </select>
+                        ` : ''}
+                      </div>
+                    ` : `
+                      <div style="display:flex; flex-direction:column; gap:1px;">
+                        <div style="display:flex; align-items:center; gap:4px;">
+                          <span>${d.is_salary ? '💰' : '📄'}</span>
+                          <strong>${d.name}</strong>
+                        </div>
+                        ${(d.is_salary && d.frequency && d.frequency !== 'monthly') ? `
+                          <span style="font-size:9.5px; color:var(--curr-border); font-weight:600;">
+                            ${d.frequency === 'biweekly' ? '🔄 Bi-Weekly' : (d.frequency === 'weekly' ? '⚡ Weekly' : (d.frequency === 'four_weekly' ? '🏥 4-Weekly' : '🗓️ Semi-Monthly'))}
+                          </span>
+                        ` : ''}
+                      </div>
+                    `}
+                  </td>
+                  <td>
+                    ${globalEditMode ? `
+                      <select class="table-input" onchange="window.budgetApp.editDeductionTarget(${idx}, this.value)">
+                        <option value="none" ${d.target_account === 'none' ? 'selected' : ''}>None (Personal)</option>
+                        <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
+                        <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}" ${d.target_account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
+                      </select>
+                    ` : (d.target_account !== 'none' ? `<span style="color:var(--curr-border); font-weight:600;">➔ ${d.target_account}</span>` : '<span style="color:var(--text-muted);">-</span>')}
+                  </td>
+                  ${cfg.people.map(p => {
+                    const val = (d.amounts && d.amounts[p]) || (d.person === p ? d.amount : 0) || 0;
+                    const salInfo = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule) : null;
+                    const isMultiPay = salInfo && salInfo.count > 1;
+                    return `
+                      <td class="text-right">
+                        ${globalEditMode ? `
+                          <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                            <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
+                            ${(d.is_salary && isMultiPay) ? `<span style="font-size:9px; color:var(--text-muted);">${curr}${salInfo.total.toFixed(2)}/mo</span>` : ''}
                           </div>
                         ` : `
-                          <input class="table-input text-right" type="number" step="0.01" value="${val}" onchange="window.budgetApp.updateSalaryDeduction(${idx}, '${p}', this.value)">
-                        `
-                      ) : (
-                        isHidden ? `
-                          <span style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Salary hidden for privacy (click to unlock/reveal)">••••••</span>
-                        ` : `${curr}${Number(val).toFixed(2)}`
-                      )}
-                    </td>
-                  `;
+                          <div style="display:flex; flex-direction:column; align-items:flex-end;">
+                            <span>${curr}${Number(val).toFixed(2)}${d.is_salary && d.frequency && d.frequency !== 'monthly' ? `<span style="font-size:9.5px; font-weight:normal; color:var(--text-muted);">/paycheck</span>` : ''}</span>
+                            ${(d.is_salary && isMultiPay) ? `<span style="font-size:9.5px; color:var(--text-muted); font-weight:600;">= ${curr}${salInfo.total.toFixed(2)}</span>` : ''}
+                          </div>
+                        `}
+                      </td>
+                    `;
+                  }).join('')}
+                  ${globalEditMode ? `<td class="text-right"><button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteSalaryDeduction(${idx})">&times;</button></td>` : ''}
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
+                <td><strong style="color:var(--heading);">Personal Leftover</strong></td>
+                <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
+                ${cfg.people.map(p => {
+                  const bal = personTotals[p] ? personTotals[p].leftover : 0;
+                  return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
                 }).join('')}
-                ${globalEditMode ? `<td class="text-right"><button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteSalaryDeduction(${idx})">&times;</button></td>` : ''}
+                ${globalEditMode ? '<td></td>' : ''}
               </tr>
-            `).join('')}
-          </tbody>
-          <tfoot>
-            <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
-              <td><strong style="color:var(--heading);">Personal Leftover</strong></td>
-              <td style="font-size:11px; color:var(--text-muted);">(After Deductions)</td>
-              ${cfg.people.map(p => {
-                const bal = personTotals[p] ? personTotals[p].leftover : 0;
-                const isUnlockedForUser = (appState.activeUser === p && isUserUnlocked(p));
-                const isHidden = isMulti && isPersonSalaryHidden(p) && !isUnlockedForUser && !(appState.unmaskedSalaries && appState.unmaskedSalaries[p]);
-                if (isHidden) {
-                  return `<td class="text-right" style="font-family:monospace; letter-spacing:2px; color:var(--text-muted); font-size:13px; cursor:pointer;" onclick="window.budgetApp.toggleSalaryReveal('${p}')" title="Click to unlock/reveal">••••••</td>`;
-                }
-                return `<td class="text-right" style="color:${bal >= 0 ? 'var(--green)' : 'var(--red)'}; font-size:13px; font-weight:700;">${curr}${bal.toFixed(2)}</td>`;
-              }).join('')}
-              ${globalEditMode ? '<td></td>' : ''}
-            </tr>
-          </tfoot>
-        </table>
+            </tfoot>
+          </table>
+        </div>
 
-        ${globalEditMode ? `
-          <div style="display:grid; grid-template-columns: 1fr 110px ${cfg.people.map(() => '60px').join(' ')} 28px; gap:4px; margin-top:8px;">
-            <input type="text" id="new-deduct-name" placeholder="Item Name (e.g. Salary, Phone Bill)">
-            <select id="new-deduct-target">
-              <option value="none">None</option>
-              <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
-              <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
-            </select>
-            ${cfg.people.map((p, idx) => `<input type="number" step="0.01" id="new-deduct-p${idx}" placeholder="${curr}">`).join('')}
-            <button class="btn green" onclick="window.budgetApp.addSalaryDeduction()">+</button>
-          </div>
-        ` : ''}
-      </div>
+          ${globalEditMode ? `
+            <div style="display:grid; grid-template-columns: 1fr 110px ${cfg.people.map(() => '60px').join(' ')} 28px; gap:4px; margin-top:8px;">
+              <input type="text" id="new-deduct-name" placeholder="Item Name (e.g. Salary, Phone Bill)">
+              <select id="new-deduct-target">
+                <option value="none">None</option>
+                <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
+                <optgroup label="Savings Accounts">${cfg.savings_accounts.map(acc => `<option value="${acc}">${acc}</option>`).join('')}</optgroup>
+              </select>
+              ${cfg.people.map((p, idx) => `<input type="number" step="0.01" id="new-deduct-p${idx}" placeholder="${curr}">`).join('')}
+              <button class="btn green" onclick="window.budgetApp.addSalaryDeduction()">+</button>
+            </div>
+            <div style="margin-top:4px;">
+              <label style="font-size:11px; cursor:pointer; color:var(--text-muted); display:inline-flex; align-items:center; gap:4px;">
+                <input type="checkbox" id="new-deduct-issalary"> This item is Salary / Income
+              </label>
+            </div>
+          ` : ''}
+        </div>
+      `}
 
       <div class="panel">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px;">
@@ -994,17 +1183,17 @@ export function renderOverviewView(container) {
           </div>
         </div>
         
-        <div style="overflow-x:auto;">
+        <div class="table-responsive">
           <table class="table" style="margin:0;">
             <thead>
               <tr>
-                <th>Description</th>
-                <th style="width:110px;">Type & Cadence</th>
-                <th style="width:80px;">Due Date</th>
-                <th style="width:90px;" class="text-right">Amount</th>
-                <th>Account</th>
-                <th>Holiday Rule</th>
-                <th>Transfer To</th>
+                <th style="white-space:nowrap;">Description</th>
+                <th style="white-space:nowrap; min-width:120px;">Type & Cadence</th>
+                <th style="white-space:nowrap; min-width:85px;">Due Date</th>
+                <th style="white-space:nowrap; min-width:90px;" class="text-right">Amount</th>
+                <th style="white-space:nowrap;">Account</th>
+                <th style="white-space:nowrap; min-width:110px;">Holiday Rule</th>
+                <th style="white-space:nowrap;">Transfer To</th>
                 ${globalEditMode ? '<th style="width:30px;"></th>' : ''}
               </tr>
             </thead>
@@ -1019,20 +1208,20 @@ export function renderOverviewView(container) {
               }).map((b) => {
                 const isInc = !!b.is_income;
                 let cadenceBadge = '';
-                if (b.frequency === 'monthly') cadenceBadge = `<span class="badge" style="background:#0284c7; color:#fff; font-size:10px;">${isInc ? '💰 Monthly In' : '📅 Monthly DD'}</span>`;
-                else if (b.frequency === 'weekly') cadenceBadge = `<span class="badge" style="background:#10b981; color:#fff; font-size:10px;">${isInc ? '💰 Weekly In' : '🔄 Weekly'}</span>`;
-                else if (b.frequency === 'biweekly') cadenceBadge = `<span class="badge" style="background:#f59e0b; color:#000; font-size:10px;">${isInc ? '💰 Bi-Weekly In' : '🔄 Bi-Weekly'}</span>`;
-                else if (b.frequency === 'four_weekly') cadenceBadge = `<span class="badge" style="background:#d97706; color:#fff; font-size:10px;">${isInc ? '💰 4-Weekly In' : '🗓️ 4-Weekly'}</span>`;
-                else if (b.frequency === 'yearly') cadenceBadge = `<span class="badge" style="background:#ec4899; color:#fff; font-size:10px;">${isInc ? '💰 Annual In' : '🎉 Annual'}</span>`;
-                else cadenceBadge = `<span class="badge" style="font-size:10px;">${isInc ? '💰 Recurring In' : '🔄 Recurring'}</span>`;
+                if (b.frequency === 'monthly') cadenceBadge = `<span class="badge" style="background:#0284c7; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Monthly In' : '📅 Monthly DD'}</span>`;
+                else if (b.frequency === 'weekly') cadenceBadge = `<span class="badge" style="background:#10b981; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Weekly In' : '🔄 Weekly'}</span>`;
+                else if (b.frequency === 'biweekly') cadenceBadge = `<span class="badge" style="background:#f59e0b; color:#000; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Bi-Weekly In' : '🔄 Bi-Weekly'}</span>`;
+                else if (b.frequency === 'four_weekly') cadenceBadge = `<span class="badge" style="background:#d97706; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 4-Weekly In' : '🗓️ 4-Weekly'}</span>`;
+                else if (b.frequency === 'yearly') cadenceBadge = `<span class="badge" style="background:#ec4899; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Annual In' : '🎉 Annual'}</span>`;
+                else cadenceBadge = `<span class="badge" style="font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Recurring In' : '🔄 Recurring'}</span>`;
 
                 let dueStr = (typeof formatScheduledBillDue === 'function') ? formatScheduledBillDue(b, activeTab, appState.currentYear) : (b.frequency === 'yearly' ? `${b.month || 'Jan'} ${b.due_day || 1}` : `Day ${b.due_day || 1}`);
 
                 const holidayRule = b.holiday_rule || (isInc ? 'previous' : 'following');
                 let holidayBadge = '';
-                if (holidayRule === 'previous') holidayBadge = '<span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); font-size:9px;">⬅️ Prev Workday</span>';
-                else if (holidayRule === 'following') holidayBadge = '<span class="badge" style="background:rgba(56,189,248,0.15); color:var(--curr-border); font-size:9px;">➡️ Next Workday</span>';
-                else holidayBadge = '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:9px;">⏸️ Exact</span>';
+                if (holidayRule === 'previous') holidayBadge = '<span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); font-size:9.5px; padding:2px 6px;">⬅️ Prev Workday</span>';
+                else if (holidayRule === 'following') holidayBadge = '<span class="badge" style="background:rgba(56,189,248,0.15); color:var(--curr-border); font-size:9.5px; padding:2px 6px;">➡️ Next Workday</span>';
+                else holidayBadge = '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:9.5px; padding:2px 6px;">⏸️ Exact</span>';
 
                 return `
                   <tr style="${isInc ? 'background:rgba(16,185,129,0.02);' : ''}">
@@ -1041,18 +1230,18 @@ export function renderOverviewView(container) {
                         <input class="table-input" type="text" value="${b.desc}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'desc', this.value)">
                       ` : `<strong>${isInc ? '📥 ' : ''}${b.desc}</strong>`}
                     </td>
-                    <td>${cadenceBadge}</td>
-                    <td>
+                    <td style="white-space:nowrap;">${cadenceBadge}</td>
+                    <td style="white-space:nowrap;">
                       ${globalEditMode && b.frequency === 'monthly' ? `
                         <input class="table-input" type="number" min="1" max="31" value="${b.due_day || 1}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'due_day', parseInt(this.value, 10))" style="width:50px;">
                       ` : `<span style="font-size:11px; color:var(--text-muted);">${dueStr}</span>`}
                     </td>
-                    <td class="text-right">
+                    <td class="text-right" style="white-space:nowrap;">
                       ${globalEditMode ? `
                         <input class="table-input text-right" type="number" step="0.01" value="${b.amount}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'amount', parseFloat(this.value))" style="width:75px; color:${isInc ? 'var(--green)' : 'var(--curr-border)'};">
                       ` : `<strong style="color:${isInc ? 'var(--green)' : 'var(--curr-border)'};">${isInc ? '+' : '-'}${curr}${Number(b.amount || 0).toFixed(2)}</strong>`}
                     </td>
-                    <td>
+                    <td style="white-space:nowrap;">
                       ${globalEditMode ? `
                         <select class="table-input" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'account', this.value)">
                           <optgroup label="Current Accounts">${cfg.current_accounts.map(acc => `<option value="${acc}" ${b.account === acc ? 'selected' : ''}>${acc}</option>`).join('')}</optgroup>
@@ -1061,7 +1250,7 @@ export function renderOverviewView(container) {
                         </select>
                       ` : `<span style="font-size:11px;">${b.account || cfg.current_accounts[0]}</span>`}
                     </td>
-                    <td>
+                    <td style="white-space:nowrap;">
                       ${globalEditMode ? `
                         <select class="table-input" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'holiday_rule', this.value)" style="font-size:10px;">
                           <option value="previous" ${holidayRule === 'previous' ? 'selected' : ''}>⬅️ Prev</option>
@@ -1070,7 +1259,7 @@ export function renderOverviewView(container) {
                         </select>
                       ` : holidayBadge}
                     </td>
-                    <td>
+                    <td style="white-space:nowrap;">
                       ${!isInc ? (
                         globalEditMode ? `
                           <select class="table-input" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'transfer_to', this.value)">

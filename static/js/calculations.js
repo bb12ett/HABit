@@ -93,8 +93,6 @@ export function calculateMonthSchedule(year = appState.currentYear, monthIdx) {
     endDate = new Date(eParts[0], eParts[1] - 1, eParts[2], 23, 59, 59);
     nextStartDate = new Date(eParts[0], eParts[1] - 1, eParts[2] + 1, 0, 0, 0);
   } else {
-    const pDay = cfg.payday_day || 26;
-    
     function getPaydayMonday(d) {
       const day = d.getDay();
       const res = new Date(d);
@@ -109,8 +107,22 @@ export function calculateMonthSchedule(year = appState.currentYear, monthIdx) {
       return res;
     }
 
-    const startRef = (monthIdx === 0) ? new Date(year - 1, 11, pDay) : new Date(year, monthIdx - 1, pDay);
-    const endRef = new Date(year, monthIdx, pDay);
+    function getTargetPayDate(y, m) {
+      if (cfg.payday_is_last_working_day || cfg.payday_day === 'last_working_day') {
+        const lastDay = new Date(y, m + 1, 0);
+        return getAdjustedWorkingDay(lastDay, 'previous');
+      } else if (cfg.payday_day === 'last_day') {
+        return new Date(y, m + 1, 0);
+      } else {
+        const pDay = parseInt(cfg.payday_day || 26, 10);
+        const maxD = new Date(y, m + 1, 0).getDate();
+        const rawDate = new Date(y, m, Math.min(pDay, maxD));
+        return getAdjustedWorkingDay(rawDate, cfg.payday_rule || 'previous');
+      }
+    }
+
+    const startRef = (monthIdx === 0) ? getTargetPayDate(year - 1, 11) : getTargetPayDate(year, monthIdx - 1);
+    const endRef = getTargetPayDate(year, monthIdx);
     
     startDate = getPaydayMonday(startRef);
     nextStartDate = getPaydayMonday(endRef);
@@ -140,7 +152,7 @@ export function calculateMonthSchedule(year = appState.currentYear, monthIdx) {
     });
   }
 
-  return {
+  const schedObj = {
     startDate,
     endDate,
     numWeeks,
@@ -148,6 +160,110 @@ export function calculateMonthSchedule(year = appState.currentYear, monthIdx) {
     primaryMonthIdx: monthIdx,
     primaryYear: year,
     dateRangeStr: `${startDate.getDate()} ${months[startDate.getMonth()]} - ${endDate.getDate()} ${months[endDate.getMonth()]}`
+  };
+
+  return schedObj;
+}
+
+export function getPaydaysForSchedule(schedule, freq = 'monthly', options = {}) {
+  const cfg = getSettings();
+  const frequency = freq || cfg.pay_frequency || 'monthly';
+  const startMs = schedule.startDate.getTime();
+  const endMs = schedule.endDate.getTime();
+  const paydays = [];
+
+  if (frequency === 'weekly') {
+    schedule.weeks.forEach(w => {
+      paydays.push({
+        date: w.startDate,
+        weekName: w.name,
+        label: `Weekly Pay (${w.startDate.getDate()} ${months[w.startDate.getMonth()]})`
+      });
+    });
+  } else if (frequency === 'biweekly' || frequency === 'four_weekly') {
+    const stepDays = frequency === 'biweekly' ? 14 : 28;
+    const anchorStr = options.anchorDate || cfg.payday_anchor_date || '2026-01-09';
+    const anchor = new Date(anchorStr.includes('T') ? anchorStr : anchorStr + 'T12:00:00');
+    
+    let cur = new Date(anchor.getTime());
+    while (cur.getTime() > startMs - (35 * 86400000)) {
+      cur.setDate(cur.getDate() - stepDays);
+    }
+    while (cur.getTime() <= endMs + (14 * 86400000)) {
+      const pTime = cur.getTime();
+      if (pTime >= startMs && pTime <= endMs) {
+        const week = schedule.weeks.find(w => pTime >= w.startDate.getTime() && pTime <= w.endDate.getTime()) || schedule.weeks[0];
+        paydays.push({
+          date: new Date(cur.getTime()),
+          weekName: week ? week.name : 'Week 1',
+          label: `${frequency === 'biweekly' ? 'Bi-Weekly' : '4-Weekly'} Pay (${cur.getDate()} ${months[cur.getMonth()]})`
+        });
+      }
+      cur.setDate(cur.getDate() + stepDays);
+    }
+  } else if (frequency === 'semi_monthly') {
+    const d1 = parseInt(options.firstDay || cfg.payday_first_day || 15, 10);
+    const d2Opt = options.secondDay || cfg.payday_second_day || 'last_day';
+    
+    const m1 = schedule.startDate.getMonth();
+    const m2 = schedule.endDate.getMonth();
+    const y1 = schedule.startDate.getFullYear();
+    const y2 = schedule.endDate.getFullYear();
+    
+    const candidateMonths = [{ y: y1, m: m1 }];
+    if (m1 !== m2 || y1 !== y2) candidateMonths.push({ y: y2, m: m2 });
+
+    candidateMonths.forEach(cm => {
+      const dt1 = new Date(cm.y, cm.m, d1, 12, 0, 0);
+      const lastDayOfMonth = new Date(cm.y, cm.m + 1, 0).getDate();
+      const d2Val = d2Opt === 'last_day' ? lastDayOfMonth : Math.min(parseInt(d2Opt, 10), lastDayOfMonth);
+      const dt2 = new Date(cm.y, cm.m, d2Val, 12, 0, 0);
+
+      [dt1, dt2].forEach(dt => {
+        const adj = getAdjustedWorkingDay(dt, 'following');
+        const pTime = adj.getTime();
+        if (pTime >= startMs && pTime <= endMs) {
+          const week = schedule.weeks.find(w => pTime >= w.startDate.getTime() && pTime <= w.endDate.getTime()) || schedule.weeks[0];
+          paydays.push({
+            date: adj,
+            weekName: week ? week.name : 'Week 1',
+            label: `Semi-Monthly Pay (${adj.getDate()} ${months[adj.getMonth()]})`
+          });
+        }
+      });
+    });
+  } else {
+    paydays.push({
+      date: schedule.startDate,
+      weekName: 'Week 1',
+      label: `Monthly Payday (${schedule.startDate.getDate()} ${months[schedule.startDate.getMonth()]})`
+    });
+  }
+
+  return paydays;
+}
+
+export function getDeductionSalaryForMonth(d, person, schedule) {
+  const baseAmt = (d.amounts && typeof d.amounts[person] !== 'undefined') ? Number(d.amounts[person]) : (d.person === person ? Number(d.amount) : 0);
+  if (baseAmt <= 0) return { total: 0, count: 0, paydays: [] };
+  if (!d.is_salary) return { total: baseAmt, count: 1, paydays: [] };
+
+  const freq = d.frequency || getSettings().pay_frequency || 'monthly';
+  if (freq === 'monthly') {
+    return { total: baseAmt, count: 1, paydays: [] };
+  }
+
+  const paydays = getPaydaysForSchedule(schedule, freq, {
+    anchorDate: d.anchor_date || getSettings().payday_anchor_date,
+    firstDay: d.first_day || getSettings().payday_first_day,
+    secondDay: d.second_day || getSettings().payday_second_day
+  });
+
+  const count = Math.max(1, paydays.length);
+  return {
+    total: baseAmt * count,
+    count,
+    paydays
   };
 }
 
@@ -444,7 +560,10 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   (md.deductions_list || []).forEach(d => {
     if (cfg.savings_accounts.includes(d.target_account)) {
-      cfg.people.forEach(p => savingsInflowFromSalary[d.target_account] += Number(d.amounts && d.amounts[p]) || 0);
+      cfg.people.forEach(p => {
+        const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        savingsInflowFromSalary[d.target_account] += amt || 0;
+      });
     }
   });
   (md.direct_debits || []).forEach(dd => {
@@ -517,7 +636,12 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     } else {
       let bal = md.current_data[acc] ? (Number(md.current_data[acc].opening) || 0) : 0;
       (md.deductions_list || []).forEach(d => {
-        if (d.target_account === acc) cfg.people.forEach(p => bal += Number(d.amounts && d.amounts[p]) || 0);
+        if (d.target_account === acc) {
+          cfg.people.forEach(p => {
+            const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+            bal += amt || 0;
+          });
+        }
       });
       (md.direct_debits || []).forEach(dd => {
         if (dd.account === acc || (!dd.account && acc === cfg.current_accounts[0])) bal -= Number(dd.amount) || 0;
