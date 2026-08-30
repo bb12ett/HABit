@@ -173,10 +173,13 @@ export function renderUserProfileNav() {
   if (!profileDropdown) return;
 
   if (!isMultiUserEnabled()) {
-    profileDropdown.style.display = 'none';
+    profileDropdown.style.setProperty('display', 'none', 'important');
+    profileDropdown.classList.add('hidden');
     return;
   }
 
+  profileDropdown.style.removeProperty('display');
+  profileDropdown.classList.remove('hidden');
   profileDropdown.style.display = 'inline-block';
   const activeUser = getActiveUser();
   if (userDisp) {
@@ -297,6 +300,9 @@ export function selectUserProfile(person) {
 export function renderNav() {
   updateTopBarTitle();
   renderUserProfileNav();
+  if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
+    window.budgetApp.updateLockNavBtn();
+  }
   const yData = getYearData();
   const cfg = getSettings();
   let html = months.map(m => {
@@ -317,6 +323,9 @@ export function renderContent() {
   try {
     updateTopBarTitle();
     renderUserProfileNav();
+    if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
+      window.budgetApp.updateLockNavBtn();
+    }
     const container = document.getElementById('appBody');
     const metaBar = document.getElementById('monthMetaBar');
     if (!container) return;
@@ -483,6 +492,22 @@ export async function init() {
       renderYearMenu();
       renderNav();
       renderContent();
+
+      if (typeof window.budgetApp.updateLockNavBtn === 'function') {
+        window.budgetApp.updateLockNavBtn();
+      }
+
+      if (!cfg.enable_multi_user && hasPersonPin('Master') && !appState.isMasterUnlocked) {
+        openPinUnlockModal('Master', () => {
+          appState.isMasterUnlocked = true;
+          if (typeof window.budgetApp.updateLockNavBtn === 'function') {
+            window.budgetApp.updateLockNavBtn();
+          }
+          renderNav();
+          renderContent();
+        });
+        return;
+      }
 
       if (isMultiUserEnabled()) {
         showProfileSelectionScreen();
@@ -2796,6 +2821,7 @@ window.budgetApp = {
     const themeEl = document.getElementById('cfg-theme');
     const trackSavEl = document.getElementById('cfg-tracksavings');
     const multiUsersEl = document.getElementById('cfg-multiusers');
+    const haSensorsEl = document.getElementById('cfg-hasensors');
 
     if (currEl) cfg.currency = currEl.value;
     if (payfreqEl) cfg.pay_frequency = payfreqEl.value;
@@ -2809,6 +2835,7 @@ window.budgetApp = {
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
     if (multiUsersEl) cfg.enable_multi_user = multiUsersEl.checked;
+    if (haSensorsEl) cfg.enable_ha_sensors = haSensorsEl.checked;
     if (themeEl) {
       cfg.theme = themeEl.value;
       applyTheme(themeEl.value);
@@ -2887,13 +2914,14 @@ window.budgetApp = {
     renderContent();
   },
 
-  submitPinUnlock(person) {
+  async submitPinUnlock(person) {
     const inp = document.getElementById('user-pin-input');
     const errEl = document.getElementById('pin-error-msg');
     const enteredPin = (inp ? inp.value : '').trim();
 
-    if (!unlockUser(person, enteredPin)) {
-      if (errEl) errEl.innerText = "Incorrect PIN. Please try again.";
+    const res = await unlockAuth(person, enteredPin);
+    if (!res.ok && !res.success) {
+      if (errEl) errEl.innerText = res.error || "Incorrect PIN. Please try again.";
       if (inp) {
         inp.value = '';
         inp.focus();
@@ -2901,13 +2929,26 @@ window.budgetApp = {
       return;
     }
 
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[person] = true;
+    if (person === 'Master') {
+      appState.isMasterUnlocked = true;
+    } else if (person !== 'Joint') {
+      // Envelope unlock: Single-PIN unlocks Person + Joint
+      appState.unlockedUsers['Joint'] = true;
+    }
+
     closeModal();
+    this.updateLockNavBtn();
+
     if (typeof window.pendingPinCallback === 'function') {
       const cb = window.pendingPinCallback;
       window.pendingPinCallback = null;
       cb();
     } else {
-      setActiveUser(person);
+      if (person !== 'Master') {
+        setActiveUser(person);
+      }
       renderUserProfileNav();
       renderContent();
     }
@@ -2917,8 +2958,7 @@ window.budgetApp = {
     const inp = document.getElementById('user-pin-input');
     if (inp) {
       inp.value += digit;
-      const expectedPin = getPersonPin(person);
-      if (expectedPin && inp.value.length === expectedPin.length) {
+      if (inp.value.length >= 4) {
         this.submitPinUnlock(person);
       }
     }
@@ -2943,9 +2983,11 @@ window.budgetApp = {
   },
 
   async savePersonPin(person) {
+    const oldInp = document.getElementById('old-pin-input');
     const newInp = document.getElementById('new-pin-input');
     const confInp = document.getElementById('confirm-pin-input');
     const errEl = document.getElementById('set-pin-error');
+    const oldPin = (oldInp ? oldInp.value : '').trim();
     const p1 = (newInp ? newInp.value : '').trim();
     const p2 = (confInp ? confInp.value : '').trim();
 
@@ -2962,26 +3004,98 @@ window.budgetApp = {
       return;
     }
 
+    const res = await setPinAuth(person, p1, oldPin, true);
+    if (!res.ok && !res.success) {
+      if (errEl) errEl.innerText = res.error || "Failed to set PIN. Check current PIN.";
+      return;
+    }
+
     setPersonPin(person, p1);
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[person] = true;
+    if (person === 'Master') appState.isMasterUnlocked = true;
+
     closeModal();
+    this.updateLockNavBtn();
     renderUserProfileNav();
     renderContent();
-    if (getSettings().onboarding_complete) {
-      await saveBudget(appState.data);
-    }
-    alert(`Security PIN set successfully for ${person}!`);
+    alert(`Security PIN set successfully for ${person === 'Master' ? 'Master Lock' : (person === 'Joint' ? 'Joint Household' : person)}!`);
   },
 
   async removePersonPin(person) {
-    if (confirm(`Remove security PIN for ${person}? Anyone will be able to switch to this profile without authentication.`)) {
+    if (confirm(`Remove security PIN for ${person}? Anyone will be able to access this profile without authentication.`)) {
+      const oldPin = prompt(`Enter current PIN for ${person} to confirm removal:`);
+      if (oldPin === null) return;
+      const res = await setPinAuth(person, '', oldPin.trim(), false);
+      if (!res.ok && !res.success) {
+        alert(res.error || "Incorrect current PIN.");
+        return;
+      }
       setPersonPin(person, '');
       closeModal();
+      this.updateLockNavBtn();
       renderUserProfileNav();
       renderContent();
-      if (getSettings().onboarding_complete) {
-        await saveBudget(appState.data);
-      }
       alert(`Security PIN removed for ${person}.`);
+    }
+  },
+
+  async removeMasterPin() {
+    if (confirm("Disable Master PIN protection? Your budget will open without a PIN prompt.")) {
+      const oldPin = prompt("Enter current Master PIN to confirm removal:");
+      if (oldPin === null) return;
+      const res = await setPinAuth('Master', '', oldPin.trim(), false);
+      if (!res.ok && !res.success) {
+        alert(res.error || "Incorrect current PIN.");
+        return;
+      }
+      const cfg = getSettings();
+      if (cfg.security) {
+        cfg.security.master_pin_enabled = false;
+        cfg.security.master_pin_hash = "";
+      }
+      appState.isMasterUnlocked = true;
+      this.updateLockNavBtn();
+      renderContent();
+      alert("Master PIN protection disabled.");
+    }
+  },
+
+  updateLockNavBtn() {
+    const lockBtn = document.getElementById('lockSessionNavBtn');
+    if (!lockBtn) return;
+    const cfg = getSettings();
+    const isMulti = cfg.enable_multi_user;
+    let anyPinActive = false;
+    if (isMulti) {
+      anyPinActive = (cfg.people || []).some(p => hasPersonPin(p)) || hasPersonPin('Joint');
+    } else {
+      anyPinActive = hasPersonPin('Master');
+    }
+    if (anyPinActive) {
+      lockBtn.style.setProperty('display', 'inline-flex', 'important');
+      lockBtn.classList.remove('hidden');
+    } else {
+      lockBtn.style.setProperty('display', 'none', 'important');
+      lockBtn.classList.add('hidden');
+    }
+  },
+
+  lockActiveSession() {
+    lockAllUsers();
+    this.updateLockNavBtn();
+    const cfg = getSettings();
+    if (!cfg.enable_multi_user && hasPersonPin('Master')) {
+      openPinUnlockModal('Master', () => {
+        appState.isMasterUnlocked = true;
+        renderContent();
+      });
+      return;
+    }
+    renderUserProfileNav();
+    renderContent();
+    if (cfg.enable_multi_user) {
+      this.showProfileSelectionScreen();
     }
   },
 

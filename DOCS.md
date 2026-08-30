@@ -160,4 +160,4 @@ Switch themes anytime via the **Settings (☰)** side drawer or in the Setup Wiz
 
 - **Issues & Bug Reports**: Submit tickets on [GitHub Issues](https://github.com/bb12ett/HABit/issues).
 - **Feature Suggestions**: Open an idea in [GitHub Discussions](https://github.com/bb12ett/HABit/discussions).
-- **License**: Released under the [MIT License](https://opensource.org/licenses/MIT).
+- **License**: Released under the [GNU Affero General Public License v3.0 (AGPLv3)](https://www.gnu.org/licenses/agpl-3.0.html).

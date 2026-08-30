@@ -1426,29 +1426,50 @@ export function openPinUnlockModal(person, callback) {
 }
 
 export function openSetPinModal(person) {
-  const currentPin = getPersonPin(person);
-  const hasPin = !!currentPin;
+  const cfg = getSettings();
+  let hasPin = false;
+  if (person === 'Master') {
+    hasPin = !!(cfg.security && cfg.security.master_pin_enabled);
+  } else if (person === 'Joint') {
+    hasPin = !!(cfg.security && cfg.security.joint_pin_enabled);
+  } else {
+    hasPin = hasPersonPin(person);
+  }
+
+  let desc = `Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.`;
+  if (person === 'Master') {
+    desc = 'Setting a 4-to-6 digit Master PIN locks your entire budget when opening HABit on your browser or Home Assistant dashboard.';
+  } else if (person === 'Joint') {
+    desc = 'Setting a 4-to-6 digit PIN protects the shared Joint household view on tablets or shared devices.';
+  }
 
   showModal({
-    title: `🔒 Configure Security PIN: ${person}`,
+    title: `🔒 Configure Security PIN: ${person === 'Master' ? 'Master PIN' : (person === 'Joint' ? 'Joint Household' : person)}`,
     body: `
       <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
-        <p style="font-size:12px; color:var(--text-muted); margin:0;">
-          Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          ${desc}
         </p>
 
         <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:12px;">
           Status: <strong>${hasPin ? '🔒 PIN Protection Active' : '🔓 No PIN Configured (Open Access)'}</strong>
         </div>
 
+        ${hasPin ? `
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Current PIN</label>
+            <input type="password" id="old-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter current PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          </div>
+        ` : ''}
+
         <div>
-          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">New 4-to-6 Digit PIN</label>
-          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">${hasPin ? 'New PIN' : 'Enter 4-to-6 Digit PIN'}</label>
+          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter PIN code" style="width:100%; margin-top:4px; font-size:14px;">
         </div>
 
         <div>
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Confirm PIN</label>
-          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm PIN code" style="width:100%; margin-top:4px; font-size:14px;">
         </div>
 
         <div id="set-pin-error" style="color:var(--red); font-size:11px; font-weight:600; min-height:16px;"></div>

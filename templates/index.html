@@ -31,6 +31,21 @@
       min-width: 0 !important;
       overflow: hidden !important;
     }
+    .logo-link {
+      display: inline-flex !important;
+      align-items: center !important;
+      text-decoration: none !important;
+      color: inherit !important;
+      cursor: pointer !important;
+      min-width: 0 !important;
+      max-width: 100% !important;
+      flex: 1 1 auto !important;
+      transition: opacity 0.15s ease, transform 0.15s ease !important;
+    }
+    .logo-link:hover {
+      opacity: 0.88 !important;
+      transform: scale(1.02) !important;
+    }
     .logo {
       display: flex !important;
       align-items: center !important;
@@ -159,6 +174,15 @@
         align-items: center !important;
         flex-shrink: 0 !important;
         border-radius: 6px !important;
+      }
+      .top-nav-bar .btn[style*="display: none"],
+      .top-nav-right .btn[style*="display: none"],
+      .top-nav-bar .btn[style*="display:none"],
+      .top-nav-right .btn[style*="display:none"],
+      .top-nav-bar .hidden,
+      .top-nav-right .hidden,
+      #lockSessionNavBtn.hidden {
+        display: none !important;
       }
       .payday-meta-bar .btn {
         padding: 3px 6px !important;
@@ -579,11 +603,13 @@
       <!-- ROW 1: TOP NAV BAR (Logo + Year on Left, View Mode + Settings on Far Right) -->
       <div class="top-nav-bar">
         <div class="top-nav-left">
-          <div class="logo">
-            <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
-            <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
-            <span id="topBarMonthTitle">Budget</span>
-          </div>
+          <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" class="logo-link" title="Open HABit Help & Documentation on GitHub">
+            <div class="logo">
+              <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
+              <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
+              <span id="topBarMonthTitle">Budget</span>
+            </div>
+          </a>
         </div>
 
         <div class="top-nav-right">
@@ -604,6 +630,7 @@
             </div>
           </div>
           <button id="calculatorNavBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator (Alt+C)"><span class="btn-icon">&#129518;</span><span class="btn-text"> Calculator</span></button>
+          <button id="lockSessionNavBtn" class="btn secondary" onclick="window.budgetApp.lockActiveSession()" title="Lock Session (PIN)" style="display:none;"><span class="btn-icon">🔒</span><span class="btn-text"> Lock</span></button>
           <button id="globalModeBtn" class="btn secondary" onclick="window.budgetApp.toggleGlobalEditMode()" title="Toggle View/Edit Mode"><span class="btn-icon">&#128065;&#65039;</span><span class="btn-text"> View Mode</span></button>
           <button id="openDrawerBtn" class="btn secondary" onclick="window.budgetApp.openDrawer()" title="Settings & Tools"><span class="btn-icon">&#9776;</span><span class="btn-text"> Settings</span></button>
         </div>
@@ -669,10 +696,12 @@
       </div>
 
       <div class="drawer-branding" style="margin-top:auto; padding-top:14px; border-top:1px solid var(--border); text-align:center;">
-        <img src="static/img/banner_dark.png" alt="HABit Logo" class="drawer-banner-img logo-dark-mode">
-        <img src="static/img/banner_light.png" alt="HABit Logo" class="drawer-banner-img logo-light-mode">
+        <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" class="drawer-banner-link" title="Open HABit Help & Documentation on GitHub">
+          <img src="static/img/banner_dark.png" alt="HABit Logo" class="drawer-banner-img logo-dark-mode">
+          <img src="static/img/banner_light.png" alt="HABit Logo" class="drawer-banner-img logo-light-mode">
+        </a>
         <div class="drawer-version-text" style="margin-top:8px; font-size:11px; font-weight:600; color:var(--text-muted); letter-spacing:0.5px;">
-          v{{ app_version }}
+          <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:none;" title="Open HABit Help on GitHub">v{{ app_version }} &bull; Help & Docs ↗</a>
         </div>
       </div>
     </div>
@@ -977,6 +1006,39 @@
       </div>
       <div id="modalBody" class="modal-body"></div>
       <div id="modalActions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <!-- SECURITY PIN PAD MODAL -->
+  <div id="pinPadModal" class="modal-overlay" style="display:none; z-index:3000;">
+    <div class="modal-box" style="max-width:340px; text-align:center; padding:24px 20px;">
+      <div style="font-size:36px; margin-bottom:6px;">🔒</div>
+      <h3 id="pinModalTitle" style="margin:0 0 6px 0; color:var(--heading); font-size:18px;">Security PIN</h3>
+      <p id="pinModalSubtitle" style="font-size:12px; color:var(--text-muted); margin:0 0 16px 0;">Enter your 4-digit PIN to unlock</p>
+      
+      <div id="pinDots" class="pin-display-dots">
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+        <div class="pin-dot"></div>
+      </div>
+
+      <div id="pinErrorMsg" style="color:var(--curr-border); font-size:12px; min-height:18px; margin-bottom:8px; font-weight:600;"></div>
+
+      <div class="pin-grid">
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('1')">1</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('2')">2</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('3')">3</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('4')">4</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('5')">5</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('6')">6</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('7')">7</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('8')">8</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('9')">9</button>
+        <button type="button" class="pin-btn action" onclick="window.budgetApp.closePinModal()">Cancel</button>
+        <button type="button" class="pin-btn" onclick="window.budgetApp.onPinKeyPress('0')">0</button>
+        <button type="button" class="pin-btn action" onclick="window.budgetApp.onPinBackspace()">⌫</button>
+      </div>
     </div>
   </div>
 

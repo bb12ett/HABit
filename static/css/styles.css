@@ -1346,6 +1346,34 @@ input:focus, select:focus, textarea:focus {
   overflow: hidden;
 }
 
+.logo-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.logo-link:hover {
+  opacity: 0.88;
+  transform: scale(1.02);
+}
+
+.drawer-banner-link {
+  display: inline-block;
+  cursor: pointer;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.drawer-banner-link:hover {
+  opacity: 0.88;
+  transform: scale(1.02);
+}
+
 .logo {
   display: flex;
   align-items: center;
@@ -1498,6 +1526,16 @@ input:focus, select:focus, textarea:focus {
     flex-shrink: 0 !important;
     border-radius: 6px !important;
     box-sizing: border-box !important;
+  }
+  .top-nav-bar .btn[style*="display: none"],
+  .top-nav-right .btn[style*="display: none"],
+  .top-nav-bar .btn[style*="display:none"],
+  .top-nav-right .btn[style*="display:none"],
+  .top-nav-bar .hidden,
+  .top-nav-right .hidden,
+  #lockSessionNavBtn.hidden,
+  #userProfileDropdown.hidden {
+    display: none !important;
   }
   .payday-meta-bar .btn {
     padding: 3px 6px !important;
@@ -2405,4 +2443,90 @@ body.val-picker-mode {
   .profile-avatar-grid {
     gap: 16px;
   }
+}
+
+/* ==========================================================================
+   PIN PAD & LOCK SCREEN STYLES
+   ========================================================================== */
+.pin-pad-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  max-width: 320px;
+  margin: 0 auto;
+}
+
+.pin-display-dots {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin: 12px 0 8px 0;
+}
+
+.pin-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: transparent;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pin-dot.filled {
+  background: var(--curr-border);
+  border-color: var(--curr-border);
+  box-shadow: 0 0 10px var(--curr-glow);
+  transform: scale(1.18);
+}
+
+.pin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.pin-btn {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--heading);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  box-sizing: border-box;
+}
+
+.pin-btn:hover {
+  background: var(--curr-border);
+  color: #ffffff;
+  border-color: var(--curr-border);
+}
+
+.pin-btn:active {
+  transform: scale(0.92);
+}
+
+.pin-btn.action {
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+@keyframes pinShake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+
+.pin-shake {
+  animation: pinShake 0.35s ease;
 }

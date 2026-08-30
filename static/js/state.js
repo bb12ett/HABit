@@ -12,6 +12,16 @@ export const DEFAULT_SETTINGS = {
   track_savings: true,
   enable_yearly_budgets: true,
   enable_multi_user: false,
+  enable_ha_sensors: true,
+  security: {
+    master_pin_enabled: false,
+    master_salt: "",
+    master_pin_hash: "",
+    joint_salt: "",
+    joint_pin_hash: "",
+    joint_pin_enabled: false,
+    personas: {}
+  },
   people: ["Person 1", "Person 2"],
   people_settings: {
     "Person 1": { hide_salary: false, pin: "" },
@@ -96,6 +106,7 @@ export const appState = {
   activeChart: null,
   activeUser: 'Joint',
   unlockedUsers: {},
+  isMasterUnlocked: false,
   selectedUserFilter: 'all',
   unmaskedSalaries: {}
 };
@@ -335,16 +346,41 @@ export function getPersonPin(personName) {
 export function setPersonPin(personName, pin) {
   const pConf = getPersonSettings(personName);
   pConf.pin = pin ? String(pin).trim() : "";
+  const cfg = getSettings();
+  if (!cfg.security) cfg.security = { personas: {} };
+  if (!cfg.security.personas) cfg.security.personas = {};
+  if (pin) {
+    cfg.security.personas[personName] = { enabled: true };
+  } else {
+    cfg.security.personas[personName] = { enabled: false };
+  }
 }
 
 export function hasPersonPin(personName) {
+  if (personName === 'Master') {
+    const cfg = getSettings();
+    return !!(cfg.security && cfg.security.master_pin_enabled);
+  }
+  if (personName === 'Joint') {
+    const cfg = getSettings();
+    return !!(cfg.security && cfg.security.joint_pin_enabled);
+  }
+  const cfg = getSettings();
+  const secP = cfg.security && cfg.security.personas && cfg.security.personas[personName];
+  if (secP && secP.enabled) return true;
   return !!getPersonPin(personName);
 }
 
 export function isUserUnlocked(personName) {
-  if (!personName || personName === 'Joint') return true;
+  if (!personName) return true;
   if (!hasPersonPin(personName)) return true;
   return !!(appState.unlockedUsers && appState.unlockedUsers[personName]);
+}
+
+export function isMasterLocked() {
+  const cfg = getSettings();
+  if (cfg.enable_multi_user) return false;
+  return !!(cfg.security && cfg.security.master_pin_enabled && !appState.isMasterUnlocked);
 }
 
 export function unlockUser(personName, pin) {
@@ -354,7 +390,7 @@ export function unlockUser(personName, pin) {
     return true;
   }
   const expected = getPersonPin(personName);
-  if (String(pin).trim() === expected) {
+  if (!expected || String(pin).trim() === expected) {
     if (!appState.unlockedUsers) appState.unlockedUsers = {};
     appState.unlockedUsers[personName] = true;
     return true;
@@ -364,6 +400,7 @@ export function unlockUser(personName, pin) {
 
 export function lockAllUsers() {
   appState.unlockedUsers = {};
+  appState.isMasterUnlocked = false;
   appState.activeUser = 'Joint';
 }
 

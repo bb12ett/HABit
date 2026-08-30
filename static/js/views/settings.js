@@ -153,6 +153,17 @@ export function renderSettingsView(container) {
         </div>
       </div>
 
+      <!-- HOME ASSISTANT SENSORS TOGGLE -->
+      <div style="margin:0 0 14px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
+        <label style="font-size:13px; cursor:pointer; font-weight:700; display:flex; align-items:center; gap:8px; color:var(--curr-border);">
+          <input type="checkbox" id="cfg-hasensors" ${cfg.enable_ha_sensors !== false ? 'checked' : ''}>
+          🏠 Publish Home Assistant Sensors
+        </label>
+        <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; margin-left:24px; line-height:1.4;">
+          Publishes live entities (<code>sensor.habit_net_position</code>, <code>sensor.habit_days_until_payday</code>, <code>sensor.habit_current_balance</code>, and weekly allowances) directly into Home Assistant for dashboards and automations.
+        </div>
+      </div>
+
       <h3 style="margin-top:24px;">Top Dashboard Widgets & Card Order</h3>
       <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;">
         Toggle which cards appear at the top of each month and arrange their order with the ⬆️ ⬇️ buttons or by dragging. The forecast page will reflect this exact order.
@@ -310,17 +321,56 @@ export function renderSettingsView(container) {
       </div>
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addSavingsAccountInSettings()">+ Add Savings Account</button>
 
+      ${!isMulti ? `
+        <h3 style="margin-top:24px;">Security & Encryption</h3>
+        <div style="margin:10px 0 16px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; width:100%; box-sizing:border-box;">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:700; font-size:13px; color:var(--heading); display:flex; align-items:center; gap:6px;">
+              <span>🔒 Master PIN & Database Protection</span>
+              ${cfg.security && cfg.security.master_pin_enabled ? '<span class="badge" style="background:#10b981; color:#fff; font-size:10px;">Active</span>' : '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:10px;">Disabled</span>'}
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.4;">
+              Protects your budget with a 4-digit PIN lock when opening HABit on your browser or Home Assistant dashboard.
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn ${cfg.security && cfg.security.master_pin_enabled ? 'secondary' : 'green'}" onclick="window.budgetApp.openSetPinModal('Master')" style="font-size:11.5px; padding:6px 12px;">
+              ${cfg.security && cfg.security.master_pin_enabled ? '🔑 Change Master PIN' : '🔒 Set Master PIN'}
+            </button>
+            ${cfg.security && cfg.security.master_pin_enabled ? `
+              <button type="button" class="btn secondary" onclick="window.budgetApp.removeMasterPin()" style="font-size:11.5px; padding:6px 12px; color:#ef4444;">
+                Remove PIN
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      ` : ''}
+
       <h3 style="margin-top:24px;">Household Members & Security ${isMulti ? `<span style="font-size:13px; font-weight:normal; color:var(--text-muted);">(${activeUser === 'Joint' ? 'All Members' : activeUser})</span>` : ''}</h3>
-      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and security PINs:</p>
+      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and individual security PINs:</p>
+      
+      ${isMulti && activeUser === 'Joint' ? `
+        <div style="margin:8px 0 12px 0; padding:10px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; width:100%; box-sizing:border-box;">
+          <div>
+            <strong style="color:var(--curr-border); font-size:12.5px;">👥 Joint Household Lock (Optional)</strong>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Protect the shared Joint view with a household PIN.</div>
+          </div>
+          <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openSetPinModal('Joint')">
+            ${cfg.security && cfg.security.joint_pin_enabled ? '🔒 Joint PIN Active' : '🔑 Set Joint PIN'}
+          </button>
+        </div>
+      ` : ''}
+
       <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; width:100%; max-width:700px; box-sizing:border-box;">
         ${visiblePeople.map((p) => {
           const realIdx = cfg.people.indexOf(p);
+          const hasPin = hasPersonPin(p);
           return `
             <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); border:1px solid var(--border); padding:8px 10px; border-radius:var(--radius-card); flex-wrap:wrap; box-sizing:border-box; width:100%;">
               <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${realIdx}, this.value)" style="flex:1; min-width:120px;" placeholder="Member Name" ${isMulti && activeUser !== 'Joint' ? 'readonly' : ''}>
               ${isMulti ? `
-                <button class="btn secondary" style="font-size:11px; padding:4px 8px; white-space:nowrap; flex-shrink:0;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
-                  ${hasPersonPin(p) ? '🔒 PIN Active' : '🔑 Set PIN'}
+                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 8px; white-space:nowrap; flex-shrink:0;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
+                  ${hasPin ? '🔒 Personal PIN Active' : '🔑 Set PIN'}
                 </button>
                 <label style="font-size:11.5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0;">
                   <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.updatePersonSalaryPrivacy(${realIdx}, this.checked)"> 🔒 Hide Salary in Overview

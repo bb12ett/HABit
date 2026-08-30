@@ -15,6 +15,16 @@ const DEFAULT_SETTINGS = {
   track_savings: true,
   enable_yearly_budgets: true,
   enable_multi_user: false,
+  enable_ha_sensors: true,
+  security: {
+    master_pin_enabled: false,
+    master_salt: "",
+    master_pin_hash: "",
+    joint_salt: "",
+    joint_pin_hash: "",
+    joint_pin_enabled: false,
+    personas: {}
+  },
   people: ["Person 1", "Person 2"],
   people_settings: {
     "Person 1": { hide_salary: false, pin: "" },
@@ -99,6 +109,7 @@ const appState = {
   activeChart: null,
   activeUser: 'Joint',
   unlockedUsers: {},
+  isMasterUnlocked: false,
   selectedUserFilter: 'all',
   unmaskedSalaries: {}
 };
@@ -338,16 +349,41 @@ function getPersonPin(personName) {
 function setPersonPin(personName, pin) {
   const pConf = getPersonSettings(personName);
   pConf.pin = pin ? String(pin).trim() : "";
+  const cfg = getSettings();
+  if (!cfg.security) cfg.security = { personas: {} };
+  if (!cfg.security.personas) cfg.security.personas = {};
+  if (pin) {
+    cfg.security.personas[personName] = { enabled: true };
+  } else {
+    cfg.security.personas[personName] = { enabled: false };
+  }
 }
 
 function hasPersonPin(personName) {
+  if (personName === 'Master') {
+    const cfg = getSettings();
+    return !!(cfg.security && cfg.security.master_pin_enabled);
+  }
+  if (personName === 'Joint') {
+    const cfg = getSettings();
+    return !!(cfg.security && cfg.security.joint_pin_enabled);
+  }
+  const cfg = getSettings();
+  const secP = cfg.security && cfg.security.personas && cfg.security.personas[personName];
+  if (secP && secP.enabled) return true;
   return !!getPersonPin(personName);
 }
 
 function isUserUnlocked(personName) {
-  if (!personName || personName === 'Joint') return true;
+  if (!personName) return true;
   if (!hasPersonPin(personName)) return true;
   return !!(appState.unlockedUsers && appState.unlockedUsers[personName]);
+}
+
+function isMasterLocked() {
+  const cfg = getSettings();
+  if (cfg.enable_multi_user) return false;
+  return !!(cfg.security && cfg.security.master_pin_enabled && !appState.isMasterUnlocked);
 }
 
 function unlockUser(personName, pin) {
@@ -357,7 +393,7 @@ function unlockUser(personName, pin) {
     return true;
   }
   const expected = getPersonPin(personName);
-  if (String(pin).trim() === expected) {
+  if (!expected || String(pin).trim() === expected) {
     if (!appState.unlockedUsers) appState.unlockedUsers = {};
     appState.unlockedUsers[personName] = true;
     return true;
@@ -367,6 +403,7 @@ function unlockUser(personName, pin) {
 
 function lockAllUsers() {
   appState.unlockedUsers = {};
+  appState.isMasterUnlocked = false;
   appState.activeUser = 'Joint';
 }
 
@@ -591,11 +628,15 @@ if (typeof window !== 'undefined') {
 
 
 // --- static/js/api.js ---
-function getApiUrl() {
+function getBaseApiUrl() {
   let p = window.location.pathname;
   if (p.endsWith('index.html')) p = p.slice(0, -10);
   if (!p.endsWith('/')) p += '/';
-  return p + 'api/budget';
+  return p;
+}
+
+function getApiUrl() {
+  return getBaseApiUrl() + 'api/budget';
 }
 
 async function fetchBudget() {
@@ -644,6 +685,51 @@ async function resetDatabase() {
   } catch (e) {
     console.error("resetDatabase error:", e);
     return false;
+  }
+}
+
+async function getAuthStatus() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/auth/status', {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("getAuthStatus error:", e);
+  }
+  return { master_pin_enabled: false, multi_user: false, personas: {} };
+}
+
+async function unlockAuth(persona, pin) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/auth/unlock', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona, pin })
+    });
+    const res = await r.json();
+    return { ok: r.ok, ...res };
+  } catch (e) {
+    console.error("unlockAuth error:", e);
+    return { ok: false, error: e.message };
+  }
+}
+
+async function setPinAuth(persona, newPin, oldPin = '', enabled = true) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/auth/set_pin', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona, new_pin: newPin, old_pin: oldPin, enabled })
+    });
+    const res = await r.json();
+    return { ok: r.ok, ...res };
+  } catch (e) {
+    console.error("setPinAuth error:", e);
+    return { ok: false, error: e.message };
   }
 }
 
@@ -3460,29 +3546,50 @@ function openPinUnlockModal(person, callback) {
 }
 
 function openSetPinModal(person) {
-  const currentPin = getPersonPin(person);
-  const hasPin = !!currentPin;
+  const cfg = getSettings();
+  let hasPin = false;
+  if (person === 'Master') {
+    hasPin = !!(cfg.security && cfg.security.master_pin_enabled);
+  } else if (person === 'Joint') {
+    hasPin = !!(cfg.security && cfg.security.joint_pin_enabled);
+  } else {
+    hasPin = hasPersonPin(person);
+  }
+
+  let desc = `Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.`;
+  if (person === 'Master') {
+    desc = 'Setting a 4-to-6 digit Master PIN locks your entire budget when opening HABit on your browser or Home Assistant dashboard.';
+  } else if (person === 'Joint') {
+    desc = 'Setting a 4-to-6 digit PIN protects the shared Joint household view on tablets or shared devices.';
+  }
 
   showModal({
-    title: `🔒 Configure Security PIN: ${person}`,
+    title: `🔒 Configure Security PIN: ${person === 'Master' ? 'Master PIN' : (person === 'Joint' ? 'Joint Household' : person)}`,
     body: `
       <div style="display:flex; flex-direction:column; gap:12px; padding:4px 0;">
-        <p style="font-size:12px; color:var(--text-muted); margin:0;">
-          Setting a 4-to-6 digit PIN protects <strong>${person}</strong>'s personal bank accounts and salary details on shared dashboards.
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          ${desc}
         </p>
 
         <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:10px; font-size:12px;">
           Status: <strong>${hasPin ? '🔒 PIN Protection Active' : '🔓 No PIN Configured (Open Access)'}</strong>
         </div>
 
+        ${hasPin ? `
+          <div>
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Current PIN</label>
+            <input type="password" id="old-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter current PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          </div>
+        ` : ''}
+
         <div>
-          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">New 4-to-6 Digit PIN</label>
-          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">${hasPin ? 'New PIN' : 'Enter 4-to-6 Digit PIN'}</label>
+          <input type="password" id="new-pin-input" maxlength="6" inputmode="numeric" placeholder="Enter PIN code" style="width:100%; margin-top:4px; font-size:14px;">
         </div>
 
         <div>
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Confirm PIN</label>
-          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm new PIN" style="width:100%; margin-top:4px; font-size:14px;">
+          <input type="password" id="confirm-pin-input" maxlength="6" inputmode="numeric" placeholder="Confirm PIN code" style="width:100%; margin-top:4px; font-size:14px;">
         </div>
 
         <div id="set-pin-error" style="color:var(--red); font-size:11px; font-weight:600; min-height:16px;"></div>
@@ -6477,6 +6584,17 @@ function renderSettingsView(container) {
         </div>
       </div>
 
+      <!-- HOME ASSISTANT SENSORS TOGGLE -->
+      <div style="margin:0 0 14px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
+        <label style="font-size:13px; cursor:pointer; font-weight:700; display:flex; align-items:center; gap:8px; color:var(--curr-border);">
+          <input type="checkbox" id="cfg-hasensors" ${cfg.enable_ha_sensors !== false ? 'checked' : ''}>
+          🏠 Publish Home Assistant Sensors
+        </label>
+        <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; margin-left:24px; line-height:1.4;">
+          Publishes live entities (<code>sensor.habit_net_position</code>, <code>sensor.habit_days_until_payday</code>, <code>sensor.habit_current_balance</code>, and weekly allowances) directly into Home Assistant for dashboards and automations.
+        </div>
+      </div>
+
       <h3 style="margin-top:24px;">Top Dashboard Widgets & Card Order</h3>
       <p style="font-size:12px; color:var(--text-muted); margin:0 0 10px 0;">
         Toggle which cards appear at the top of each month and arrange their order with the ⬆️ ⬇️ buttons or by dragging. The forecast page will reflect this exact order.
@@ -6634,17 +6752,56 @@ function renderSettingsView(container) {
       </div>
       <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addSavingsAccountInSettings()">+ Add Savings Account</button>
 
+      ${!isMulti ? `
+        <h3 style="margin-top:24px;">Security & Encryption</h3>
+        <div style="margin:10px 0 16px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; width:100%; box-sizing:border-box;">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:700; font-size:13px; color:var(--heading); display:flex; align-items:center; gap:6px;">
+              <span>🔒 Master PIN & Database Protection</span>
+              ${cfg.security && cfg.security.master_pin_enabled ? '<span class="badge" style="background:#10b981; color:#fff; font-size:10px;">Active</span>' : '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:10px;">Disabled</span>'}
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.4;">
+              Protects your budget with a 4-digit PIN lock when opening HABit on your browser or Home Assistant dashboard.
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <button type="button" class="btn ${cfg.security && cfg.security.master_pin_enabled ? 'secondary' : 'green'}" onclick="window.budgetApp.openSetPinModal('Master')" style="font-size:11.5px; padding:6px 12px;">
+              ${cfg.security && cfg.security.master_pin_enabled ? '🔑 Change Master PIN' : '🔒 Set Master PIN'}
+            </button>
+            ${cfg.security && cfg.security.master_pin_enabled ? `
+              <button type="button" class="btn secondary" onclick="window.budgetApp.removeMasterPin()" style="font-size:11.5px; padding:6px 12px; color:#ef4444;">
+                Remove PIN
+              </button>
+            ` : ''}
+          </div>
+        </div>
+      ` : ''}
+
       <h3 style="margin-top:24px;">Household Members & Security ${isMulti ? `<span style="font-size:13px; font-weight:normal; color:var(--text-muted);">(${activeUser === 'Joint' ? 'All Members' : activeUser})</span>` : ''}</h3>
-      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and security PINs:</p>
+      <p style="font-size:12px; color:var(--text-muted);">Manage household members, per-user salary visibility, and individual security PINs:</p>
+      
+      ${isMulti && activeUser === 'Joint' ? `
+        <div style="margin:8px 0 12px 0; padding:10px 12px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; width:100%; box-sizing:border-box;">
+          <div>
+            <strong style="color:var(--curr-border); font-size:12.5px;">👥 Joint Household Lock (Optional)</strong>
+            <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">Protect the shared Joint view with a household PIN.</div>
+          </div>
+          <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openSetPinModal('Joint')">
+            ${cfg.security && cfg.security.joint_pin_enabled ? '🔒 Joint PIN Active' : '🔑 Set Joint PIN'}
+          </button>
+        </div>
+      ` : ''}
+
       <div id="peopleList" style="display:flex; flex-direction:column; gap:8px; width:100%; max-width:700px; box-sizing:border-box;">
         ${visiblePeople.map((p) => {
           const realIdx = cfg.people.indexOf(p);
+          const hasPin = hasPersonPin(p);
           return `
             <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); border:1px solid var(--border); padding:8px 10px; border-radius:var(--radius-card); flex-wrap:wrap; box-sizing:border-box; width:100%;">
               <input type="text" value="${p}" onchange="window.budgetApp.updatePersonNameInSettings(${realIdx}, this.value)" style="flex:1; min-width:120px;" placeholder="Member Name" ${isMulti && activeUser !== 'Joint' ? 'readonly' : ''}>
               ${isMulti ? `
-                <button class="btn secondary" style="font-size:11px; padding:4px 8px; white-space:nowrap; flex-shrink:0;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
-                  ${hasPersonPin(p) ? '🔒 PIN Active' : '🔑 Set PIN'}
+                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 8px; white-space:nowrap; flex-shrink:0;" onclick="window.budgetApp.openSetPinModal('${p}')" title="Configure 4-digit security PIN for ${p}">
+                  ${hasPin ? '🔒 Personal PIN Active' : '🔑 Set PIN'}
                 </button>
                 <label style="font-size:11.5px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; white-space:nowrap; color:var(--text-muted); margin:0;">
                   <input type="checkbox" ${isPersonSalaryHidden(p) ? 'checked' : ''} onchange="window.budgetApp.updatePersonSalaryPrivacy(${realIdx}, this.checked)"> 🔒 Hide Salary in Overview
@@ -7565,10 +7722,13 @@ function renderUserProfileNav() {
   if (!profileDropdown) return;
 
   if (!isMultiUserEnabled()) {
-    profileDropdown.style.display = 'none';
+    profileDropdown.style.setProperty('display', 'none', 'important');
+    profileDropdown.classList.add('hidden');
     return;
   }
 
+  profileDropdown.style.removeProperty('display');
+  profileDropdown.classList.remove('hidden');
   profileDropdown.style.display = 'inline-block';
   const activeUser = getActiveUser();
   if (userDisp) {
@@ -7689,6 +7849,9 @@ function selectUserProfile(person) {
 function renderNav() {
   updateTopBarTitle();
   renderUserProfileNav();
+  if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
+    window.budgetApp.updateLockNavBtn();
+  }
   const yData = getYearData();
   const cfg = getSettings();
   let html = months.map(m => {
@@ -7709,6 +7872,9 @@ function renderContent() {
   try {
     updateTopBarTitle();
     renderUserProfileNav();
+    if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
+      window.budgetApp.updateLockNavBtn();
+    }
     const container = document.getElementById('appBody');
     const metaBar = document.getElementById('monthMetaBar');
     if (!container) return;
@@ -7875,6 +8041,22 @@ async function init() {
       renderYearMenu();
       renderNav();
       renderContent();
+
+      if (typeof window.budgetApp.updateLockNavBtn === 'function') {
+        window.budgetApp.updateLockNavBtn();
+      }
+
+      if (!cfg.enable_multi_user && hasPersonPin('Master') && !appState.isMasterUnlocked) {
+        openPinUnlockModal('Master', () => {
+          appState.isMasterUnlocked = true;
+          if (typeof window.budgetApp.updateLockNavBtn === 'function') {
+            window.budgetApp.updateLockNavBtn();
+          }
+          renderNav();
+          renderContent();
+        });
+        return;
+      }
 
       if (isMultiUserEnabled()) {
         showProfileSelectionScreen();
@@ -10188,6 +10370,7 @@ window.budgetApp = {
     const themeEl = document.getElementById('cfg-theme');
     const trackSavEl = document.getElementById('cfg-tracksavings');
     const multiUsersEl = document.getElementById('cfg-multiusers');
+    const haSensorsEl = document.getElementById('cfg-hasensors');
 
     if (currEl) cfg.currency = currEl.value;
     if (payfreqEl) cfg.pay_frequency = payfreqEl.value;
@@ -10201,6 +10384,7 @@ window.budgetApp = {
     if (holidayEl) cfg.country_holidays = holidayEl.value;
     if (trackSavEl) cfg.track_savings = trackSavEl.checked;
     if (multiUsersEl) cfg.enable_multi_user = multiUsersEl.checked;
+    if (haSensorsEl) cfg.enable_ha_sensors = haSensorsEl.checked;
     if (themeEl) {
       cfg.theme = themeEl.value;
       applyTheme(themeEl.value);
@@ -10279,13 +10463,14 @@ window.budgetApp = {
     renderContent();
   },
 
-  submitPinUnlock(person) {
+  async submitPinUnlock(person) {
     const inp = document.getElementById('user-pin-input');
     const errEl = document.getElementById('pin-error-msg');
     const enteredPin = (inp ? inp.value : '').trim();
 
-    if (!unlockUser(person, enteredPin)) {
-      if (errEl) errEl.innerText = "Incorrect PIN. Please try again.";
+    const res = await unlockAuth(person, enteredPin);
+    if (!res.ok && !res.success) {
+      if (errEl) errEl.innerText = res.error || "Incorrect PIN. Please try again.";
       if (inp) {
         inp.value = '';
         inp.focus();
@@ -10293,13 +10478,26 @@ window.budgetApp = {
       return;
     }
 
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[person] = true;
+    if (person === 'Master') {
+      appState.isMasterUnlocked = true;
+    } else if (person !== 'Joint') {
+      // Envelope unlock: Single-PIN unlocks Person + Joint
+      appState.unlockedUsers['Joint'] = true;
+    }
+
     closeModal();
+    this.updateLockNavBtn();
+
     if (typeof window.pendingPinCallback === 'function') {
       const cb = window.pendingPinCallback;
       window.pendingPinCallback = null;
       cb();
     } else {
-      setActiveUser(person);
+      if (person !== 'Master') {
+        setActiveUser(person);
+      }
       renderUserProfileNav();
       renderContent();
     }
@@ -10309,8 +10507,7 @@ window.budgetApp = {
     const inp = document.getElementById('user-pin-input');
     if (inp) {
       inp.value += digit;
-      const expectedPin = getPersonPin(person);
-      if (expectedPin && inp.value.length === expectedPin.length) {
+      if (inp.value.length >= 4) {
         this.submitPinUnlock(person);
       }
     }
@@ -10335,9 +10532,11 @@ window.budgetApp = {
   },
 
   async savePersonPin(person) {
+    const oldInp = document.getElementById('old-pin-input');
     const newInp = document.getElementById('new-pin-input');
     const confInp = document.getElementById('confirm-pin-input');
     const errEl = document.getElementById('set-pin-error');
+    const oldPin = (oldInp ? oldInp.value : '').trim();
     const p1 = (newInp ? newInp.value : '').trim();
     const p2 = (confInp ? confInp.value : '').trim();
 
@@ -10354,26 +10553,98 @@ window.budgetApp = {
       return;
     }
 
+    const res = await setPinAuth(person, p1, oldPin, true);
+    if (!res.ok && !res.success) {
+      if (errEl) errEl.innerText = res.error || "Failed to set PIN. Check current PIN.";
+      return;
+    }
+
     setPersonPin(person, p1);
+    if (!appState.unlockedUsers) appState.unlockedUsers = {};
+    appState.unlockedUsers[person] = true;
+    if (person === 'Master') appState.isMasterUnlocked = true;
+
     closeModal();
+    this.updateLockNavBtn();
     renderUserProfileNav();
     renderContent();
-    if (getSettings().onboarding_complete) {
-      await saveBudget(appState.data);
-    }
-    alert(`Security PIN set successfully for ${person}!`);
+    alert(`Security PIN set successfully for ${person === 'Master' ? 'Master Lock' : (person === 'Joint' ? 'Joint Household' : person)}!`);
   },
 
   async removePersonPin(person) {
-    if (confirm(`Remove security PIN for ${person}? Anyone will be able to switch to this profile without authentication.`)) {
+    if (confirm(`Remove security PIN for ${person}? Anyone will be able to access this profile without authentication.`)) {
+      const oldPin = prompt(`Enter current PIN for ${person} to confirm removal:`);
+      if (oldPin === null) return;
+      const res = await setPinAuth(person, '', oldPin.trim(), false);
+      if (!res.ok && !res.success) {
+        alert(res.error || "Incorrect current PIN.");
+        return;
+      }
       setPersonPin(person, '');
       closeModal();
+      this.updateLockNavBtn();
       renderUserProfileNav();
       renderContent();
-      if (getSettings().onboarding_complete) {
-        await saveBudget(appState.data);
-      }
       alert(`Security PIN removed for ${person}.`);
+    }
+  },
+
+  async removeMasterPin() {
+    if (confirm("Disable Master PIN protection? Your budget will open without a PIN prompt.")) {
+      const oldPin = prompt("Enter current Master PIN to confirm removal:");
+      if (oldPin === null) return;
+      const res = await setPinAuth('Master', '', oldPin.trim(), false);
+      if (!res.ok && !res.success) {
+        alert(res.error || "Incorrect current PIN.");
+        return;
+      }
+      const cfg = getSettings();
+      if (cfg.security) {
+        cfg.security.master_pin_enabled = false;
+        cfg.security.master_pin_hash = "";
+      }
+      appState.isMasterUnlocked = true;
+      this.updateLockNavBtn();
+      renderContent();
+      alert("Master PIN protection disabled.");
+    }
+  },
+
+  updateLockNavBtn() {
+    const lockBtn = document.getElementById('lockSessionNavBtn');
+    if (!lockBtn) return;
+    const cfg = getSettings();
+    const isMulti = cfg.enable_multi_user;
+    let anyPinActive = false;
+    if (isMulti) {
+      anyPinActive = (cfg.people || []).some(p => hasPersonPin(p)) || hasPersonPin('Joint');
+    } else {
+      anyPinActive = hasPersonPin('Master');
+    }
+    if (anyPinActive) {
+      lockBtn.style.setProperty('display', 'inline-flex', 'important');
+      lockBtn.classList.remove('hidden');
+    } else {
+      lockBtn.style.setProperty('display', 'none', 'important');
+      lockBtn.classList.add('hidden');
+    }
+  },
+
+  lockActiveSession() {
+    lockAllUsers();
+    this.updateLockNavBtn();
+    const cfg = getSettings();
+    if (!cfg.enable_multi_user && hasPersonPin('Master')) {
+      openPinUnlockModal('Master', () => {
+        appState.isMasterUnlocked = true;
+        renderContent();
+      });
+      return;
+    }
+    renderUserProfileNav();
+    renderContent();
+    if (cfg.enable_multi_user) {
+      this.showProfileSelectionScreen();
     }
   },
 
