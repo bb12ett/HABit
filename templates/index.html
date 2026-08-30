@@ -31,20 +31,26 @@
       min-width: 0 !important;
       overflow: hidden !important;
     }
+    .logo-btn,
     .logo-link {
       display: inline-flex !important;
       align-items: center !important;
       text-decoration: none !important;
       color: inherit !important;
       cursor: pointer !important;
+      user-select: none !important;
       min-width: 0 !important;
       max-width: 100% !important;
       flex: 1 1 auto !important;
       transition: opacity 0.15s ease, transform 0.15s ease !important;
     }
+    .logo-btn:hover,
     .logo-link:hover {
       opacity: 0.88 !important;
       transform: scale(1.02) !important;
+    }
+    .logo-btn:active {
+      transform: scale(0.97) !important;
     }
     .logo {
       display: flex !important;
@@ -603,13 +609,13 @@
       <!-- ROW 1: TOP NAV BAR (Logo + Year on Left, View Mode + Settings on Far Right) -->
       <div class="top-nav-bar">
         <div class="top-nav-left">
-          <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" class="logo-link" title="Open HABit Help & Documentation on GitHub">
+          <div class="logo-btn" onclick="window.budgetApp.handleLogoClick()" title="Return to Overview / Current Week" role="button" tabindex="0">
             <div class="logo">
               <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
               <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
               <span id="topBarMonthTitle">Budget</span>
             </div>
-          </a>
+          </div>
         </div>
 
         <div class="top-nav-right">

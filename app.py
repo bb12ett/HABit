@@ -28,7 +28,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.1.2")
+    return os.environ.get("APP_VERSION", "0.1.2a")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))

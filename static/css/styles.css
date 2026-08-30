@@ -1346,6 +1346,7 @@ input:focus, select:focus, textarea:focus {
   overflow: hidden;
 }
 
+.logo-btn,
 .logo-link {
   display: inline-flex;
   align-items: center;
@@ -1353,14 +1354,20 @@ input:focus, select:focus, textarea:focus {
   text-decoration: none;
   color: inherit;
   cursor: pointer;
+  user-select: none;
   min-width: 0;
   max-width: 100%;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
+.logo-btn:hover,
 .logo-link:hover {
   opacity: 0.88;
   transform: scale(1.02);
+}
+
+.logo-btn:active {
+  transform: scale(0.97);
 }
 
 .drawer-banner-link {
@@ -1372,6 +1379,24 @@ input:focus, select:focus, textarea:focus {
 .drawer-banner-link:hover {
   opacity: 0.88;
   transform: scale(1.02);
+}
+
+@keyframes weekHighlightPulse {
+  0% {
+    box-shadow: 0 0 0 0 var(--curr-glow, rgba(99, 102, 241, 0.6));
+    border-color: var(--curr-border);
+  }
+  50% {
+    box-shadow: 0 0 20px 4px var(--curr-glow, rgba(99, 102, 241, 0.6));
+    border-color: var(--curr-border);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+.week-highlight-pulse {
+  animation: weekHighlightPulse 1.2s ease-out !important;
 }
 
 .logo {

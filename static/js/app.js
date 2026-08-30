@@ -427,6 +427,10 @@ export function scrollToCurrentWeek(smooth = true) {
         block: 'center',
         inline: 'nearest'
       });
+      currentWeekEl.classList.remove('week-highlight-pulse');
+      void currentWeekEl.offsetWidth;
+      currentWeekEl.classList.add('week-highlight-pulse');
+      setTimeout(() => currentWeekEl.classList.remove('week-highlight-pulse'), 1500);
     }
   }, 120);
 }
@@ -574,6 +578,28 @@ window.budgetApp = {
   },
 
   scrollToCurrentWeek,
+
+  handleLogoClick() {
+    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
+    const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : 'Jan');
+    const isMainMonthTab = months.includes(appState.activeTab);
+
+    if (!isMainMonthTab || appState.activeTab === 'Settings' || appState.activeSubTab !== 'overview') {
+      appState.activeTab = targetMonth;
+      appState.activeSubTab = 'overview';
+      renderNav();
+      renderContent();
+      scrollToCurrentWeek(true);
+    } else {
+      if (appState.activeTab !== targetMonth) {
+        appState.activeTab = targetMonth;
+        appState.activeSubTab = 'overview';
+        renderNav();
+        renderContent();
+      }
+      scrollToCurrentWeek(true);
+    }
+  },
 
   setSubTab(subTabName) {
     appState.activeSubTab = subTabName;
