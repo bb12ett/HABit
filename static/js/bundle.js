@@ -10145,33 +10145,66 @@ function initCalculator() {
 
 
 
+const fullMonthNames = {
+  Jan: 'January',
+  Feb: 'February',
+  Mar: 'March',
+  Apr: 'April',
+  May: 'May',
+  Jun: 'June',
+  Jul: 'July',
+  Aug: 'August',
+  Sep: 'September',
+  Oct: 'October',
+  Nov: 'November',
+  Dec: 'December'
+};
+
 function updateTopBarTitle() {
   const titleEl = document.getElementById('topBarMonthTitle');
   if (!titleEl) return;
-  const yr = `'${String(appState.currentYear).slice(-2)}`;
+
+  const yr = String(appState.currentYear);
+  const shortYr = `'${yr.slice(-2)}`;
+
+  let desktopTitle = 'Budget';
+  let mobileTitle = 'Budget';
+
   if (months.includes(appState.activeTab)) {
-    titleEl.innerText = `${appState.activeTab} ${yr}`;
+    const fullMonth = fullMonthNames[appState.activeTab] || appState.activeTab;
+    desktopTitle = `${fullMonth} ${yr}`;
+    mobileTitle = `${appState.activeTab} ${shortYr}`;
   } else if (appState.activeTab === 'Year') {
-    titleEl.innerText = `Annual ${yr}`;
+    desktopTitle = `Annual Trajectory ${yr}`;
+    mobileTitle = `Annual ${shortYr}`;
   } else if (appState.activeTab === 'Budgets') {
-    titleEl.innerText = `Budgets ${yr}`;
+    desktopTitle = `Budgets & Occasions ${yr}`;
+    mobileTitle = `Budgets ${shortYr}`;
   } else if (appState.activeTab === 'Bills') {
-    titleEl.innerText = `Bills ${yr}`;
+    desktopTitle = `Scheduled Bills ${yr}`;
+    mobileTitle = `Bills ${shortYr}`;
   } else if (appState.activeTab === 'Spend') {
-    titleEl.innerText = `Live Spend ${yr}`;
+    desktopTitle = `Live Spend & Categories ${yr}`;
+    mobileTitle = `Live Spend ${shortYr}`;
   } else if (appState.activeTab === 'Settings') {
-    titleEl.innerText = 'Settings';
+    desktopTitle = 'Settings & Tools';
+    mobileTitle = 'Settings';
   } else if (appState.activeTab) {
-    titleEl.innerText = `${appState.activeTab} ${yr}`;
-  } else {
-    titleEl.innerText = `Budget ${yr}`;
+    desktopTitle = `${appState.activeTab} ${yr}`;
+    mobileTitle = `${appState.activeTab} ${shortYr}`;
   }
+
+  titleEl.innerHTML = `<span class="topbar-title-desktop">${desktopTitle}</span><span class="topbar-title-mobile">${mobileTitle}</span>`;
 }
 
 function renderYearMenu() {
   updateTopBarTitle();
   const disp = document.getElementById('currentYearDisplay');
-  if (disp) disp.innerText = `'${String(appState.currentYear).slice(-2)}`;
+  if (disp) {
+    const fullYr = String(appState.currentYear);
+    const shortYr = `'${fullYr.slice(-2)}`;
+    disp.innerHTML = `<span class="year-full">${fullYr}</span><span class="year-short">${shortYr}</span>`;
+  }
   const yData = getYearData();
   const archiveBtn = document.getElementById('archiveYearActionBtn');
   if (archiveBtn) {
@@ -10378,6 +10411,7 @@ function renderNav() {
     });
     html += `</div>`;
     navTabsEl.innerHTML = html;
+    scrollToActiveMonthPill(true);
   } else if (activeSec === 'budgets') {
     let html = `
       <div class="month-pills-bar">
@@ -10651,6 +10685,19 @@ function scrollToCurrentWeek(smooth = true) {
   }, 120);
 }
 
+function scrollToActiveMonthPill(smooth = true) {
+  setTimeout(() => {
+    const activePill = document.querySelector('.month-pills-bar .tab-btn.month-pill.active');
+    if (activePill) {
+      activePill.scrollIntoView({
+        behavior: smooth ? 'smooth' : 'auto',
+        block: 'nearest',
+        inline: 'center'
+      });
+    }
+  }, 80);
+}
+
 function toggleDesktopRail(e) {
   if (e && typeof e.stopPropagation === 'function') {
     e.stopPropagation();
@@ -10785,6 +10832,7 @@ async function init() {
       const detected = detectCurrentMonthAndWeek(appState.currentYear);
       if (detected && detected.month) {
         appState.activeTab = detected.month;
+        appState.lastActiveMonth = detected.month;
       }
 
       if (window.budgetApp && typeof window.budgetApp.applyOpenBankingToCheckins === 'function') {
@@ -10795,6 +10843,8 @@ async function init() {
       renderYearMenu();
       renderNav();
       renderContent();
+      scrollToActiveMonthPill(false);
+      scrollToCurrentWeek(false);
 
       if (typeof window.budgetApp.updateLockNavBtn === 'function') {
         window.budgetApp.updateLockNavBtn();

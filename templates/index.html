@@ -43,8 +43,7 @@
       cursor: pointer !important;
       user-select: none !important;
       min-width: 0 !important;
-      max-width: 100% !important;
-      flex: 1 1 auto !important;
+      flex: 0 0 auto !important;
       transition: opacity 0.15s ease, transform 0.15s ease !important;
     }
     .logo-btn:hover,
@@ -60,8 +59,7 @@
       align-items: center !important;
       gap: 10px !important;
       min-width: 0 !important;
-      overflow: hidden !important;
-      flex: 1 1 auto !important;
+      flex: 0 0 auto !important;
     }
     .topbar-logo-img {
       height: 38px !important;
@@ -71,6 +69,15 @@
       border-radius: 6px !important;
       vertical-align: middle !important;
       flex-shrink: 0 !important;
+    }
+    .topbar-title-wrapper {
+      display: flex !important;
+      align-items: center !important;
+      cursor: pointer !important;
+      user-select: none !important;
+      min-width: 0 !important;
+      flex: 0 1 auto !important;
+      justify-content: flex-start !important;
     }
     #topBarMonthTitle {
       font-size: 20px !important;
@@ -82,6 +89,31 @@
       min-width: 0 !important;
       letter-spacing: -0.3px !important;
       line-height: 1.2 !important;
+      text-align: left !important;
+      display: inline-flex !important;
+      align-items: center !important;
+    }
+    .topbar-title-desktop {
+      display: inline-block !important;
+      font-size: 20px !important;
+      font-weight: 800 !important;
+      color: var(--heading, #f8fafc) !important;
+      letter-spacing: -0.3px !important;
+      line-height: 1.2 !important;
+    }
+    .topbar-title-mobile {
+      display: none !important;
+      font-size: 18px !important;
+      font-weight: 800 !important;
+      color: var(--heading, #f8fafc) !important;
+      letter-spacing: -0.2px !important;
+      line-height: 1.2 !important;
+    }
+    .year-full {
+      display: inline !important;
+    }
+    .year-short {
+      display: none !important;
     }
     .top-nav-right {
       display: flex !important;
@@ -139,15 +171,25 @@
         min-width: 0 !important;
         max-width: none !important;
         overflow: hidden !important;
+        justify-content: flex-start !important;
+      }
+      .logo-btn {
+        flex: 0 0 auto !important;
       }
       .logo {
         gap: 8px !important;
+        flex: 0 0 auto !important;
       }
       .topbar-logo-img {
         height: 32px !important;
         width: auto !important;
         max-width: 42px !important;
         flex-shrink: 0 !important;
+      }
+      .topbar-title-wrapper {
+        flex: 0 1 auto !important;
+        min-width: 0 !important;
+        justify-content: flex-start !important;
       }
       #topBarMonthTitle {
         font-size: 18px !important;
@@ -156,6 +198,19 @@
         max-width: none !important;
         letter-spacing: -0.2px !important;
         line-height: 1.2 !important;
+        text-align: left !important;
+      }
+      .topbar-title-desktop {
+        display: none !important;
+      }
+      .topbar-title-mobile {
+        display: inline-block !important;
+      }
+      .year-full {
+        display: none !important;
+      }
+      .year-short {
+        display: inline !important;
       }
       .top-nav-bar .btn-text,
       .top-nav-right .btn-text,

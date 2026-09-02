@@ -5,6 +5,17 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-09-02
+
+### Fixed & Enhanced
+- **Mobile Header Left-Alignment**: Fixed flex expansion on `.logo-btn` and grouped the logo, drawer button, and month title snugly to the left of the mobile header.
+- **Auto-Navigation & Smooth Centering on Startup**: The active payday month chip is now automatically centered in the sub-navigation pills bar on load and tab switches, with initial scroll focused on the current week.
+- **Desktop vs Mobile Date & Title Heading Formats**:
+  - **Desktop**: Renders full month names and complete 4-digit years (e.g. `December 2026`, `Budgets & Occasions 2026`, `Scheduled Bills 2026`).
+  - **Mobile**: Automatically condenses headings to compact, space-saving titles (e.g. `Dec '26`, `Budgets '26`) and abbreviates the year selector button on tight viewports.
+
+---
+
 ## [0.2.0] - 2026-09-02
 
 ### Added & Redesigned

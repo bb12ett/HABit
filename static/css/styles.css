@@ -1853,6 +1853,7 @@ input:focus, select:focus, textarea:focus {
 .top-nav-left {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   flex: 1 1 auto;
   min-width: 0;
@@ -1869,7 +1870,7 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
   user-select: none;
   min-width: 0;
-  max-width: 100%;
+  flex: 0 0 auto;
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 
@@ -1917,16 +1918,17 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  overflow: hidden;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
 }
 
 .topbar-title-wrapper {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   cursor: pointer;
   user-select: none;
   min-width: 0;
+  flex: 0 1 auto;
 }
 
 #topBarMonthTitle {
@@ -1939,6 +1941,77 @@ input:focus, select:focus, textarea:focus {
   min-width: 0;
   letter-spacing: -0.3px;
   line-height: 1.2;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+}
+
+.topbar-title-desktop {
+  display: inline-block;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--heading);
+  letter-spacing: -0.3px;
+  line-height: 1.2;
+}
+
+.topbar-title-mobile {
+  display: none;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--heading);
+  letter-spacing: -0.2px;
+  line-height: 1.2;
+}
+
+/* =========================================================
+   RESPONSIVE YEAR FORMATTING (DESKTOP FULL VS MOBILE CONDITIONAL)
+   ========================================================= */
+.year-full {
+  display: inline;
+}
+
+.year-short {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .topbar-title-desktop {
+    display: inline-block !important;
+  }
+  .topbar-title-mobile {
+    display: none !important;
+  }
+  .year-full {
+    display: inline !important;
+  }
+  .year-short {
+    display: none !important;
+  }
+}
+
+@media (max-width: 899px) {
+  .topbar-title-desktop {
+    display: none !important;
+  }
+  .topbar-title-mobile {
+    display: inline-block !important;
+  }
+  .year-full {
+    display: inline !important;
+  }
+  .year-short {
+    display: none !important;
+  }
+}
+
+@media (max-width: 680px) {
+  .year-full {
+    display: none !important;
+  }
+  .year-short {
+    display: inline !important;
+  }
 }
 
 .top-nav-right {
@@ -2086,15 +2159,25 @@ input:focus, select:focus, textarea:focus {
     min-width: 0 !important;
     max-width: none !important;
     overflow: hidden !important;
+    justify-content: flex-start !important;
+  }
+  .logo-btn {
+    flex: 0 0 auto !important;
   }
   .logo {
     gap: 8px !important;
+    flex: 0 0 auto !important;
   }
   .topbar-logo-img {
     height: 32px !important;
     width: auto !important;
     max-width: 42px !important;
     flex-shrink: 0 !important;
+  }
+  .topbar-title-wrapper {
+    flex: 0 1 auto !important;
+    min-width: 0 !important;
+    justify-content: flex-start !important;
   }
   #topBarMonthTitle {
     font-size: 18px !important;
@@ -2106,7 +2189,8 @@ input:focus, select:focus, textarea:focus {
     max-width: none !important;
     letter-spacing: -0.2px !important;
     line-height: 1.2 !important;
-    flex: 1 1 auto !important;
+    flex: 0 1 auto !important;
+    text-align: left !important;
   }
   .top-nav-bar .btn-text,
   .top-nav-right .btn-text,
