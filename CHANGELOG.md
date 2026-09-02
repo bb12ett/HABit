@@ -5,6 +5,14 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-09-02
+
+### Fixed & Enhanced
+- **Viewport Scroll Reset on Tab Switches**: Navigating between tabs (`Monthly`, `Budgets`, `Bills`, `Spend`, `Year`, `Settings`) and switching months or subtabs now cleanly resets viewport scroll to top (`scrollTop = 0`).
+- **Clean Scheduled Bills Master Table**: Removed redundant month-specific `Due`/`Cleared` badges from the Scheduled & Recurring master schedule table while preserving execution badges on the Monthly Overview.
+
+---
+
 ## [0.2.2] - 2026-09-02
 
 ### Fixed & Enhanced

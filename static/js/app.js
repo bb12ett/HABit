@@ -921,7 +921,8 @@ window.budgetApp = {
   copyCalcResult,
   initCalculator,
 
-  setTab(tabName) {
+  setTab(tabName, shouldScrollToWeek = false) {
+    const isSwitching = appState.activeTab !== tabName;
     appState.activeTab = tabName;
     if (months.includes(tabName)) {
       appState.lastActiveMonth = tabName;
@@ -932,6 +933,16 @@ window.budgetApp = {
     }
     renderNav();
     renderContent();
+
+    if (isSwitching) {
+      const container = document.getElementById('appBody');
+      if (container) container.scrollTop = 0;
+      window.scrollTo(0, 0);
+    }
+
+    if (shouldScrollToWeek) {
+      scrollToCurrentWeek(true);
+    }
   },
 
   setPrimarySection(section) {
@@ -1778,6 +1789,9 @@ window.budgetApp = {
   setSubTab(subTabName) {
     appState.activeSubTab = subTabName;
     renderContent();
+    const container = document.getElementById('appBody');
+    if (container) container.scrollTop = 0;
+    window.scrollTo(0, 0);
   },
 
   switchYear(y) {
@@ -1787,6 +1801,9 @@ window.budgetApp = {
     renderNav();
     calculateAndSyncRollovers();
     renderContent();
+    const container = document.getElementById('appBody');
+    if (container) container.scrollTop = 0;
+    window.scrollTo(0, 0);
   },
 
   toggleArchiveYear() {
