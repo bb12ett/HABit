@@ -39,13 +39,13 @@ Explore the deep-dive documentation pages below:
 | 🚀 **[Installation & Getting Started](Installation-and-Getting-Started)** | Add-on repository installation, Ingress setup, and Onboarding Wizard walkthrough. |
 | 📅 **[Payday Cycles & Calendar Engine](Payday-Cycles-and-Calendar-Engine)** | Pay frequency mathematics, 4/5-week splits, bank holiday engine, and rollover equations. |
 | 💳 **[Accounts & Credit Cards](Accounts-and-Credit-Cards)** | Checking, Savings, Credit Cards, autopay/statement calculation engine, and limits. |
-| ⚡ **[Open Banking & Bank Sync](Open-Banking-and-Bank-Sync)** | Multi-provider Open Banking (Enable Banking, TrueLayer, GoCardless, SimpleFIN) and offline CSV/OFX statement imports. |
+| ⚡ **[Open Banking & Bank Sync](Open-Banking-and-Bank-Sync)** | TrueLayer, Enable Banking, GoCardless, SimpleFIN, offline statements, and automated bill matching. |
 | 📋 **[Scheduled Bills & Direct Debits](Scheduled-Bills-and-Direct-Debits)** | Direct Debits, standing orders, working-day shifts, and payment status lifecycle. |
 | 🔒 **[Multi-User Mode & Security](Multi-User-Mode-and-Security)** | Single-PIN envelope encryption, AES-256-GCM crypto, salary masking, and session lock. |
-| 🎯 **[Budgets & Occasions](Budgets-and-Occasions)** | Envelope budgeting, weekly safe-to-spend formula, and gift/occasion purchase tracking. |
-| 📈 **[Annual Trajectory & Analytics](Annual-Trajectory-and-Analytics)** | 12-month net liquidity projections, Chart.js trends, multi-year archiving, and backups. |
+| 🎯 **[Budgets & Occasions](Budgets-and-Occasions)** | Category envelopes, Live Daily Pacing (`calculateLiveDailyPacing`), and gift/occasion tracking. |
+| 📈 **[Annual Trajectory & Spend Analytics](Annual-Trajectory-and-Analytics)** | 12-month projections, Live Spend donut charts, Top Merchants, and custom merchant rules. |
 | 🏠 **[Home Assistant Sensors & Automations](Home-Assistant-Sensors-and-Automations)** | Entity reference, Lovelace dashboard YAML cards, and notification automations. |
-| 🛠️ **[Interface, Navigation & Tools](Interface-Navigation-and-Tools)** | Topbar back/current-week jump, floating Financial Calculator (`Alt+C`), Value Picker, and Themes. |
+| 🛠️ **[Interface, Navigation & Tools](Interface-Navigation-and-Tools)** | Material Design 3 navigation rail, mobile bottom bar, Financial Calculator (`Alt+C`), Value Picker, and Themes. |
 
 ---
 

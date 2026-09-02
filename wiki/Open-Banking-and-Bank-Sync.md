@@ -290,24 +290,17 @@ HABit features a dedicated **Live Spend & Category Analytics** page accessible d
 ```
 
 ### Key Features:
-1. **Automated Merchant Classification**: Automatically categorizes UK and international merchants into 9 core categories:
-   - 🛒 **Supermarket & Groceries** (Tesco, Sainsbury's, Asda, Aldi, Lidl, Waitrose, M&S, etc.)
-   - ⛽ **Fuel & Transport** (Shell, BP, Esso, Trainline, TfL, Uber, Parking, etc.)
-   - ☕ **Dining, Cafes & Takeaways** (Costa, Starbucks, Greggs, McDonald's, Deliveroo, Pubs)
-   - 🛍️ **Shopping & Retail** (Amazon, eBay, Argos, Primark, Boots, TK Maxx, B&Q, Currys)
-   - 🎮 **Entertainment & Media** (Netflix, Spotify, Disney+, PlayStation, Cinema)
-   - 🏡 **Bills & Utilities** (Council Tax, British Gas, Octopus, Broadband, Water)
-   - 🏥 **Health & Personal** (Gyms, PureGym, Pharmacy, Barber, Dentist)
-   - ✈️ **Travel & Holidays** (Airlines, Airbnb, Hotels, Booking.com)
-   - 🔄 **Transfers & Card Payments** (Credit Card payoff, internal transfers)
-2. **Interactive Chart.js Donut & Progress Bars**: Proportional donut breakdown and ranked spending bars.
-3. **Custom Categorization Rules**: Click any transaction category tag to reclassify it and check *"Always categorize future transactions from [Merchant]"* to save persistent custom rules.
-4. **Timeframe & Account Filtering**: Filter instantly between This Week, This Month, Last Month, Last 30 Days, or Full Year, across all accounts or specific credit cards.
+1. **Automated Merchant Classification**: Automatically categorizes UK and international merchants into 11 core categories (Groceries, Dining, Transport, Bills, Shopping, Entertainment, Health, Travel, Transfers, Education, General).
+2. **Interactive Chart.js Donut & Progress Bars**: Proportional donut breakdown and ranked spending bars with real-time percentage allocation.
+3. **Instant Recategorization & Custom Merchant Rules**: Click any transaction category badge in the spend analytics table or the weekly transactions ledger to reclassify it. Check *"Save as permanent rule for this merchant"* to apply across all matching transactions. The view updates synchronously with zero perceptible lag.
+4. **Weekly Transaction Ledger Recategorization**: Open any week card's **View Transactions** ledger to see matched bills, auto-cleared debits, and interactive category pills for one-click reclassification directly from the overview.
+5. **Crowdsourced GitHub Catalog Sync**: Synchronize community merchant patterns with one click in Settings, or contribute unrecognized merchants back to the upstream directory.
+6. **Timeframe & Account Filtering**: Filter instantly between This Month, Last 30 Days, This Year, or All Time across Joint or individual user accounts.
 
 ---
 
 ## 🔒 Security & Privacy Architecture
 
-- **100% Local Storage**: Tokens, credentials, and transaction histories reside purely within Home Assistant (or encrypted SQLite).
-- **Read-Only AIS**: Open Banking protocols only allow read access. HABit cannot move money or create transfers.
-- **90-Day Renewal**: Due to PSD2 regulatory standards, Open Banking consents expire every 90 days. HABit warns you when renewal is approaching so you can re-authenticate with 1 click.
+- **100% Local Storage**: Tokens, credentials, and transaction histories reside purely within Home Assistant (or encrypted SQLite/JSON).
+- **Read-Only AIS**: Open Banking protocols strictly grant read-only Account Information Services (AIS). HABit cannot move money or initiate transfers.
+- **90-Day Renewal**: Due to PSD2 regulatory standards, Open Banking consents expire every 90 days. HABit notifies you when renewal is approaching so you can re-authenticate with 1 click.
