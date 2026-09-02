@@ -41,6 +41,7 @@ Most traditional budgeting apps force you into rigid 1st-to-31st calendar months
 | 📊 **Year Overview & Trends** | Visual charts and summary tables comparing annual income, fixed commitments, weekly spend, and savings growth. |
 | 🧮 **Built-in Calculator (`Alt+C`)** | Draggable, minimizable on-screen calculator featuring calculation history and a click-to-pick **Value Picker**. |
 | ⚡ **Speed-Dial Action Button** | Bottom-corner quick action button for instant balance check-ins, quick expense logging, and birthday purchases. |
+| 🧭 **Material Design 3 Navigation** | Collapsible desktop navigation rail (full-drawer $\rightleftharpoons$ icons-only) and streamlined mobile bottom navigation bar with full-bleed Home Assistant kiosk integration. |
 | 🎨 **4 Visual Themes** | Choose between Dark Charcoal, Navy Dark, Clean Light, and High Contrast modes. |
 
 ---

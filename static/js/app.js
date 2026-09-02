@@ -346,21 +346,69 @@ export function renderNav() {
   if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
     window.budgetApp.updateLockNavBtn();
   }
-  const yData = getYearData();
-  const cfg = getSettings();
-  let html = months.map(m => {
-    const md = yData.months[m] || {};
-    if (md.archived) return '';
-    return `<button class="tab-btn ${m === appState.activeTab ? 'active' : ''}" onclick="window.budgetApp.setTab('${m}')">${m}</button>`;
-  }).join('');
 
-  html += `<button class="tab-btn special ${appState.activeTab === 'Budgets' ? 'active' : ''}" onclick="window.budgetApp.setTab('Budgets')">🎯 Budgets & Occasions</button>`;
-  html += `<button class="tab-btn special ${appState.activeTab === 'Bills' ? 'active' : ''}" onclick="window.budgetApp.setTab('Bills')">📅 Scheduled Bills</button>`;
-  html += `<button class="tab-btn special ${appState.activeTab === 'Spend' ? 'active' : ''}" onclick="window.budgetApp.setTab('Spend')">🛒 Live Spend</button>`;
-  html += `<button class="tab-btn special ${appState.activeTab === 'Year' ? 'active' : ''}" onclick="window.budgetApp.setTab('Year')">📊 Annual Trajectory</button>`;
-  
+  const activeSec = (typeof getPrimarySection === 'function')
+    ? getPrimarySection(appState.activeTab)
+    : (months.includes(appState.activeTab) ? 'monthly' : (appState.activeTab === 'Budgets' || appState.activeTab === 'Bills' ? 'budgets' : 'analytics'));
+
+  // 1. Update Active State on MD3 Bottom Nav & Desktop Rail
+  if (typeof document !== 'undefined') {
+    const navItems = document.querySelectorAll('.md3-nav-item, .md3-rail-item');
+    navItems.forEach(el => {
+      const sec = el.getAttribute('data-section');
+      if (sec === activeSec) {
+        el.classList.add('active');
+      } else {
+        el.classList.remove('active');
+      }
+    });
+  }
+
+  // 2. Render Contextual Sub-Navigation in Header
   const navTabsEl = document.getElementById('navTabs');
-  if (navTabsEl) navTabsEl.innerHTML = html;
+  if (!navTabsEl) return;
+
+  if (activeSec === 'monthly') {
+    const yData = getYearData();
+    let html = `<div class="month-pills-bar">`;
+    months.forEach(m => {
+      const md = yData.months[m] || {};
+      if (md.archived) return;
+      html += `<button class="tab-btn month-pill ${m === appState.activeTab ? 'active' : ''}" onclick="window.budgetApp.setTab('${m}')">${m}</button>`;
+    });
+    html += `</div>`;
+    navTabsEl.innerHTML = html;
+  } else if (activeSec === 'budgets') {
+    let html = `
+      <div class="month-pills-bar">
+        <button class="tab-btn month-pill ${appState.activeTab === 'Budgets' ? 'active' : ''}" onclick="window.budgetApp.setTab('Budgets')">
+          🎯 Budgets & Occasions
+        </button>
+        <button class="tab-btn month-pill ${appState.activeTab === 'Bills' ? 'active' : ''}" onclick="window.budgetApp.setTab('Bills')">
+          📅 Scheduled & Recurring Bills
+        </button>
+      </div>
+    `;
+    navTabsEl.innerHTML = html;
+  } else if (activeSec === 'analytics') {
+    let html = `
+      <div class="month-pills-bar">
+        <button class="tab-btn month-pill ${appState.activeTab === 'Spend' ? 'active' : ''}" onclick="window.budgetApp.setTab('Spend')">
+          🛒 Live Spend & Categories
+        </button>
+        <button class="tab-btn month-pill ${appState.activeTab === 'Year' ? 'active' : ''}" onclick="window.budgetApp.setTab('Year')">
+          📊 Annual Trajectory
+        </button>
+      </div>
+    `;
+    navTabsEl.innerHTML = html;
+  } else if (activeSec === 'settings') {
+    navTabsEl.innerHTML = `
+      <div class="settings-subnav-title">
+        <span style="font-size:12.5px; font-weight:700; color:var(--heading);">⚙️ Global Application & Household Settings</span>
+      </div>
+    `;
+  }
 }
 
 export function renderContent() {
@@ -375,38 +423,21 @@ export function renderContent() {
       window.budgetApp.updateLockNavBtn();
     }
     const container = document.getElementById('appBody');
-    const metaBar = document.getElementById('monthMetaBar');
     if (!container) return;
 
     if (appState.activeTab === 'Settings') {
-      if (metaBar) {
-        metaBar.style.display = 'flex';
-        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">⚙️ Global Settings & Household Setup</span>`;
-      }
       renderSettingsView(container);
       return;
     }
     if (appState.activeTab === 'Budgets') {
-      if (metaBar) {
-        metaBar.style.display = 'flex';
-        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">🎯 Annual Budgets & Occasions (${appState.currentYear})</span>`;
-      }
       renderBudgetsView(container);
       return;
     }
     if (appState.activeTab === 'Bills') {
-      if (metaBar) {
-        metaBar.style.display = 'flex';
-        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">📅 Scheduled & Recurring Bills (${appState.currentYear})</span>`;
-      }
       renderBillsView(container);
       return;
     }
     if (appState.activeTab === 'Spend') {
-      if (metaBar) {
-        metaBar.style.display = 'flex';
-        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">🛒 Live Spend & Category Analytics</span>`;
-      }
       try {
         if (typeof renderSpendAnalyticsView === 'function') {
           renderSpendAnalyticsView(container);
@@ -424,29 +455,8 @@ export function renderContent() {
       return;
     }
     if (appState.activeTab === 'Year') {
-      if (metaBar) {
-        metaBar.style.display = 'flex';
-        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">📊 Annual Trajectory & Year Overview (${appState.currentYear})</span>`;
-      }
       renderYearOverviewView(container);
       return;
-    }
-
-    const mIdx = months.indexOf(appState.activeTab);
-    const schedule = calculateMonthSchedule(appState.currentYear, mIdx);
-    const yData = getYearData();
-    const isArchived = !!(yData.months[appState.activeTab] && yData.months[appState.activeTab].archived);
-
-    if (metaBar) {
-      metaBar.style.display = 'flex';
-      metaBar.innerHTML = `
-        <div class="payday-period-text" style="display:flex; align-items:center; gap:6px; cursor:pointer; min-width:0;" onclick="window.budgetApp.openDateOverrideModal('${appState.activeTab}')" title="Click to override payday period">
-          <span style="font-size:12px; color:var(--heading); font-weight:500;">📅 Payday: <strong style="color:var(--curr-border); font-weight:700;">${schedule.dateRangeStr}</strong> (${schedule.numWeeks} Wks) ✏️</span>
-        </div>
-        <button class="btn secondary payday-archive-btn" onclick="window.budgetApp.toggleArchiveMonth('${appState.activeTab}')" title="${isArchived ? 'Restore this month to navigation tabs' : 'Hide this completed month from top bar'}">
-          <span class="btn-icon">📦</span><span class="btn-text"> ${isArchived ? 'Unarchive Month' : 'Archive Month'}</span>
-        </button>
-      `;
     }
 
     renderOverviewView(container);
@@ -460,12 +470,149 @@ export function renderContent() {
   }
 }
 
+export function enableHomeAssistantKioskMode() {
+  if (typeof window === 'undefined' || window.self === window.top) return;
+
+  function injectKioskStyles() {
+    try {
+      const parentDoc = window.parent.document;
+      if (!parentDoc) return;
+
+      const styleId = 'habit-ha-ingress-fullscreen-style';
+      const cssRules = `
+        /* Hide Home Assistant Ingress Toolbar & Header */
+        ha-panel-iframe,
+        hass-ingress,
+        ha-ingress {
+          --app-header-height: 0px !important;
+        }
+        app-header,
+        app-toolbar,
+        ha-top-app-bar,
+        .header,
+        .toolbar,
+        app-header-layout > app-header,
+        ha-panel-iframe app-header,
+        ha-panel-iframe app-toolbar,
+        ha-panel-iframe ha-top-app-bar,
+        ha-panel-iframe .header,
+        ha-panel-iframe .toolbar,
+        ha-panel-iframe,
+        hass-ingress,
+        ha-ingress,
+        ha-panel-iframe app-header-layout,
+        hass-ingress app-header-layout,
+        ha-ingress app-header-layout {
+          --app-header-height: 0px !important;
+          padding: 0px !important;
+          margin: 0px !important;
+          height: 100% !important;
+          min-height: 100% !important;
+          max-height: 100% !important;
+        }
+        app-header,
+        app-toolbar,
+        ha-top-app-bar,
+        .header,
+        .toolbar,
+        app-header-layout > app-header,
+        ha-panel-iframe app-header,
+        ha-panel-iframe app-toolbar,
+        ha-panel-iframe ha-top-app-bar,
+        ha-panel-iframe .header,
+        ha-panel-iframe .toolbar,
+        hass-ingress app-header,
+        hass-ingress app-toolbar,
+        hass-ingress ha-top-app-bar,
+        hass-ingress .header,
+        hass-ingress .toolbar {
+          display: none !important;
+          height: 0px !important;
+          min-height: 0px !important;
+          max-height: 0px !important;
+          visibility: hidden !important;
+          opacity: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          pointer-events: none !important;
+        }
+        ha-panel-iframe iframe,
+        hass-ingress iframe,
+        ha-ingress iframe,
+        iframe {
+          height: 100% !important;
+          height: 100vh !important;
+          height: 100dvh !important;
+          max-height: 100% !important;
+          max-height: 100vh !important;
+          max-height: 100dvh !important;
+          width: 100% !important;
+          border: none !important;
+          position: fixed !important;
+          top: 0 !important;
+          left: 0 !important;
+          right: 0 !important;
+          bottom: 0 !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          z-index: 100 !important;
+        }
+        app-header-layout, #contentContainer, .main-content, #view {
+          padding-top: 0px !important;
+          padding-bottom: 0px !important;
+          margin-top: 0px !important;
+          margin-bottom: 0px !important;
+          height: 100% !important;
+          min-height: 100% !important;
+          max-height: 100% !important;
+        }
+      `;
+
+      if (!parentDoc.getElementById(styleId)) {
+        const style = parentDoc.createElement('style');
+        style.id = styleId;
+        style.textContent = cssRules;
+        parentDoc.head.appendChild(style);
+      }
+
+      function patchShadow(node) {
+        if (!node) return;
+        try {
+          if (node.shadowRoot) {
+            if (!node.shadowRoot.getElementById(styleId)) {
+              const srStyle = parentDoc.createElement('style');
+              srStyle.id = styleId;
+              srStyle.textContent = cssRules;
+              node.shadowRoot.appendChild(srStyle);
+            }
+            node.shadowRoot.querySelectorAll('*').forEach(patchShadow);
+          }
+        } catch (e) {}
+      }
+
+      parentDoc.querySelectorAll('home-assistant, home-assistant-main, ha-panel-iframe, hass-ingress, ha-ingress, partial-panel-resolver').forEach(el => {
+        patchShadow(el);
+      });
+
+      window.dispatchEvent(new Event('resize'));
+    } catch (e) {
+      // Ignored if cross-origin
+    }
+  }
+
+  injectKioskStyles();
+  setTimeout(injectKioskStyles, 50);
+  setTimeout(injectKioskStyles, 200);
+  setTimeout(injectKioskStyles, 600);
+  setTimeout(injectKioskStyles, 1500);
+  setTimeout(injectKioskStyles, 3000);
+}
+
 function bindGlobalEvents() {
   document.addEventListener('click', (e) => {
     const drawer = document.getElementById('sideDrawer');
-    const openBtn = document.getElementById('openDrawerBtn');
     if (drawer && drawer.classList.contains('open')) {
-      if (!drawer.contains(e.target) && !openBtn?.contains(e.target)) {
+      if (!drawer.contains(e.target) && !e.target.closest('#openDrawerBtn, #desktopRailMenuBtn, [onclick*="openDrawer"]')) {
         window.budgetApp.closeDrawer();
       }
     }
@@ -504,8 +651,34 @@ export function scrollToCurrentWeek(smooth = true) {
   }, 120);
 }
 
+export function toggleDesktopRail(e) {
+  if (e && typeof e.stopPropagation === 'function') {
+    e.stopPropagation();
+  }
+  const rail = document.getElementById('desktopNavRail');
+  if (!rail) return;
+  const isCollapsed = rail.classList.toggle('collapsed');
+  try {
+    localStorage.setItem('habit_rail_collapsed', isCollapsed ? '1' : '0');
+  } catch (err) {}
+}
+
+export function initDesktopRail() {
+  try {
+    const isCollapsed = localStorage.getItem('habit_rail_collapsed') === '1';
+    const rail = document.getElementById('desktopNavRail');
+    if (rail && isCollapsed) {
+      rail.classList.add('collapsed');
+    }
+  } catch (err) {}
+}
+
 export async function init() {
   try {
+    // Automatically enable full-bleed kiosk mode when embedded in Home Assistant Ingress
+    enableHomeAssistantKioskMode();
+    initDesktopRail();
+
     // Build ID check & storage cache purge
     const currentBuild = window.__BUILD_ID__ || '';
     const storedBuild = localStorage.getItem('budget_app_build_id');
@@ -700,32 +873,44 @@ window.budgetApp = {
 
   setTab(tabName) {
     appState.activeTab = tabName;
+    if (months.includes(tabName)) {
+      appState.lastActiveMonth = tabName;
+    } else if (tabName === 'Budgets' || tabName === 'Bills') {
+      appState.lastBudgetsTab = tabName;
+    } else if (tabName === 'Spend' || tabName === 'Year') {
+      appState.lastAnalyticsTab = tabName;
+    }
     renderNav();
     renderContent();
+  },
+
+  setPrimarySection(section) {
+    if (section === 'monthly') {
+      const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
+      const targetMonth = appState.lastActiveMonth || (detected && detected.month ? detected.month : 'Jan');
+      this.setTab(targetMonth);
+    } else if (section === 'budgets') {
+      const target = appState.lastBudgetsTab || 'Budgets';
+      this.setTab(target);
+    } else if (section === 'analytics') {
+      const target = appState.lastAnalyticsTab || 'Spend';
+      this.setTab(target);
+    } else if (section === 'settings') {
+      this.setTab('Settings');
+    }
   },
 
   scrollToCurrentWeek,
 
   handleLogoClick() {
     const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
-    const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : 'Jan');
-    const isMainMonthTab = months.includes(appState.activeTab);
-
-    if (!isMainMonthTab || appState.activeTab === 'Settings' || appState.activeSubTab !== 'overview') {
-      appState.activeTab = targetMonth;
-      appState.activeSubTab = 'overview';
-      renderNav();
-      renderContent();
-      scrollToCurrentWeek(true);
-    } else {
-      if (appState.activeTab !== targetMonth) {
-        appState.activeTab = targetMonth;
-        appState.activeSubTab = 'overview';
-        renderNav();
-        renderContent();
-      }
-      scrollToCurrentWeek(true);
-    }
+    const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : (appState.lastActiveMonth || 'Jan'));
+    appState.lastActiveMonth = targetMonth;
+    appState.activeTab = targetMonth;
+    appState.activeSubTab = 'overview';
+    renderNav();
+    renderContent();
+    scrollToCurrentWeek(true);
   },
 
   openBankLinkModal,
@@ -1628,7 +1813,10 @@ window.budgetApp = {
     renderContent();
   },
 
-  openDrawer() {
+  openDrawer(e) {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
     const d = document.getElementById('sideDrawer');
     const b = document.getElementById('drawerBackdrop');
     if (d) d.classList.add('open');
@@ -1641,6 +1829,10 @@ window.budgetApp = {
     if (d) d.classList.remove('open');
     if (b) b.classList.remove('open');
   },
+
+  enableHomeAssistantKioskMode,
+  toggleDesktopRail,
+  initDesktopRail,
 
 
   // ==========================================

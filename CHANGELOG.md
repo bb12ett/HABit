@@ -5,6 +5,35 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-02
+
+### Added & Redesigned
+- **Material Design 3 Navigation Hierarchy**: Restructured the entire interface into 3 core Material Design 3 destinations:
+  - **Monthly Views & Cashflow**: Direct payday cycle sheets with dynamic weekly cashflow ledgers.
+  - **Budgets & Bills**: Dedicated management for Annual Budgets, Occasions/Birthdays, and Scheduled Recurring Bills.
+  - **KPIs & Analysis**: Visualized Live Spend Analytics, Category Breakdowns, and Year-End Trajectory Forecasts.
+- **Collapsible Material Design 3 Desktop Navigation Rail**:
+  - Full-height left rail extending from the top to bottom of the viewport on desktop screens ($\ge 900\text{px}$).
+  - Dynamic icon swapping on toggle: fold-away (`panel-left-close`) icon when expanded, hamburger (`menu`) icon when collapsed into icons-only mode.
+  - Natural multi-line label text wrapping under indicator pills in collapsed mode per MD3 specifications.
+  - Persistent rail state across browser reloads via `localStorage`.
+- **Streamlined Mobile Bottom Navigation**:
+  - Compact 56px bottom navigation bar with vertical centering and refined safe-area padding (`env(safe-area-inset-bottom)`), eliminating empty dead space on mobile.
+  - Floating Action Button (FAB `+`) dynamically anchored directly above the bottom bar.
+- **Unified Individual Sub-Navigation Pills**:
+  - Standardized all sub-views (Monthly selector, Budgets vs Bills, Spend vs Trajectory) on individual rounded pill chips (`.tab-btn.month-pill`) for a clean, consistent design language.
+- **Automatic Home Assistant Ingress Full-Bleed Kiosk Mode**:
+  - Automatically suppresses Home Assistant top ingress bars and header toolbars on startup, expanding HABit into a native full-viewport app experience.
+- **Left-Anchored Settings & Tools Drawer**:
+  - Redesigned Settings & Tools drawer to slide out from the left edge with glassmorphic backdrop elevation.
+
+### Fixed
+- **Factory Reset & Danger Button Contrast**: Fixed text color cascade on `.btn.red` so button text displays in high-contrast solid white.
+- **Top App Bar Title Decoupling**: Decoupled the active month/section title (`#topBarMonthTitle`) from the desktop logo to ensure titles remain visible across all screen sizes.
+- **Logo Theme Swapping**: Fixed theme selector specificity ensuring single active logo rendering in the top bar.
+
+---
+
 ## [0.1.8] - 2026-09-02
 
 ### Fixed

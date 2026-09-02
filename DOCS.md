@@ -146,7 +146,7 @@ Switch themes anytime via the **Settings (☰)** side drawer or in the Setup Wiz
 2. On mobile, pull down to refresh or clear the Home Assistant Companion App cache.
 
 ### Q: How do I change my payday or currency after initial setup?
-**A:** Click the **Settings (☰)** button in the top right, navigate to **Global Settings**, and update your Payday date, Currency symbol, or Holiday region. Click **Save Settings**.
+**A:** Click **Settings (⚙️)** in the left navigation rail (or tap **☰** in the top-left on mobile), navigate to **Global Settings**, and update your Payday date, Currency symbol, or Holiday region. Click **Save Settings**.
 
 ### Q: Can I run HABit on Raspberry Pi (ARM) and x86_64 systems?
 **A:** Yes! HABit is packaged with multi-architecture support for `aarch64` (Raspberry Pi 3/4/5 64-bit, Home Assistant Green/Yellow), `amd64` (Intel/AMD NUC, Proxmox, x86_64 VMs), `armhf`, `armv7`, and `i386`.

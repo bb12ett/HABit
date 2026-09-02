@@ -19,7 +19,10 @@
       align-items: center !important;
       width: 100% !important;
       gap: 10px !important;
-      padding: 6px 0 !important;
+      padding: 0 !important;
+      margin-bottom: 6px !important;
+      height: 36px !important;
+      min-height: 36px !important;
       box-sizing: border-box !important;
       flex-wrap: nowrap !important;
     }
@@ -99,7 +102,7 @@
       border: 1px solid var(--border, rgba(255,255,255,0.15)) !important;
       border-radius: 8px !important;
       padding: 6px 12px !important;
-      margin: 4px 0 8px 0 !important;
+      margin: 0 0 14px 0 !important;
       box-sizing: border-box !important;
       min-height: 38px !important;
     }
@@ -125,7 +128,7 @@
       vertical-align: middle !important;
       flex-shrink: 0 !important;
     }
-    @media (max-width: 600px) {
+    @media (max-width: 680px) {
       .top-nav-bar {
         gap: 6px !important;
         padding: 4px 0 !important;
@@ -522,10 +525,17 @@
       box-shadow: 0 6px 20px rgba(239, 68, 68, 0.5) !important;
     }
 
+    @media (max-width: 899px) {
+      .fab-container {
+        bottom: calc(56px + 16px + env(safe-area-inset-bottom, 0px)) !important;
+        right: 16px !important;
+      }
+    }
+
     @media (max-width: 680px) {
       .fab-container {
-        bottom: 20px !important;
-        right: 16px !important;
+        bottom: calc(56px + 12px + env(safe-area-inset-bottom, 0px)) !important;
+        right: 14px !important;
       }
       .fab-speed-dial {
         gap: 10px !important;
@@ -604,60 +614,176 @@
     <!-- ERROR BANNER -->
     <div id="errorBanner" style="display:none; background:#ef4444; color:#fff; padding:12px; font-weight:bold; font-size:12px; margin:8px 16px; border-radius:6px; white-space:pre-wrap;"></div>
 
-    <!-- STATIC FIXED TOP HEADER & TABS (Never scrolls with content) -->
-    <header id="appHeaderSticky" class="app-header-static">
-      <!-- ROW 1: TOP NAV BAR (Logo + Year on Left, View Mode + Settings on Far Right) -->
-      <div class="top-nav-bar">
-        <div class="top-nav-left">
-          <div class="logo-btn" onclick="window.budgetApp.handleLogoClick()" title="Return to Overview / Current Week" role="button" tabindex="0">
-            <div class="logo">
-              <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
-              <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
-              <span id="topBarMonthTitle">Budget</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="top-nav-right">
-          <!-- OPEN BANKING SYNC ERROR INDICATOR -->
-          <button id="openBankingSyncErrorBtn" class="btn" style="display:none; background:rgba(239,68,68,0.18); color:var(--red, #ef4444); border:1px solid rgba(239,68,68,0.45); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.handleOpenBankingSyncErrorClick()" title="Open Banking Sync Error. Click to view Settings & Logs.">
-            <span class="btn-icon">⚠️</span><span class="btn-text"> Sync Error</span>
-          </button>
-          <!-- USER PROFILE DROPDOWN (Shown when multi-user enabled) -->
-          <div class="dropdown" id="userProfileDropdown" style="display:none;">
-            <button id="userProfileBtn" class="btn secondary" onclick="window.budgetApp.toggleUserDropdown(event)" title="Active User Profile"><span class="btn-icon">&#128100;</span><span class="btn-text"> <span id="currentUserDisplay">Joint</span> &#9662;</span></button>
-            <div id="userProfileDropdownOptions" class="dropdown-content"></div>
-          </div>
-          <div class="dropdown">
-            <button id="yearDropdownBtn" class="btn secondary" onclick="window.budgetApp.toggleYearDropdown(event)" title="Select Year"><span class="btn-icon">&#128197;</span><span class="btn-text"> <span id="currentYearDisplay">2026</span> &#9662;</span></button>
-            <div class="dropdown-content">
-              <div id="yearListOptions"></div>
-              <div style="border-top:1px solid var(--border); margin-top:4px;">
-                <button id="dropdownArchiveManagerBtn" onclick="window.budgetApp.openArchiveManagerModal()">&#128230; Archive Manager</button>
-                <button id="archiveYearActionBtn" onclick="window.budgetApp.toggleArchiveYear()">&#128230; Archive Year</button>
-                <button id="createNewYearBtn" onclick="window.budgetApp.promptCreateNewYear()">&#10133; Create New Year</button>
+    <!-- APP MAIN LAYOUT (DESKTOP RAIL ON LEFT, CONTENT CANVAS ON RIGHT) -->
+    <div class="app-main-layout">
+      <!-- DESKTOP MATERIAL DESIGN 3 NAVIGATION RAIL -->
+      <aside id="desktopNavRail" class="md3-nav-rail" aria-label="Desktop Navigation Rail">
+        <div class="md3-rail-header">
+          <div class="md3-rail-brand">
+            <div class="logo-btn" onclick="window.budgetApp.handleLogoClick()" title="Return to Overview / Current Week" role="button" tabindex="0">
+              <div class="logo" style="gap:8px;">
+                <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode" style="height:32px; width:auto;">
+                <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode" style="height:32px; width:auto;">
+                <span style="font-size:17px; font-weight:800; letter-spacing:-0.2px; color:var(--heading);">HABit</span>
               </div>
             </div>
+            <button id="desktopRailMenuBtn" class="md3-rail-menu-btn" onclick="window.budgetApp.toggleDesktopRail(event)" title="Collapse / Expand Navigation" aria-label="Toggle Navigation Rail">
+              <!-- MD3 FOLD AWAY (COLLAPSE) ICON: Shown when expanded -->
+              <svg class="md3-rail-icon-fold" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+                <rect width="18" height="18" x="3" y="3" rx="2"></rect>
+                <path d="M9 3v18"></path>
+                <path d="m14 9-3 3 3 3"></path>
+              </svg>
+              <!-- MD3 EXPAND (HAMBURGER) ICON: Shown when collapsed -->
+              <svg class="md3-rail-icon-expand" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+                <line x1="3" y1="12" x2="21" y2="12"></line>
+                <line x1="3" y1="6" x2="21" y2="6"></line>
+                <line x1="3" y1="18" x2="21" y2="18"></line>
+              </svg>
+            </button>
           </div>
-          <button id="calculatorNavBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator (Alt+C)"><span class="btn-icon">&#129518;</span><span class="btn-text"> Calculator</span></button>
-          <button id="lockSessionNavBtn" class="btn secondary" onclick="window.budgetApp.lockActiveSession()" title="Lock Session (PIN)" style="display:none;"><span class="btn-icon">🔒</span><span class="btn-text"> Lock</span></button>
-          <button id="globalModeBtn" class="btn secondary" onclick="window.budgetApp.toggleGlobalEditMode()" title="Toggle View/Edit Mode"><span class="btn-icon">&#128065;&#65039;</span><span class="btn-text"> View Mode</span></button>
-          <button id="openDrawerBtn" class="btn secondary" onclick="window.budgetApp.openDrawer()" title="Settings & Tools"><span class="btn-icon">&#9776;</span><span class="btn-text"> Settings</span></button>
         </div>
+
+        <div class="md3-rail-items">
+          <button class="md3-rail-item active" data-section="monthly" onclick="window.budgetApp.setPrimarySection('monthly')" title="Monthly Views & Cashflow">
+            <div class="md3-rail-icon-wrapper">
+              <svg class="md3-rail-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+            </div>
+            <span class="md3-rail-label">Monthly Views</span>
+          </button>
+
+          <button class="md3-rail-item" data-section="budgets" onclick="window.budgetApp.setPrimarySection('budgets')" title="Annual Budgets & Scheduled Bills">
+            <div class="md3-rail-icon-wrapper">
+              <svg class="md3-rail-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+                <line x1="2" y1="10" x2="22" y2="10"></line>
+              </svg>
+            </div>
+            <span class="md3-rail-label">Budgets & Bills</span>
+          </button>
+
+          <button class="md3-rail-item" data-section="analytics" onclick="window.budgetApp.setPrimarySection('analytics')" title="Spend Analytics & Annual Trajectory">
+            <div class="md3-rail-icon-wrapper">
+              <svg class="md3-rail-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="20" x2="18" y2="10"></line>
+                <line x1="12" y1="20" x2="12" y2="4"></line>
+                <line x1="6" y1="20" x2="6" y2="14"></line>
+              </svg>
+            </div>
+            <span class="md3-rail-label">KPIs & Analysis</span>
+          </button>
+        </div>
+
+        <div class="md3-rail-footer" style="margin-top:auto; padding-top:14px; border-top:1px solid var(--border);">
+          <button class="md3-rail-item" onclick="window.budgetApp.openDrawer(event)" title="Settings, Appearance & Tools">
+            <div class="md3-rail-icon-wrapper">
+              <svg class="md3-rail-svg" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+              </svg>
+            </div>
+            <span class="md3-rail-label">Settings</span>
+          </button>
+        </div>
+      </aside>
+
+      <!-- CONTENT CANVAS (HEADER + SCROLLABLE MAIN CONTENT) -->
+      <div class="app-content-canvas">
+        <!-- STATIC FIXED TOP HEADER & TABS -->
+        <header id="appHeaderSticky" class="app-header-static">
+          <!-- ROW 1: TOP NAV BAR (Menu + Logo on Left, Action Buttons on Right) -->
+          <div class="top-nav-bar">
+            <div class="top-nav-left">
+              <button id="openDrawerBtn" class="btn secondary menu-drawer-btn" onclick="window.budgetApp.openDrawer(event)" title="Settings, Appearance & Tools (Left Menu)" aria-label="Open Settings Menu">
+                <span class="btn-icon">☰</span>
+              </button>
+              <div class="logo-btn" onclick="window.budgetApp.handleLogoClick()" title="Return to Overview / Current Week" role="button" tabindex="0">
+                <div class="logo">
+                  <img src="static/img/logo_dark.png" alt="HABit Logo" class="topbar-logo-img logo-dark-mode">
+                  <img src="static/img/logo_light.png" alt="HABit Logo" class="topbar-logo-img logo-light-mode">
+                </div>
+              </div>
+              <div class="topbar-title-wrapper" onclick="window.budgetApp.handleLogoClick()" role="button" tabindex="0" title="Return to Overview / Current Week">
+                <span id="topBarMonthTitle">Budget</span>
+              </div>
+            </div>
+
+            <div class="top-nav-right">
+              <!-- OPEN BANKING SYNC ERROR INDICATOR -->
+              <button id="openBankingSyncErrorBtn" class="btn" style="display:none; background:rgba(239,68,68,0.18); color:var(--red, #ef4444); border:1px solid rgba(239,68,68,0.45); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.handleOpenBankingSyncErrorClick()" title="Open Banking Sync Error. Click to view Settings & Logs.">
+                <span class="btn-icon">⚠️</span><span class="btn-text"> Sync Error</span>
+              </button>
+              <!-- USER PROFILE DROPDOWN (Shown when multi-user enabled) -->
+              <div class="dropdown" id="userProfileDropdown" style="display:none;">
+                <button id="userProfileBtn" class="btn secondary" onclick="window.budgetApp.toggleUserDropdown(event)" title="Active User Profile"><span class="btn-icon">&#128100;</span><span class="btn-text"> <span id="currentUserDisplay">Joint</span> &#9662;</span></button>
+                <div id="userProfileDropdownOptions" class="dropdown-content"></div>
+              </div>
+              <div class="dropdown">
+                <button id="yearDropdownBtn" class="btn secondary" onclick="window.budgetApp.toggleYearDropdown(event)" title="Select Year"><span class="btn-icon">&#128197;</span><span class="btn-text"> <span id="currentYearDisplay">2026</span> &#9662;</span></button>
+                <div class="dropdown-content">
+                  <div id="yearListOptions"></div>
+                  <div style="border-top:1px solid var(--border); margin-top:4px;">
+                    <button id="dropdownArchiveManagerBtn" onclick="window.budgetApp.openArchiveManagerModal()">&#128230; Archive Manager</button>
+                    <button id="archiveYearActionBtn" onclick="window.budgetApp.toggleArchiveYear()">&#128230; Archive Year</button>
+                    <button id="createNewYearBtn" onclick="window.budgetApp.promptCreateNewYear()">&#10133; Create New Year</button>
+                  </div>
+                </div>
+              </div>
+              <button id="calculatorNavBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator (Alt+C)"><span class="btn-icon">&#129518;</span><span class="btn-text"> Calculator</span></button>
+              <button id="lockSessionNavBtn" class="btn secondary" onclick="window.budgetApp.lockActiveSession()" title="Lock Session (PIN)" style="display:none;"><span class="btn-icon">🔒</span><span class="btn-text"> Lock</span></button>
+              <button id="globalModeBtn" class="btn secondary" onclick="window.budgetApp.toggleGlobalEditMode()" title="Toggle View/Edit Mode"><span class="btn-icon">&#128065;&#65039;</span><span class="btn-text"> View Mode</span></button>
+            </div>
+          </div>
+
+          <!-- ROW 2: SUB-NAVIGATION / MONTH TABS -->
+          <div class="nav-tabs" id="navTabs"></div>
+        </header>
+
+        <!-- SCROLLABLE CONTENT VIEWPORT -->
+        <main id="appBody" class="app-body-scroll"></main>
       </div>
+    </div>
 
-      <!-- ROW 2: PAYDAY PERIOD META BAR (Sleek full-width banner) -->
-      <div id="monthMetaBar" class="payday-meta-bar"></div>
+    <!-- MOBILE MATERIAL DESIGN 3 BOTTOM NAVIGATION BAR -->
+    <nav id="mobileBottomNav" class="md3-bottom-nav" aria-label="Primary Navigation">
+      <button class="md3-nav-item active" data-section="monthly" onclick="window.budgetApp.setPrimarySection('monthly')" title="Monthly Views">
+        <div class="md3-icon-container">
+          <svg class="md3-nav-svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+            <line x1="16" y1="2" x2="16" y2="6"></line>
+            <line x1="8" y1="2" x2="8" y2="6"></line>
+            <line x1="3" y1="10" x2="21" y2="10"></line>
+          </svg>
+        </div>
+        <span class="md3-nav-label">Monthly</span>
+      </button>
 
-      <!-- ROW 3: NAVIGATION TABS -->
-      <div class="nav-tabs" id="navTabs"></div>
+      <button class="md3-nav-item" data-section="budgets" onclick="window.budgetApp.setPrimarySection('budgets')" title="Budgets & Bills">
+        <div class="md3-icon-container">
+          <svg class="md3-nav-svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+            <line x1="2" y1="10" x2="22" y2="10"></line>
+          </svg>
+        </div>
+        <span class="md3-nav-label">Budgets</span>
+      </button>
 
-      <!-- ROW 4: SUB-NAVIGATION BAR -->
-      <div class="sub-nav" id="subNavBar" style="display:none;"></div>
-    </header>
-
-    <!-- SCROLLABLE CONTENT VIEWPORT -->
-    <main id="appBody" class="app-body-scroll"></main>
+      <button class="md3-nav-item" data-section="analytics" onclick="window.budgetApp.setPrimarySection('analytics')" title="KPIs & Analysis">
+        <div class="md3-icon-container">
+          <svg class="md3-nav-svg" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="20" x2="18" y2="10"></line>
+            <line x1="12" y1="20" x2="12" y2="4"></line>
+            <line x1="6" y1="20" x2="6" y2="14"></line>
+          </svg>
+        </div>
+        <span class="md3-nav-label">Analysis</span>
+      </button>
+    </nav>
   </div>
 
   <!-- BACKDROP FOR SIDE DRAWER -->

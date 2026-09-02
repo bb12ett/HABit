@@ -111,6 +111,9 @@ export const appState = {
   currentYear: 2026,
   activeTab: "Jan",
   activeSubTab: "overview",
+  lastActiveMonth: "Jan",
+  lastBudgetsTab: "Budgets",
+  lastAnalyticsTab: "Spend",
   globalEditMode: false,
   draggedItemInfo: null,
   activeChart: null,
@@ -121,8 +124,17 @@ export const appState = {
   unmaskedSalaries: {}
 };
 
+export function getPrimarySection(tabName = appState.activeTab) {
+  if (months.includes(tabName)) return 'monthly';
+  if (tabName === 'Budgets' || tabName === 'Bills') return 'budgets';
+  if (tabName === 'Spend' || tabName === 'Year') return 'analytics';
+  if (tabName === 'Settings') return 'settings';
+  return 'monthly';
+}
+
 if (typeof window !== 'undefined') {
   window.__budgetAppState = appState;
+  window.getPrimarySection = getPrimarySection;
 }
 
 export function applyTheme(theme) {
