@@ -39,7 +39,11 @@ import {
   uploadBankStatement,
   fetchCategories,
   syncCategoriesFromGitHub,
-  suggestCategoryMerchant
+  fetchAvailableYears,
+  createBudgetYear,
+  propagateScheduledBillsApi,
+  exportFullBudgetBackupApi,
+  importFullBudgetBackupApi
 } from './api.js';
 
 import {
@@ -127,6 +131,8 @@ import {
   copyCalcResult,
   initCalculator
 } from './views/calculator.js';
+
+import { initMobileGestures } from './gestures.js';
 
 ﻿
 
@@ -811,6 +817,7 @@ export async function init() {
 
     bindGlobalEvents();
     initCalculator();
+    initMobileGestures();
 
     // Fetch and initialize dynamic categories from API/cache
     try {
@@ -1794,9 +1801,24 @@ window.budgetApp = {
     window.scrollTo(0, 0);
   },
 
-  switchYear(y) {
-    appState.currentYear = parseInt(y, 10);
+  async switchYear(y) {
+    const targetY = parseInt(y, 10);
+    if (!targetY || isNaN(targetY)) return;
     document.querySelector('.dropdown')?.classList.remove('open');
+    
+    // If year data is not yet in client state, fetch it from backend
+    if (!appState.data.years || !appState.data.years[String(targetY)]) {
+      const fresh = await fetchBudget(targetY);
+      if (fresh) {
+        if (fresh.settings) appState.data.settings = fresh.settings;
+        if (!appState.data.years) appState.data.years = {};
+        if (fresh.years) Object.assign(appState.data.years, fresh.years);
+        if (fresh.open_banking_transactions) appState.data.open_banking_transactions = fresh.open_banking_transactions;
+        if (fresh.available_years) appState.data.available_years = fresh.available_years;
+      }
+    }
+
+    appState.currentYear = targetY;
     renderYearMenu();
     renderNav();
     calculateAndSyncRollovers();
@@ -1828,11 +1850,20 @@ window.budgetApp = {
     startOnboarding();
   },
 
-  exportData() {
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState.data, null, 2));
+  async exportData() {
+    let payload = appState.data;
+    try {
+      const full = await exportFullBudgetBackupApi();
+      if (full && full.years && full.settings) {
+        payload = full;
+      }
+    } catch (e) {
+      console.warn("Using active memory state for export fallback:", e);
+    }
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
     const dlAnchor = document.createElement('a');
     dlAnchor.setAttribute("href", dataStr);
-    dlAnchor.setAttribute("download", `budget_backup_${appState.currentYear}_${new Date().toISOString().split('T')[0]}.json`);
+    dlAnchor.setAttribute("download", `habit_full_backup_${new Date().toISOString().split('T')[0]}.json`);
     document.body.appendChild(dlAnchor);
     dlAnchor.click();
     dlAnchor.remove();
@@ -1849,14 +1880,19 @@ window.budgetApp = {
           alert("Invalid budget backup file format.");
           return;
         }
-        if (confirm("Import this budget dataset? This will overwrite your current budget data!")) {
-          appState.data = imported;
+        if (confirm("Import this complete budget dataset? This will update your settings and budget years!")) {
+          const res = await importFullBudgetBackupApi(imported);
+          if (res && res.data) {
+            appState.data = res.data;
+          } else {
+            appState.data = imported;
+            await saveBudget(appState.data);
+          }
           calculateAndSyncRollovers();
           renderYearMenu();
           renderNav();
           renderContent();
-          await saveBudget(appState.data);
-          alert("Budget data imported successfully!");
+          alert("Complete multi-year budget data imported successfully!");
         }
       } catch (err) {
         alert("Failed to parse JSON file: " + err.message);
@@ -1902,6 +1938,13 @@ window.budgetApp = {
     const b = document.getElementById('drawerBackdrop');
     if (d) d.classList.add('open');
     if (b) b.classList.add('open');
+
+    // Sync theme pills in side sheet
+    const currentTheme = getSettings().theme || 'grey_dark';
+    document.querySelectorAll('.md3-theme-pill').forEach(p => {
+      if (p.getAttribute('data-theme') === currentTheme) p.classList.add('active');
+      else p.classList.remove('active');
+    });
   },
 
   closeDrawer() {
@@ -2459,35 +2502,38 @@ window.budgetApp = {
     if (fromIdx === -1) return;
 
     const remainingMonths = months.slice(fromIdx + 1);
-    if (remainingMonths.length === 0) {
-      alert(`${fromMonth} is the last month of the year. Updating global defaults for future years.`);
+    const availYears = (appState.data.available_years || []).filter(y => y > appState.currentYear);
+    const futureYearsNote = availYears.length > 0 ? `\n• Future Years: ${availYears.join(', ')} (all 12 months)` : '';
+
+    const confirmMsg = `🚀 Propagate Scheduled Bills & Inflows\n\nApply active ${fromMonth} ${appState.currentYear} items to:\n• ${appState.currentYear}: ${remainingMonths.length > 0 ? remainingMonths.join(', ') : 'Global Defaults'}${futureYearsNote}\n• Master Templates: Permanent defaults for any new years\n\nProceed?`;
+    if (!confirm(confirmMsg)) return;
+
+    // Call backend propagate endpoint for complete multi-year & master template sync
+    const res = await propagateScheduledBillsApi(appState.currentYear, fromMonth);
+    if (res && res.data) {
+      if (res.data.settings) appState.data.settings = res.data.settings;
+      if (res.data.years) Object.assign(appState.data.years, res.data.years);
+      if (res.data.open_banking_transactions) appState.data.open_banking_transactions = res.data.open_banking_transactions;
+      if (res.data.available_years) appState.data.available_years = res.data.available_years;
+    } else {
+      // Local fallback
+      const yData = getYearData();
+      for (let i = fromIdx + 1; i < months.length; i++) {
+        const targetM = months[i];
+        if (!yData.months[targetM]) yData.months[targetM] = {};
+        yData.months[targetM].direct_debits = JSON.parse(JSON.stringify(curDDs));
+        yData.months[targetM].payments_in = JSON.parse(JSON.stringify(curIncomes));
+      }
       const cfg = getSettings();
       cfg.default_direct_debits = JSON.parse(JSON.stringify(curDDs));
       cfg.default_payments_in = JSON.parse(JSON.stringify(curIncomes));
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      return;
     }
-
-    const confirmed = confirm(`Propagate ${curDDs.length} scheduled bills and ${curIncomes.length} payments in from ${fromMonth} to all following months (${remainingMonths.join(', ')}) in ${appState.currentYear}?`);
-    if (!confirmed) return;
-
-    const yData = getYearData();
-    for (let i = fromIdx + 1; i < months.length; i++) {
-      const targetM = months[i];
-      if (!yData.months[targetM]) yData.months[targetM] = {};
-      yData.months[targetM].direct_debits = JSON.parse(JSON.stringify(curDDs));
-      yData.months[targetM].payments_in = JSON.parse(JSON.stringify(curIncomes));
-    }
-
-    // Update global defaults so new years inherit them
-    const cfg = getSettings();
-    cfg.default_direct_debits = JSON.parse(JSON.stringify(curDDs));
-    cfg.default_payments_in = JSON.parse(JSON.stringify(curIncomes));
 
     calculateAndSyncRollovers();
     renderContent();
-    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    alert(`Successfully propagated ${curDDs.length} bills and ${curIncomes.length} payments in across the rest of ${appState.currentYear}.`);
+    const updatedFut = res && res.updated_future_years && res.updated_future_years.length > 0 ? ` and future years (${res.updated_future_years.join(', ')})` : '';
+    alert(`Successfully propagated ${curDDs.length} bills and ${curIncomes.length} payments in across ${appState.currentYear}${updatedFut}.`);
   },
 
   // FAB Speed Dial Methods
@@ -3012,7 +3058,7 @@ window.budgetApp = {
   async createNewBudgetYear(newYear) {
     newYear = parseInt(newYear, 10);
     if (!newYear || isNaN(newYear)) return;
-    if (appState.data.years[newYear]) {
+    if (appState.data.years && appState.data.years[newYear]) {
       alert(`Year ${newYear} already exists.`);
       return;
     }
@@ -3020,97 +3066,85 @@ window.budgetApp = {
     const prevYearNum = newYear - 1;
     const prevYearData = appState.data.years ? appState.data.years[String(prevYearNum)] : null;
 
-    // 1. Inherit Birthdays (fresh transactions for new year)
-    let initialBirthdays = [];
-    if (prevYearData && prevYearData.birthdays && prevYearData.birthdays.length > 0) {
-      initialBirthdays = prevYearData.birthdays.map(b => ({ ...b, transactions: [] }));
+    // Call backend endpoint to initialize new year
+    const res = await createBudgetYear(newYear, prevYearNum);
+    if (res && res.data) {
+      if (res.data.settings) appState.data.settings = res.data.settings;
+      if (!appState.data.years) appState.data.years = {};
+      if (res.data.years) Object.assign(appState.data.years, res.data.years);
+      if (res.data.open_banking_transactions) appState.data.open_banking_transactions = res.data.open_banking_transactions;
+      if (res.data.available_years) appState.data.available_years = res.data.available_years;
     } else {
-      initialBirthdays = JSON.parse(JSON.stringify(cfg.birthdays || []));
-    }
+      // Local fallback initialization
+      let initialBirthdays = (prevYearData && prevYearData.birthdays) ? prevYearData.birthdays.map(b => ({ ...b, transactions: [] })) : JSON.parse(JSON.stringify(cfg.birthdays || []));
+      let initialRecurring = (prevYearData && prevYearData.recurring_payments) ? JSON.parse(JSON.stringify(prevYearData.recurring_payments)) : JSON.parse(JSON.stringify(cfg.recurring_payments || []));
+      let initialRecurringIncomes = (prevYearData && prevYearData.recurring_incomes) ? JSON.parse(JSON.stringify(prevYearData.recurring_incomes)) : JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
+      let initialYearlyBills = (prevYearData && prevYearData.yearly_recurring) ? JSON.parse(JSON.stringify(prevYearData.yearly_recurring)) : JSON.parse(JSON.stringify(cfg.default_yearly_recurring || []));
+      let initialYearlyIncomes = (prevYearData && prevYearData.yearly_income) ? JSON.parse(JSON.stringify(prevYearData.yearly_income)) : JSON.parse(JSON.stringify(cfg.default_yearly_income || []));
 
-    // 2. Inherit Recurring Payments & Incomes
-    let initialRecurring = [];
-    if (prevYearData && prevYearData.recurring_payments && prevYearData.recurring_payments.length > 0) {
-      initialRecurring = JSON.parse(JSON.stringify(prevYearData.recurring_payments));
-    } else {
-      initialRecurring = JSON.parse(JSON.stringify(cfg.recurring_payments || []));
-    }
+      const prevDecMonth = (prevYearData && prevYearData.months && prevYearData.months['Dec']) ? prevYearData.months['Dec'] : null;
+      const inheritDDs = prevDecMonth ? prevDecMonth.direct_debits : cfg.default_direct_debits;
+      const inheritPaymentsIn = prevDecMonth ? prevDecMonth.payments_in : cfg.default_payments_in;
+      const inheritDeducts = prevDecMonth ? prevDecMonth.deductions_list : cfg.default_deductions;
 
-    let initialRecurringIncomes = [];
-    if (prevYearData && prevYearData.recurring_incomes && prevYearData.recurring_incomes.length > 0) {
-      initialRecurringIncomes = JSON.parse(JSON.stringify(prevYearData.recurring_incomes));
-    } else {
-      initialRecurringIncomes = JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
-    }
-
-    // 3. Inherit Annual Bills & Incomes
-    let initialYearlyBills = [];
-    if (prevYearData && prevYearData.yearly_recurring && prevYearData.yearly_recurring.length > 0) {
-      initialYearlyBills = JSON.parse(JSON.stringify(prevYearData.yearly_recurring));
-    } else {
-      initialYearlyBills = JSON.parse(JSON.stringify(cfg.default_yearly_recurring || []));
-    }
-
-    let initialYearlyIncomes = [];
-    if (prevYearData && prevYearData.yearly_income && prevYearData.yearly_income.length > 0) {
-      initialYearlyIncomes = JSON.parse(JSON.stringify(prevYearData.yearly_income));
-    } else {
-      initialYearlyIncomes = JSON.parse(JSON.stringify(cfg.default_yearly_income || []));
-    }
-
-    // 4. Inherit active Direct Debits, Payments In, and Deductions from previous year December (or defaults)
-    const prevDecMonth = (prevYearData && prevYearData.months && prevYearData.months['Dec']) ? prevYearData.months['Dec'] : null;
-    const inheritDDs = prevDecMonth ? prevDecMonth.direct_debits : cfg.default_direct_debits;
-    const inheritPaymentsIn = prevDecMonth ? prevDecMonth.payments_in : cfg.default_payments_in;
-    const inheritDeducts = prevDecMonth ? prevDecMonth.deductions_list : cfg.default_deductions;
-
-    appState.data.years[newYear] = {
-      archived: false,
-      birthdays: initialBirthdays,
-      recurring_payments: initialRecurring,
-      recurring_incomes: initialRecurringIncomes,
-      yearly_recurring: initialYearlyBills,
-      yearly_income: initialYearlyIncomes,
-      yearly_budgets: [],
-      months: {}
-    };
-
-    months.forEach(mName => {
-      appState.data.years[newYear].months[mName] = {
-        current_data: {},
-        savings_data: {},
-        credit_data: {},
-        deductions_list: JSON.parse(JSON.stringify(inheritDeducts || cfg.default_deductions || [])),
-        direct_debits: JSON.parse(JSON.stringify(inheritDDs || cfg.default_direct_debits || [])),
-        payments_in: JSON.parse(JSON.stringify(inheritPaymentsIn || cfg.default_payments_in || [])),
-        weekly_items: {},
-        weekly_actuals: {},
-        archived: false
+      if (!appState.data.years) appState.data.years = {};
+      appState.data.years[newYear] = {
+        archived: false,
+        birthdays: initialBirthdays,
+        recurring_payments: initialRecurring,
+        recurring_incomes: initialRecurringIncomes,
+        yearly_recurring: initialYearlyBills,
+        yearly_income: initialYearlyIncomes,
+        yearly_budgets: [],
+        months: {}
       };
-      cfg.current_accounts.forEach(acc => { appState.data.years[newYear].months[mName].current_data[acc] = { opening: 0 }; });
-      cfg.savings_accounts.forEach(acc => { appState.data.years[newYear].months[mName].savings_data[acc] = { opening: 0 }; });
-      cfg.credit_accounts.forEach(c => { appState.data.years[newYear].months[mName].credit_data[c.name] = { opening_spent: 0 }; });
-    });
 
-    // 5. Carry over December closing balances to January opening balances of new year
+      months.forEach(mName => {
+        appState.data.years[newYear].months[mName] = {
+          current_data: {},
+          savings_data: {},
+          credit_data: {},
+          deductions_list: JSON.parse(JSON.stringify(inheritDeducts || cfg.default_deductions || [])),
+          direct_debits: JSON.parse(JSON.stringify(inheritDDs || cfg.default_direct_debits || [])),
+          payments_in: JSON.parse(JSON.stringify(inheritPaymentsIn || cfg.default_payments_in || [])),
+          weekly_items: {},
+          weekly_actuals: {},
+          archived: false
+        };
+        cfg.current_accounts.forEach(acc => { appState.data.years[newYear].months[mName].current_data[acc] = { opening: 0 }; });
+        cfg.savings_accounts.forEach(acc => { appState.data.years[newYear].months[mName].savings_data[acc] = { opening: 0 }; });
+        cfg.credit_accounts.forEach(c => { appState.data.years[newYear].months[mName].credit_data[c.name] = { opening_spent: 0 }; });
+      });
+    }
+
+    // Carry over December closing balances to January opening balances of new year
     if (prevYearData && typeof computeMonthClosing === 'function') {
       try {
         const decClosing = computeMonthClosing('Dec', 11, prevYearNum);
-        cfg.current_accounts.forEach(acc => {
-          if (decClosing.current[acc] !== undefined) {
-            appState.data.years[newYear].months['Jan'].current_data[acc].opening = decClosing.current[acc];
-          }
-        });
-        cfg.credit_accounts.forEach(c => {
-          if (decClosing.credit[c.name] !== undefined) {
-            appState.data.years[newYear].months['Jan'].credit_data[c.name].opening_spent = decClosing.credit[c.name];
-          }
-        });
-        cfg.savings_accounts.forEach(acc => {
-          if (decClosing.savings[acc] !== undefined) {
-            appState.data.years[newYear].months['Jan'].savings_data[acc].opening = decClosing.savings[acc];
-          }
-        });
+        if (appState.data.years[newYear] && appState.data.years[newYear].months && appState.data.years[newYear].months['Jan']) {
+          const janM = appState.data.years[newYear].months['Jan'];
+          if (!janM.current_data) janM.current_data = {};
+          if (!janM.credit_data) janM.credit_data = {};
+          if (!janM.savings_data) janM.savings_data = {};
+          cfg.current_accounts.forEach(acc => {
+            if (decClosing.current[acc] !== undefined) {
+              janM.current_data[acc] = janM.current_data[acc] || {};
+              janM.current_data[acc].opening = decClosing.current[acc];
+            }
+          });
+          cfg.credit_accounts.forEach(c => {
+            if (decClosing.credit[c.name] !== undefined) {
+              janM.credit_data[c.name] = janM.credit_data[c.name] || {};
+              janM.credit_data[c.name].opening_spent = decClosing.credit[c.name];
+            }
+          });
+          cfg.savings_accounts.forEach(acc => {
+            if (decClosing.savings[acc] !== undefined) {
+              janM.savings_data[acc] = janM.savings_data[acc] || {};
+              janM.savings_data[acc].opening = decClosing.savings[acc];
+            }
+          });
+        }
       } catch(e) {
         console.warn("Could not roll over December closing balances:", e);
       }
@@ -3122,7 +3156,7 @@ window.budgetApp = {
     renderYearMenu();
     renderNav();
     renderContent();
-    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data, newYear); }
   },
 
   // Yearly Budgets View Handlers
@@ -4612,6 +4646,10 @@ window.budgetApp = {
   async changeTheme(themeKey) {
     getSettings().theme = themeKey;
     applyTheme(themeKey);
+    document.querySelectorAll('.md3-theme-pill').forEach(p => {
+      if (p.getAttribute('data-theme') === themeKey) p.classList.add('active');
+      else p.classList.remove('active');
+    });
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },

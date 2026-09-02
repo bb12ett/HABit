@@ -7,6 +7,7 @@ import uuid
 import datetime
 import csv
 import io
+import shutil
 import threading
 import urllib.request
 import urllib.error
@@ -28,19 +29,19 @@ def load_version():
                 for line in f:
                     line_clean = line.strip()
                     if line_clean.startswith("version:"):
-                        ver = line_clean.split(":", 1)[1].strip().strip('"\'')
+                        ver = line_clean.split(":", 1)[1].strip().strip('"').strip("'")
                         if ver:
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.2.3")
+    return os.environ.get("APP_VERSION", "0.3.0")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
 
 @app.after_request
 def add_no_cache_headers(response):
-    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, post-check=0, pre-check=0, max-age=0"
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0, post-check=0, pre-check=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     response.headers["Surrogate-Control"] = "no-store"
@@ -52,7 +53,9 @@ def add_no_cache_headers(response):
     response.headers.pop("Last-Modified", None)
     return response
 
-DATA_FILE = "/data/budget.json"
+DATA_DIR = "/data" if os.path.exists("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+DATA_FILE = os.path.join(DATA_DIR, "budget.json")
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 import base64
 import hashlib
@@ -218,54 +221,218 @@ DEFAULT_SETTINGS = {
     "recurring_incomes": []
 }
 
-def load_data():
-    data = {}
-    if os.path.exists(DATA_FILE):
+def migrate_legacy_storage():
+    """Migrates a monolithic budget.json into settings.json and budget_YYYY.json files."""
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        settings_path = os.path.join(DATA_DIR, "settings.json")
+        legacy_candidates = [
+            os.path.join(DATA_DIR, "budget.json"),
+            "budget_data.json"
+        ]
+        
+        # If settings.json already exists, migration has already run
+        if os.path.exists(settings_path):
+            return
+
+        legacy_file = None
+        for candidate in legacy_candidates:
+            if os.path.exists(candidate):
+                legacy_file = candidate
+                break
+
+        if not legacy_file:
+            return
+
+        print(f"[Storage] Migrating legacy budget file '{legacy_file}' to modular per-year storage...")
+        with open(legacy_file, "r", encoding="utf-8") as f:
+            raw = f.read()
+            if not raw.strip():
+                return
+            legacy_data = json.loads(raw)
+
+        if not isinstance(legacy_data, dict):
+            return
+
+        # 1. Extract and save settings.json
+        settings = legacy_data.get("settings", {})
+        if not settings:
+            settings = copy.deepcopy(DEFAULT_SETTINGS)
+        else:
+            for k, v in DEFAULT_SETTINGS.items():
+                if k not in settings:
+                    settings[k] = copy.deepcopy(v)
+
+        if "scheduled_templates" not in settings:
+            settings["scheduled_templates"] = {
+                "direct_debits": copy.deepcopy(settings.get("default_direct_debits", [])),
+                "payments_in": copy.deepcopy(settings.get("default_payments_in", [])),
+                "yearly_recurring": copy.deepcopy(settings.get("default_yearly_recurring", [])),
+                "yearly_income": copy.deepcopy(settings.get("default_yearly_income", [])),
+                "recurring_payments": copy.deepcopy(settings.get("recurring_payments", [])),
+                "recurring_incomes": copy.deepcopy(settings.get("recurring_incomes", []))
+            }
+
+        tmp_settings = settings_path + ".tmp"
+        with open(tmp_settings, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_settings, settings_path)
+
+        # 2. Extract and save individual budget_YYYY.json files
+        years_dict = legacy_data.get("years", {})
+        all_txns = legacy_data.get("open_banking_transactions", [])
+        current_y = legacy_data.get("current_year", 2026)
+
+        if not years_dict:
+            years_dict = {str(current_y): {
+                "archived": False,
+                "yearly_recurring": copy.deepcopy(settings.get("default_yearly_recurring", [])),
+                "yearly_income": copy.deepcopy(settings.get("default_yearly_income", [])),
+                "recurring_payments": copy.deepcopy(settings.get("recurring_payments", [])),
+                "recurring_incomes": copy.deepcopy(settings.get("recurring_incomes", [])),
+                "yearly_budgets": [],
+                "months": {}
+            }}
+
+        for y_str, y_data in years_dict.items():
+            y_txns = [t for t in all_txns if str(t.get("booking_date", "")).startswith(str(y_str))]
+            if str(y_str) == str(current_y):
+                unmatched_txns = [t for t in all_txns if not any(str(t.get("booking_date", "")).startswith(k) for k in years_dict.keys())]
+                y_txns.extend(unmatched_txns)
+            
+            y_data["open_banking_transactions"] = y_txns
+            year_path = os.path.join(DATA_DIR, f"budget_{y_str}.json")
+            tmp_year = year_path + ".tmp"
+            with open(tmp_year, "w", encoding="utf-8") as f:
+                json.dump(y_data, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_year, year_path)
+            print(f"[Storage] Created modular year file: {year_path}")
+
+        # 3. Create backup archive of legacy file
+        bak_file = legacy_file + ".bak"
         try:
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                content = f.read()
-                if content.strip():
-                    data = json.loads(content)
-        except Exception as e:
-            print(f"Error reading JSON file: {e}")
-    if not data and os.path.exists("budget_data.json"):
+            shutil.copy2(legacy_file, bak_file)
+            print(f"[Storage] Created legacy backup archive: {bak_file}")
+        except Exception as be:
+            print(f"[Storage] Note copying backup: {be}")
+
+        print("[Storage] Migration to modular per-year storage completed successfully.")
+    except Exception as e:
+        print(f"[Storage] Migration error: {e}")
+
+def load_settings():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    settings_path = os.path.join(DATA_DIR, "settings.json")
+    settings = {}
+    if os.path.exists(settings_path):
         try:
-            with open("budget_data.json", "r", encoding="utf-8") as f:
-                content = f.read()
-                if content.strip():
-                    data = json.loads(content)
-                    save_data(data)
+            with open(settings_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    settings = json.loads(content)
         except Exception as e:
-            print(f"Error reading local budget_data.json: {e}")
-    
-    if not isinstance(data, dict):
-        data = {}
-        
-    if "current_year" not in data:
-        data["current_year"] = 2026
-        
-    if "settings" not in data or not isinstance(data["settings"], dict):
-        data["settings"] = copy.deepcopy(DEFAULT_SETTINGS)
-    else:
-        for k, v in DEFAULT_SETTINGS.items():
-            if k not in data["settings"]:
-                data["settings"][k] = copy.deepcopy(v)
-                
-    if "years" not in data or not isinstance(data["years"], dict):
-        data["years"] = {}
-        
-    year_str = str(data["current_year"])
-    if year_str not in data["years"]:
-        data["years"][year_str] = {
+            print(f"[Storage] Error reading settings.json: {e}")
+    if not isinstance(settings, dict) or not settings:
+        settings = copy.deepcopy(DEFAULT_SETTINGS)
+    for k, v in DEFAULT_SETTINGS.items():
+        if k not in settings:
+            settings[k] = copy.deepcopy(v)
+    return settings
+
+def save_settings(settings):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        settings_path = os.path.join(DATA_DIR, "settings.json")
+        tmp = settings_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, settings_path)
+        return True
+    except Exception as e:
+        print(f"[Storage] Error saving settings.json: {e}")
+        return False
+
+def get_available_years():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    years = []
+    try:
+        for fname in os.listdir(DATA_DIR):
+            if fname.startswith("budget_") and fname.endswith(".json") and not fname.endswith(".tmp") and not fname.endswith(".bak"):
+                y_str = fname[7:-5]
+                if y_str.isdigit():
+                    years.append(int(y_str))
+    except Exception as e:
+        print(f"[Storage] Error scanning available years: {e}")
+    if not years:
+        years = [2026]
+    return sorted(list(set(years)))
+
+def load_year_data(year: int, settings: dict = None):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    year_path = os.path.join(DATA_DIR, f"budget_{year}.json")
+    y_data = None
+    if os.path.exists(year_path):
+        try:
+            with open(year_path, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if content:
+                    y_data = json.loads(content)
+        except Exception as e:
+            print(f"[Storage] Error reading budget_{year}.json: {e}")
+
+    if not isinstance(y_data, dict) or not y_data:
+        if settings is None:
+            settings = load_settings()
+        y_data = {
             "archived": False,
-            "yearly_recurring": copy.deepcopy(data["settings"].get("default_yearly_recurring", [])),
-            "yearly_income": copy.deepcopy(data["settings"].get("default_yearly_income", [])),
-            "recurring_payments": copy.deepcopy(data["settings"].get("recurring_payments", [])),
-            "recurring_incomes": copy.deepcopy(data["settings"].get("recurring_incomes", [])),
+            "yearly_recurring": copy.deepcopy(settings.get("default_yearly_recurring", [])),
+            "yearly_income": copy.deepcopy(settings.get("default_yearly_income", [])),
+            "recurring_payments": copy.deepcopy(settings.get("recurring_payments", [])),
+            "recurring_incomes": copy.deepcopy(settings.get("recurring_incomes", [])),
             "yearly_budgets": [],
-            "months": {}
+            "months": {},
+            "open_banking_transactions": []
         }
-    return data
+    return y_data
+
+def save_year_data(year: int, year_data: dict):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        year_path = os.path.join(DATA_DIR, f"budget_{year}.json")
+        tmp = year_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(year_data, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, year_path)
+        return True
+    except Exception as e:
+        print(f"[Storage] Error saving budget_{year}.json: {e}")
+        return False
+
+def load_data(year=None):
+    migrate_legacy_storage()
+    settings = load_settings()
+    avail_years = get_available_years()
+    
+    if year is None:
+        target_year = settings.get("current_year", 2026)
+    else:
+        try:
+            target_year = int(year)
+        except Exception:
+            target_year = settings.get("current_year", 2026)
+
+    year_data = load_year_data(target_year, settings)
+    txns = year_data.get("open_banking_transactions", [])
+    
+    return {
+        "settings": settings,
+        "current_year": target_year,
+        "years": {
+            str(target_year): year_data
+        },
+        "available_years": avail_years,
+        "open_banking_transactions": txns
+    }
 
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -707,18 +874,41 @@ def sync_ha_sensors(budget_data, token=None, supervisor_url=None):
             
     return success_count > 0
 
-def save_data(data):
+def save_data(data, year=None):
     try:
-        os.makedirs(os.path.dirname(DATA_FILE), exist_ok=True)
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        migrate_legacy_storage()
+        settings = data.get("settings", {})
+        if settings:
+            save_settings(settings)
+            
+        target_year = year or data.get("current_year", 2026)
+        try:
+            target_year = int(target_year)
+        except Exception:
+            target_year = 2026
+            
+        years_dict = data.get("years", {})
+        if str(target_year) in years_dict:
+            y_data = years_dict[str(target_year)]
+            if "open_banking_transactions" in data:
+                y_data["open_banking_transactions"] = data["open_banking_transactions"]
+            save_year_data(target_year, y_data)
+        elif years_dict:
+            for y_str, y_data in years_dict.items():
+                if y_str.isdigit():
+                    if "open_banking_transactions" in data and str(target_year) == y_str:
+                        y_data["open_banking_transactions"] = data["open_banking_transactions"]
+                    save_year_data(int(y_str), y_data)
+
+        # Trigger HA sensors sync
         try:
             sync_ha_sensors(data)
         except Exception as e:
             print(f"Notice: HA sensor sync: {e}")
+            
         return True
     except Exception as e:
-        print(f"Error saving JSON file: {e}")
+        print(f"[Storage] Error saving data: {e}")
         return False
 
 def build_bundle():
@@ -737,6 +927,7 @@ def build_bundle():
         "static/js/views/spend_analytics.js",
         "static/js/views/settings.js",
         "static/js/views/calculator.js",
+        "static/js/gestures.js",
         "static/js/app.js",
     ]
     bundle_parts = ["// Unified single-file app bundle\n"]
@@ -3171,11 +3362,222 @@ def openbanking_unlink():
 @app.route("/api/budget", methods=["GET", "POST"])
 def budget_api():
     if request.method == "POST":
-        save_data(request.get_json(force=True))
+        req_data = request.get_json(force=True) or {}
+        target_year = request.args.get("year") or req_data.get("current_year")
+        save_data(req_data, year=target_year)
         return jsonify({"status": "saved"})
-    data = load_data()
+    
+    target_year = request.args.get("year")
+    data = load_data(year=target_year)
     reconcile_transactions_and_bills(data)
     return jsonify(data)
+
+@app.route("/api/budget/years", methods=["GET"])
+def budget_years_api():
+    migrate_legacy_storage()
+    avail = get_available_years()
+    settings = load_settings()
+    return jsonify({
+        "years": avail,
+        "current_year": settings.get("current_year", 2026)
+    })
+
+@app.route("/api/budget/create_year", methods=["POST"])
+def budget_create_year_api():
+    try:
+        migrate_legacy_storage()
+        req_data = request.get_json(force=True) or {}
+        new_year = int(req_data.get("year"))
+        copy_from_year = req_data.get("copy_from_year")
+        
+        settings = load_settings()
+        
+        # Check if year already exists
+        year_path = os.path.join(DATA_DIR, f"budget_{new_year}.json")
+        if os.path.exists(year_path):
+            composite = load_data(year=new_year)
+            return jsonify({"status": "exists", "year": new_year, "data": composite}), 200
+
+        # Base templates from settings or copy_from_year
+        templates = settings.get("scheduled_templates", {})
+        default_dds = templates.get("direct_debits", settings.get("default_direct_debits", []))
+        default_incomes = templates.get("payments_in", settings.get("default_payments_in", []))
+        default_yearly = templates.get("yearly_recurring", settings.get("default_yearly_recurring", []))
+        default_yearly_inc = templates.get("yearly_income", settings.get("default_yearly_income", []))
+        rec_payments = templates.get("recurring_payments", settings.get("recurring_payments", []))
+        rec_incomes = templates.get("recurring_incomes", settings.get("recurring_incomes", []))
+
+        if copy_from_year:
+            try:
+                src_y = int(copy_from_year)
+                if os.path.exists(os.path.join(DATA_DIR, f"budget_{src_y}.json")):
+                    src_data = load_year_data(src_y, settings)
+                    # Pick latest month's bills as blueprint
+                    for m in reversed(MONTH_NAMES):
+                        if m in src_data.get("months", {}):
+                            m_obj = src_data["months"][m]
+                            if m_obj.get("direct_debits"):
+                                default_dds = copy.deepcopy(m_obj["direct_debits"])
+                            if m_obj.get("payments_in"):
+                                default_incomes = copy.deepcopy(m_obj["payments_in"])
+                            break
+                    if src_data.get("yearly_recurring"):
+                        default_yearly = copy.deepcopy(src_data["yearly_recurring"])
+                    if src_data.get("yearly_income"):
+                        default_yearly_inc = copy.deepcopy(src_data["yearly_income"])
+                    if src_data.get("recurring_payments"):
+                        rec_payments = copy.deepcopy(src_data["recurring_payments"])
+                    if src_data.get("recurring_incomes"):
+                        rec_incomes = copy.deepcopy(src_data["recurring_incomes"])
+            except Exception as ce:
+                print(f"[Storage] Note copying from year {copy_from_year}: {ce}")
+
+        # Initialize 12 months for the new year
+        new_months = {}
+        for m in MONTH_NAMES:
+            new_months[m] = {
+                "direct_debits": copy.deepcopy(default_dds),
+                "payments_in": copy.deepcopy(default_incomes),
+                "start_balance": 0.0,
+                "credit_spend": 0.0,
+                "weeks": {},
+                "actuals": {}
+            }
+
+        new_year_data = {
+            "archived": False,
+            "yearly_recurring": copy.deepcopy(default_yearly),
+            "yearly_income": copy.deepcopy(default_yearly_inc),
+            "recurring_payments": copy.deepcopy(rec_payments),
+            "recurring_incomes": copy.deepcopy(rec_incomes),
+            "yearly_budgets": [],
+            "months": new_months,
+            "open_banking_transactions": []
+        }
+
+        save_year_data(new_year, new_year_data)
+        
+        # Update active year in settings
+        settings["current_year"] = new_year
+        save_settings(settings)
+        
+        composite = load_data(year=new_year)
+        return jsonify({"status": "created", "year": new_year, "data": composite})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/budget/propagate", methods=["POST"])
+def budget_propagate_api():
+    try:
+        migrate_legacy_storage()
+        req_data = request.get_json(force=True) or {}
+        source_year = int(req_data.get("source_year", 2026))
+        source_month = req_data.get("source_month", "Jan")
+        if source_month not in MONTH_NAMES:
+            source_month = "Jan"
+            
+        settings = load_settings()
+        source_year_data = load_year_data(source_year, settings)
+        
+        s_month_data = source_year_data.get("months", {}).get(source_month, {})
+        cur_dds = s_month_data.get("direct_debits", [])
+        cur_incomes = s_month_data.get("payments_in", [])
+        
+        from_idx = MONTH_NAMES.index(source_month)
+        
+        # 1. Update remaining months in source year
+        for i in range(from_idx + 1, len(MONTH_NAMES)):
+            target_m = MONTH_NAMES[i]
+            if target_m not in source_year_data["months"]:
+                source_year_data["months"][target_m] = {}
+            source_year_data["months"][target_m]["direct_debits"] = copy.deepcopy(cur_dds)
+            source_year_data["months"][target_m]["payments_in"] = copy.deepcopy(cur_incomes)
+            
+        save_year_data(source_year, source_year_data)
+        
+        # 2. Update Master Templates in settings.json
+        if "scheduled_templates" not in settings:
+            settings["scheduled_templates"] = {}
+        settings["scheduled_templates"]["direct_debits"] = copy.deepcopy(cur_dds)
+        settings["scheduled_templates"]["payments_in"] = copy.deepcopy(cur_incomes)
+        settings["default_direct_debits"] = copy.deepcopy(cur_dds)
+        settings["default_payments_in"] = copy.deepcopy(cur_incomes)
+        save_settings(settings)
+        
+        # 3. Cascade into any existing FUTURE years
+        all_years = get_available_years()
+        updated_future_years = []
+        for y in all_years:
+            if y > source_year:
+                fut_data = load_year_data(y, settings)
+                for m in MONTH_NAMES:
+                    if m not in fut_data["months"]:
+                        fut_data["months"][m] = {}
+                    fut_data["months"][m]["direct_debits"] = copy.deepcopy(cur_dds)
+                    fut_data["months"][m]["payments_in"] = copy.deepcopy(cur_incomes)
+                save_year_data(y, fut_data)
+                updated_future_years.append(y)
+                
+        composite = load_data(year=source_year)
+        return jsonify({
+            "status": "propagated",
+            "source_year": source_year,
+            "source_month": source_month,
+            "updated_future_years": updated_future_years,
+            "data": composite
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/api/budget/export", methods=["GET"])
+def budget_export_api():
+    try:
+        migrate_legacy_storage()
+        settings = load_settings()
+        all_years = get_available_years()
+        years_data = {}
+        for y in all_years:
+            years_data[str(y)] = load_year_data(y, settings)
+            
+        full_backup = {
+            "version": APP_VERSION,
+            "export_timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+            "settings": settings,
+            "current_year": settings.get("current_year", 2026),
+            "years": years_data
+        }
+        return jsonify(full_backup)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/budget/import", methods=["POST"])
+def budget_import_api():
+    try:
+        migrate_legacy_storage()
+        imported = request.get_json(force=True) or {}
+        if not isinstance(imported, dict) or not imported.get("settings"):
+            return jsonify({"error": "Invalid budget backup payload format."}), 400
+            
+        # 1. Save settings
+        settings = imported.get("settings", {})
+        save_settings(settings)
+        
+        # 2. Save all years present in the backup
+        years_dict = imported.get("years", {})
+        all_txns = imported.get("open_banking_transactions", [])
+        current_y = imported.get("current_year", settings.get("current_year", 2026))
+        
+        for y_str, y_data in years_dict.items():
+            if str(y_str).isdigit():
+                if "open_banking_transactions" not in y_data and all_txns:
+                    y_txns = [t for t in all_txns if str(t.get("booking_date", "")).startswith(str(y_str))]
+                    y_data["open_banking_transactions"] = y_txns
+                save_year_data(int(y_str), y_data)
+                
+        composite = load_data(year=current_y)
+        return jsonify({"status": "imported", "data": composite})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/ha/sensors", methods=["GET", "POST"])
 def ha_sensors_api():

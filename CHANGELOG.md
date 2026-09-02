@@ -5,6 +5,21 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-02
+
+### Added & Enhanced
+- **Modular Per-Year Storage Engine**: Decoupled monolithic storage into a lightweight `settings.json` and isolated `budget_YYYY.json` year files. Automatically migrates existing datasets with zero manual intervention and loads historical or future years on-demand.
+- **Multi-Year Cascade Propagation**: Propagating scheduled bills or recurring inflows from any active month automatically updates remaining months of the year, updates permanent Master Templates in `settings.json`, and cascades to all 12 months of existing future years with automatic cashflow rollover rebalancing.
+- **Unified All-Years Backup & Restore**: "Export Full Backup" compiles all years, settings, and Open Banking transactions across your entire dataset into a single portable `.json` file; "Import Backup" automatically unpacks and restores them to modular storage.
+- **Mobile Touch Navigation & Gestures**:
+  - Horizontal swipe pagination for fast month-to-month flipping with directional slide transitions.
+  - Left-edge swipe ($\le 30\text{px}$) for opening the Settings Side Sheet.
+  - Pull-to-Refresh MD3 spinner at scroll top for bank and sensor sync.
+  - Bottom navigation bar horizontal swipe to switch primary sections.
+- **Material Design 3 Settings Side Sheet**: Redesigned side panel with 4-theme pill grid, elevation styling, direct link to full settings view, backup actions, and clean footer branding.
+
+---
+
 ## [0.2.3] - 2026-09-02
 
 ### Fixed & Enhanced

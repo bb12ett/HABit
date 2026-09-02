@@ -1703,35 +1703,234 @@ h1, h2, h3, h4, h5, h6 {
   line-height: 1 !important;
 }
 
-.drawer {
+/* ==========================================================================
+   MATERIAL DESIGN 3 SETTINGS SIDE SHEET
+   ========================================================================== */
+.drawer,
+.md3-settings-sheet {
   position: fixed;
   top: 0;
-  left: -360px;
+  left: -380px;
   right: auto;
-  width: 340px;
-  max-width: calc(100vw - 32px);
+  width: 350px;
+  max-width: calc(100vw - 28px);
   height: 100%;
-  background: var(--card-bg);
-  border-right: 1px solid var(--border);
+  background: var(--card-bg, #1e293b);
+  border-right: 1px solid var(--border, #334155);
   border-left: none;
   z-index: 1200;
-  padding: 20px;
-  transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.25s ease;
-  overflow-y: auto;
-  box-shadow: 5px 0 25px rgba(0,0,0,0.6);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  transition: left 0.28s cubic-bezier(0.2, 0.9, 0.3, 1), background 0.25s ease;
+  overflow: hidden;
+  box-shadow: 12px 0 36px rgba(0, 0, 0, 0.45);
 }
 
-.drawer.open {
+.drawer.open,
+.md3-settings-sheet.open {
   left: 0;
   right: auto;
 }
-.drawer-header {
+
+.md3-sheet-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--border);
-  padding-bottom: 10px;
+  padding: 16px 18px 14px 18px;
+  border-bottom: 1px solid var(--border, #334155);
+  background: var(--panel-bg, #0f172a);
+  flex-shrink: 0;
+}
+
+.md3-sheet-header-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: rgba(14, 165, 233, 0.12);
+  color: var(--curr-border, #0284c7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.md3-sheet-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--heading, #f8fafc);
+  letter-spacing: -0.2px;
+}
+
+.md3-sheet-subtitle {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+  font-weight: 500;
+}
+
+.md3-icon-btn {
+  background: transparent;
+  border: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--text-muted, #94a3b8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.md3-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--heading, #f8fafc);
+}
+
+.md3-sheet-content {
+  padding: 14px 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.md3-sheet-content::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.md3-settings-section {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border, #334155);
+}
+
+.md3-settings-section:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.md3-section-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  font-weight: 700;
+  color: var(--text-muted, #94a3b8);
+  margin-bottom: 8px;
+}
+
+/* Theme Pill Grid */
+.md3-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 7px;
+}
+
+.md3-theme-pill {
+  background: var(--panel-bg, #0f172a);
+  border: 1px solid var(--border, #334155);
+  border-radius: 10px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--text-muted, #94a3b8);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.md3-theme-pill:hover {
+  border-color: var(--curr-border, #0284c7);
+  color: var(--heading, #f8fafc);
+  transform: translateY(-1px);
+}
+
+.md3-theme-pill.active {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: var(--curr-border, #0284c7);
+  color: var(--curr-border, #0284c7);
+  box-shadow: 0 0 10px rgba(14, 165, 233, 0.2);
+}
+
+/* MD3 Navigation Card */
+.md3-settings-nav-card {
+  width: 100%;
+  background: var(--panel-bg, #0f172a);
+  border: 1px solid var(--border, #334155);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  text-align: left;
+  margin-bottom: 8px;
+  transition: all 0.15s ease;
+}
+
+.md3-settings-nav-card:hover {
+  border-color: var(--curr-border, #0284c7);
+  background: rgba(14, 165, 233, 0.05);
+  transform: translateX(2px);
+}
+
+.md3-nav-card-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.md3-nav-card-icon {
+  font-size: 18px;
+}
+
+.md3-nav-card-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--heading, #f8fafc);
+}
+
+.md3-nav-card-desc {
+  font-size: 11px;
+  color: var(--text-muted, #94a3b8);
+}
+
+.md3-nav-card-chevron {
+  font-size: 18px;
+  color: var(--text-muted, #94a3b8);
+  font-weight: bold;
+}
+
+.md3-tonal-btn {
+  font-size: 12px;
+  padding: 8px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 10px;
+}
+
+.md3-danger-btn {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  border-radius: 10px;
+  font-weight: 700;
+  justify-content: center;
+}
+
+.md3-sheet-footer {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border, #334155);
 }
 
 .dropdown { position: relative; display: inline-block; }
@@ -3360,4 +3559,88 @@ body.val-picker-mode {
 
 .pin-shake {
   animation: pinShake 0.35s ease;
+}
+
+/* ==========================================================================
+   MOBILE GESTURES, PULL-TO-REFRESH & SLIDE TRANSITIONS
+   ========================================================================== */
+
+/* Month Transition Slides */
+@keyframes monthSlideInFromRight {
+  0% {
+    opacity: 0.5;
+    transform: translateX(24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes monthSlideInFromLeft {
+  0% {
+    opacity: 0.5;
+    transform: translateX(-24px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.month-slide-right {
+  animation: monthSlideInFromRight 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.month-slide-left {
+  animation: monthSlideInFromLeft 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Pull to Refresh Indicator */
+.pull-to-refresh-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  z-index: 99;
+  transform: translateY(-60px);
+  transition: transform 0.2s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.2s ease;
+  opacity: 0;
+}
+
+.pull-to-refresh-container.visible {
+  opacity: 1;
+}
+
+.pull-to-refresh-pill {
+  background: var(--card-bg, #1e293b);
+  border: 1px solid var(--border, #334155);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  border-radius: 20px;
+  padding: 6px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--heading, #f8fafc);
+}
+
+.pull-refresh-icon {
+  display: inline-block;
+  font-size: 13px;
+  transition: transform 0.15s ease;
+}
+
+.pull-refresh-icon.spinning {
+  animation: pullSpinnerRotate 0.75s linear infinite;
+}
+
+@keyframes pullSpinnerRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }

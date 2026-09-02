@@ -9,9 +9,10 @@ export function getApiUrl() {
   return getBaseApiUrl() + 'api/budget';
 }
 
-export async function fetchBudget() {
+export async function fetchBudget(year) {
   try {
-    const r = await fetch(getApiUrl(), { 
+    const url = year ? `${getApiUrl()}?year=${encodeURIComponent(year)}` : getApiUrl();
+    const r = await fetch(url, { 
       cache: 'no-store',
       headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
     });
@@ -27,10 +28,12 @@ export async function fetchBudget() {
   return null;
 }
 
-export async function saveBudget(state) {
+export async function saveBudget(state, year) {
   if (!state) return false;
   try {
-    const r = await fetch(getApiUrl(), {
+    const targetY = year || state.current_year;
+    const url = targetY ? `${getApiUrl()}?year=${encodeURIComponent(targetY)}` : getApiUrl();
+    const r = await fetch(url, {
       method: 'POST',
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
@@ -41,6 +44,70 @@ export async function saveBudget(state) {
     console.error("saveBudget error:", e);
     return false;
   }
+}
+
+export async function fetchAvailableYears() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/years`, {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) {
+      return await r.json();
+    }
+  } catch (e) {
+    console.error("fetchAvailableYears error:", e);
+  }
+  return null;
+}
+
+export async function createBudgetYear(year, copyFromYear) {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/create_year`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ year, copy_from_year: copyFromYear })
+    });
+    if (r.ok) {
+      return await r.json();
+    }
+  } catch (e) {
+    console.error("createBudgetYear error:", e);
+  }
+  return null;
+}
+
+export async function exportFullBudgetBackupApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/export`, {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) {
+      return await r.json();
+    }
+  } catch (e) {
+    console.error("exportFullBudgetBackupApi error:", e);
+  }
+  return null;
+}
+
+export async function importFullBudgetBackupApi(data) {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/import`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify(data)
+    });
+    if (r.ok) {
+      return await r.json();
+    }
+  } catch (e) {
+    console.error("importFullBudgetBackupApi error:", e);
+  }
+  return null;
 }
 
 export async function resetDatabase() {
