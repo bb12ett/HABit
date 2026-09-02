@@ -2292,7 +2292,7 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
       if (diffWeeks >= 0 && diffWeeks % stepWeeks === 0) {
         const occDate = weekObj.startDate;
         const occIso = occDate.toISOString().slice(0, 10);
-        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+        const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
         occurrences.push({
           ...r,
           isRecurring: true,
@@ -2330,7 +2330,7 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
           const diffMonths = (year - startDate.getFullYear()) * 12 + (m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
             const occIso = actualPayDate.toISOString().slice(0, 10);
-            const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+            const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
             occurrences.push({
               ...r,
               isRecurring: true,
@@ -5262,13 +5262,24 @@ function openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, bi
     }
   }
 
-  const finalAmt = (amt > 0 ? amt : Number(item?.amount || 0));
-  const isCleared = Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
+  const isCleared = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+    ? Boolean(dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr))
+    : Boolean(item?.status === 'paid' || item?.auto_cleared);
 
   const allTxns = appState.data.open_banking_transactions || [];
   const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const sortedTxns = [...allTxns].sort((a, b) => {
+    if (dateStr && a.booking_date && b.booking_date) {
+      const targetTime = new Date(dateStr).getTime();
+      const aTimeDiff = Math.abs(new Date(a.booking_date).getTime() - targetTime);
+      const bTimeDiff = Math.abs(new Date(b.booking_date).getTime() - targetTime);
+      const aNear = aTimeDiff <= (14 * 86400000);
+      const bNear = bTimeDiff <= (14 * 86400000);
+      if (aNear && !bNear) return -1;
+      if (!aNear && bNear) return 1;
+      if (aNear && bNear) return aTimeDiff - bTimeDiff;
+    }
     const aAmtDiff = Math.abs(Math.abs(Number(a.amount) || 0) - amt);
     const bAmtDiff = Math.abs(Math.abs(Number(b.amount) || 0) - amt);
     if (aAmtDiff < 0.05 && bAmtDiff >= 0.05) return -1;
@@ -5311,7 +5322,9 @@ function openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, bi
             const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
             const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
             const isRecMatch = isAmtMatch || isNameMatch;
-            const isCurrentMatch = item?.matched_txn_id === t.transaction_id;
+            const isCurrentMatch = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+              ? Boolean(dateStr && t.booking_date && t.booking_date.startsWith(dateStr) && (t.matched_bill_id === desc || item?.matched_txn_id === t.transaction_id))
+              : (item?.matched_txn_id === t.transaction_id);
 
             return `
               <div class="bill-match-row" data-search="${tPayee.toLowerCase()} ${t.account_name || ''} ${tAmt}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; background:${isCurrentMatch ? 'rgba(16,185,129,0.18)' : (isRecMatch ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)')}; border:1px solid ${isCurrentMatch ? 'var(--green)' : (isRecMatch ? 'rgba(56,189,248,0.3)' : 'transparent')};">
@@ -6527,7 +6540,7 @@ function renderOverviewView(container) {
                               ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
                                 const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
+                                const isCleared = (i.isRecurring || occDateStr) ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid');
                                 const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (i.rawDesc || i.desc || '').replace(/'/g, "\\'");
@@ -6546,7 +6559,7 @@ function renderOverviewView(container) {
                               }).join('')}
                               ${colDDs.map((d, dIdx) => {
                                 const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
+                                const isCleared = (d.isRecurring || occDateStr) ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid');
                                 const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (d.rawDesc || d.desc || '').replace(/'/g, "\\'");
@@ -7852,14 +7865,20 @@ function renderBillsView(container) {
                   <td>
                     <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                        ${flowBadge} ${cadenceBadge}
-                      ${isOpenBankingEnabled ? `
-                        <button type="button" class="badge" style="background:${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.15)'}; color:${(b.auto_cleared || b.status === 'paid') ? 'var(--green)' : 'var(--amber)'}; font-size:9.5px; padding:2px 6px; font-weight:600; border:1px solid ${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}; cursor:${globalEditMode ? 'pointer' : 'default'};" ${globalEditMode ? `onclick="window.budgetApp.toggleScheduledBillCleared('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})"` : ''} title="${(b.auto_cleared || b.status === 'paid') ? 'Cleared' + (b.matched_payee ? ' (' + b.matched_payee + ')' : '') + (globalEditMode ? '. Click to mark Due' : '') : 'Due' + (globalEditMode ? '. Click to mark Cleared' : '')}">
-                          ${(b.auto_cleared || b.status === 'paid') ? '⚡ Cleared' : '⚠️ Due'}
-                        </button>
-                        ${globalEditMode ? `
-                          <button type="button" class="btn secondary" style="font-size:9px; padding:1px 5px;" onclick="window.budgetApp.openManualBillMatchModal('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="Match with Bank Transaction">🔗 Match</button>
-                        ` : ''}
-                      ` : ''}
+                      ${isOpenBankingEnabled ? (() => {
+                        const isRecurring = (b.source_type === 'recurring_income' || b.source_type === 'recurring_payment');
+                        const isCleared = isRecurring
+                          ? Boolean(b.cleared_dates && b.cleared_dates.some(d => { const dt = new Date(d); return months[dt.getMonth()] === appState.activeTab && dt.getFullYear() === appState.currentYear; }))
+                          : Boolean(b.auto_cleared || b.status === 'paid');
+                        return `
+                          <button type="button" class="badge" style="background:${isCleared ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.15)'}; color:${isCleared ? 'var(--green)' : 'var(--amber)'}; font-size:9.5px; padding:2px 6px; font-weight:600; border:1px solid ${isCleared ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}; cursor:${globalEditMode ? 'pointer' : 'default'};" ${globalEditMode ? `onclick="window.budgetApp.toggleScheduledBillCleared('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})"` : ''} title="${isCleared ? 'Cleared' + (b.matched_payee ? ' (' + b.matched_payee + ')' : '') + (globalEditMode ? '. Click to mark Due' : '') : 'Due' + (globalEditMode ? '. Click to mark Cleared' : '')}">
+                            ${isCleared ? '⚡ Cleared' : '⚠️ Due'}
+                          </button>
+                          ${globalEditMode ? `
+                            <button type="button" class="btn secondary" style="font-size:9px; padding:1px 5px;" onclick="window.budgetApp.openManualBillMatchModal('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="Match with Bank Transaction">🔗 Match</button>
+                          ` : ''}
+                        `;
+                      })() : ''}
                     </div>
                   </td>
                   <td>
@@ -11288,34 +11307,51 @@ window.budgetApp = {
       return;
     }
 
+    const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
     const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
-    const isCleared = Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
+    const isCleared = isRecurring
+      ? Boolean(occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr))
+      : Boolean(item.auto_cleared || item.status === 'paid');
 
     if (isCleared) {
-      item.status = 'due';
-      item.auto_cleared = false;
-      item.manually_cleared = false;
-      item.matched_txn_id = null;
-      item.matched_date = null;
-      item.matched_payee = null;
-      if (occDateStr && item.cleared_dates) {
-        item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+      if (isRecurring) {
+        if (occDateStr && item.cleared_dates) {
+          item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+        }
+      } else {
+        item.status = 'due';
+        item.auto_cleared = false;
+        item.manually_cleared = false;
+        item.matched_txn_id = null;
+        item.matched_date = null;
+        item.matched_payee = null;
+        if (occDateStr && item.cleared_dates) {
+          item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+        }
       }
       const allTxns = appState.data.open_banking_transactions || [];
       allTxns.forEach(t => {
-        if (t.matched_bill_id === (item.desc || billDesc)) {
+        if (t.matched_bill_id === (item.desc || billDesc) && (!occDateStr || !t.booking_date || t.booking_date.startsWith(occDateStr))) {
           t.matched_bill_id = null;
           t.auto_cleared = false;
         }
       });
     } else {
-      item.status = 'paid';
-      item.auto_cleared = true;
-      item.manually_cleared = true;
-      item.matched_date = occDateStr;
-      if (occDateStr) {
-        item.cleared_dates = item.cleared_dates || [];
-        if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+      if (isRecurring) {
+        if (occDateStr) {
+          item.cleared_dates = item.cleared_dates || [];
+          if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+        }
+        item.manually_cleared = true;
+      } else {
+        item.status = 'paid';
+        item.auto_cleared = true;
+        item.manually_cleared = true;
+        item.matched_date = occDateStr;
+        if (occDateStr) {
+          item.cleared_dates = item.cleared_dates || [];
+          if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+        }
       }
     }
 
@@ -11334,14 +11370,17 @@ window.budgetApp = {
     const txn = allTxns.find(t => String(t.transaction_id) === String(transactionId));
 
     if (item && txn) {
-      item.status = 'paid';
-      item.auto_cleared = true;
+      const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
+      if (!isRecurring) {
+        item.status = 'paid';
+        item.auto_cleared = true;
+      }
       item.manually_cleared = true;
       item.matched_txn_id = txn.transaction_id;
       item.matched_date = txn.booking_date;
       item.matched_amount = Math.abs(txn.amount);
       item.matched_payee = txn.payee_name || txn.merchant_name;
-      const targetDate = dateStr || txn.booking_date;
+      const targetDate = dateStr || (txn.booking_date ? txn.booking_date.slice(0, 10) : null);
       if (targetDate) {
         item.cleared_dates = item.cleared_dates || [];
         if (!item.cleared_dates.includes(targetDate)) item.cleared_dates.push(targetDate);

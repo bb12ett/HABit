@@ -1366,34 +1366,51 @@ window.budgetApp = {
       return;
     }
 
+    const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
     const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
-    const isCleared = Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
+    const isCleared = isRecurring
+      ? Boolean(occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr))
+      : Boolean(item.auto_cleared || item.status === 'paid');
 
     if (isCleared) {
-      item.status = 'due';
-      item.auto_cleared = false;
-      item.manually_cleared = false;
-      item.matched_txn_id = null;
-      item.matched_date = null;
-      item.matched_payee = null;
-      if (occDateStr && item.cleared_dates) {
-        item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+      if (isRecurring) {
+        if (occDateStr && item.cleared_dates) {
+          item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+        }
+      } else {
+        item.status = 'due';
+        item.auto_cleared = false;
+        item.manually_cleared = false;
+        item.matched_txn_id = null;
+        item.matched_date = null;
+        item.matched_payee = null;
+        if (occDateStr && item.cleared_dates) {
+          item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+        }
       }
       const allTxns = appState.data.open_banking_transactions || [];
       allTxns.forEach(t => {
-        if (t.matched_bill_id === (item.desc || billDesc)) {
+        if (t.matched_bill_id === (item.desc || billDesc) && (!occDateStr || !t.booking_date || t.booking_date.startsWith(occDateStr))) {
           t.matched_bill_id = null;
           t.auto_cleared = false;
         }
       });
     } else {
-      item.status = 'paid';
-      item.auto_cleared = true;
-      item.manually_cleared = true;
-      item.matched_date = occDateStr;
-      if (occDateStr) {
-        item.cleared_dates = item.cleared_dates || [];
-        if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+      if (isRecurring) {
+        if (occDateStr) {
+          item.cleared_dates = item.cleared_dates || [];
+          if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+        }
+        item.manually_cleared = true;
+      } else {
+        item.status = 'paid';
+        item.auto_cleared = true;
+        item.manually_cleared = true;
+        item.matched_date = occDateStr;
+        if (occDateStr) {
+          item.cleared_dates = item.cleared_dates || [];
+          if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+        }
       }
     }
 
@@ -1412,14 +1429,17 @@ window.budgetApp = {
     const txn = allTxns.find(t => String(t.transaction_id) === String(transactionId));
 
     if (item && txn) {
-      item.status = 'paid';
-      item.auto_cleared = true;
+      const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
+      if (!isRecurring) {
+        item.status = 'paid';
+        item.auto_cleared = true;
+      }
       item.manually_cleared = true;
       item.matched_txn_id = txn.transaction_id;
       item.matched_date = txn.booking_date;
       item.matched_amount = Math.abs(txn.amount);
       item.matched_payee = txn.payee_name || txn.merchant_name;
-      const targetDate = dateStr || txn.booking_date;
+      const targetDate = dateStr || (txn.booking_date ? txn.booking_date.slice(0, 10) : null);
       if (targetDate) {
         item.cleared_dates = item.cleared_dates || [];
         if (!item.cleared_dates.includes(targetDate)) item.cleared_dates.push(targetDate);

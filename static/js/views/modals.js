@@ -1957,13 +1957,24 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
     }
   }
 
-  const finalAmt = (amt > 0 ? amt : Number(item?.amount || 0));
-  const isCleared = Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
+  const isCleared = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+    ? Boolean(dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr))
+    : Boolean(item?.status === 'paid' || item?.auto_cleared);
 
   const allTxns = appState.data.open_banking_transactions || [];
   const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const sortedTxns = [...allTxns].sort((a, b) => {
+    if (dateStr && a.booking_date && b.booking_date) {
+      const targetTime = new Date(dateStr).getTime();
+      const aTimeDiff = Math.abs(new Date(a.booking_date).getTime() - targetTime);
+      const bTimeDiff = Math.abs(new Date(b.booking_date).getTime() - targetTime);
+      const aNear = aTimeDiff <= (14 * 86400000);
+      const bNear = bTimeDiff <= (14 * 86400000);
+      if (aNear && !bNear) return -1;
+      if (!aNear && bNear) return 1;
+      if (aNear && bNear) return aTimeDiff - bTimeDiff;
+    }
     const aAmtDiff = Math.abs(Math.abs(Number(a.amount) || 0) - amt);
     const bAmtDiff = Math.abs(Math.abs(Number(b.amount) || 0) - amt);
     if (aAmtDiff < 0.05 && bAmtDiff >= 0.05) return -1;
@@ -2006,7 +2017,9 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
             const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
             const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
             const isRecMatch = isAmtMatch || isNameMatch;
-            const isCurrentMatch = item?.matched_txn_id === t.transaction_id;
+            const isCurrentMatch = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+              ? Boolean(dateStr && t.booking_date && t.booking_date.startsWith(dateStr) && (t.matched_bill_id === desc || item?.matched_txn_id === t.transaction_id))
+              : (item?.matched_txn_id === t.transaction_id);
 
             return `
               <div class="bill-match-row" data-search="${tPayee.toLowerCase()} ${t.account_name || ''} ${tAmt}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; background:${isCurrentMatch ? 'rgba(16,185,129,0.18)' : (isRecMatch ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)')}; border:1px solid ${isCurrentMatch ? 'var(--green)' : (isRecMatch ? 'rgba(56,189,248,0.3)' : 'transparent')};">

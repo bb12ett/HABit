@@ -33,7 +33,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.1.4")
+    return os.environ.get("APP_VERSION", "0.1.5")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -2184,16 +2184,7 @@ def reconcile_transactions_and_bills(data):
                 dt = datetime.date.fromisoformat(t_date_str[:10])
                 target_year_str = str(dt.year)
                 t_day = dt.day
-
-                # Payday schedule mapping:
-                if pay_freq == "monthly" and pday_day >= 20 and t_day >= (pday_day - 4):
-                    budget_m_idx = dt.month # 1-based dt.month gives next month's 0-based index (e.g. 8 -> idx 8 = Sep)
-                    if budget_m_idx > 11:
-                        budget_m_idx = 0
-                        target_year_str = str(dt.year + 1)
-                    target_m_name = month_names[budget_m_idx]
-                else:
-                    target_m_name = month_names[dt.month - 1]
+                target_m_name, _ = detect_current_month_and_week_py(data, dt)
             except Exception:
                 pass
 
@@ -2202,16 +2193,10 @@ def reconcile_transactions_and_bills(data):
             year_data = data.get("years", {}).get(current_year_str, {})
         months_map = year_data.get("months", {})
 
-        # Order search months prioritizing target_m_name, with adjacent months for edge-of-month payments
+        # Order search months prioritizing target_m_name
         search_months = []
         if target_m_name and target_m_name in months_map:
             search_months.append(target_m_name)
-            m_idx = month_names.index(target_m_name) if target_m_name in month_names else -1
-            if m_idx >= 0:
-                if m_idx > 0 and month_names[m_idx - 1] in months_map:
-                    search_months.append(month_names[m_idx - 1])
-                if m_idx < 11 and month_names[m_idx + 1] in months_map:
-                    search_months.append(month_names[m_idx + 1])
         else:
             search_months = list(months_map.keys())
 
@@ -2273,32 +2258,49 @@ def reconcile_transactions_and_bills(data):
                 if t_is_income != is_inc_coll:
                     continue
 
+                is_recurring_type = (b_type in ["recurring_payment", "recurring_income"])
+                occ_iso = t_date_str[:10] if t_date_str else ""
+
                 for idx, b in enumerate(b_list or []):
-                    b_id = b.get("id") or f"{target_year_str}_{m_name}_{b_type}_{idx}"
-                    if b_id in matched_bill_keys:
+                    b_name = b.get("desc") or b.get("name") or ""
+                    if is_recurring_type:
+                        b_key = f"rec_{b.get('id') or b_name}_{m_name}_{occ_iso}"
+                    else:
+                        b_key = b.get("id") or f"{target_year_str}_{m_name}_{b_type}_{idx}"
+
+                    if b_key in matched_bill_keys:
                         continue
 
-                    if b.get("manually_cleared"):
-                        matched_bill_keys.add(b_id)
+                    if is_recurring_type and occ_iso and (occ_iso in b.get("cleared_dates", [])):
+                        matched_bill_keys.add(b_key)
+                        continue
+                    elif not is_recurring_type and b.get("manually_cleared"):
+                        matched_bill_keys.add(b_key)
                         continue
 
                     b_amt = abs(float(b.get("amount", 0.0)))
-                    b_name = b.get("desc") or b.get("name") or ""
                     b_due_day = int(b.get("due_day") or b.get("day_of_month") or 1)
                     is_same_month = (target_m_name == m_name)
 
                     if is_valid_bill_match(b_name, b_amt, b_due_day, t_payee, t_amt, t_day, is_same_month):
-                        b["status"] = "paid"
-                        b["auto_cleared"] = True
-                        b["matched_txn_id"] = t.get("transaction_id")
-                        b["matched_date"] = t_date_str
-                        b["matched_amount"] = t_amt
-                        b["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
-                        if t_date_str:
-                            occ_iso = t_date_str[:10]
+                        if is_recurring_type:
                             b_cleared_dates = b.setdefault("cleared_dates", [])
-                            if occ_iso not in b_cleared_dates:
+                            if occ_iso and occ_iso not in b_cleared_dates:
                                 b_cleared_dates.append(occ_iso)
+                            b["matched_txn_id"] = t.get("transaction_id")
+                            b["matched_date"] = t_date_str
+                            b["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
+                        else:
+                            b["status"] = "paid"
+                            b["auto_cleared"] = True
+                            b["matched_txn_id"] = t.get("transaction_id")
+                            b["matched_date"] = t_date_str
+                            b["matched_amount"] = t_amt
+                            b["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
+                            if occ_iso:
+                                b_cleared_dates = b.setdefault("cleared_dates", [])
+                                if occ_iso not in b_cleared_dates:
+                                    b_cleared_dates.append(occ_iso)
 
                         # Also sync to underlying raw_target if this was a budget/birthday transaction
                         raw_target = b.get("raw_target")
@@ -2309,14 +2311,14 @@ def reconcile_transactions_and_bills(data):
                             raw_target["matched_date"] = t_date_str
                             raw_target["matched_amount"] = t_amt
                             raw_target["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
-                            if t_date_str:
+                            if occ_iso:
                                 raw_cleared = raw_target.setdefault("cleared_dates", [])
                                 if occ_iso not in raw_cleared:
                                     raw_cleared.append(occ_iso)
 
                         t["matched_bill_id"] = b_name
                         t["auto_cleared"] = True
-                        matched_bill_keys.add(b_id)
+                        matched_bill_keys.add(b_key)
                         matched_this_txn = True
                         match_count += 1
                         log_open_banking_debug(f"Auto-cleared scheduled bill '{b_name}' in {m_name} (£{b_amt:.2f}) with txn '{t.get('payee_name') or t.get('merchant_name')}' (£{t_amt:.2f} on {t_date_str})")

@@ -1351,7 +1351,7 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
       if (diffWeeks >= 0 && diffWeeks % stepWeeks === 0) {
         const occDate = weekObj.startDate;
         const occIso = occDate.toISOString().slice(0, 10);
-        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+        const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
         occurrences.push({
           ...r,
           isRecurring: true,
@@ -1389,7 +1389,7 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
           const diffMonths = (year - startDate.getFullYear()) * 12 + (m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
             const occIso = actualPayDate.toISOString().slice(0, 10);
-            const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+            const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
             occurrences.push({
               ...r,
               isRecurring: true,
