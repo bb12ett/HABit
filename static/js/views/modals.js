@@ -1957,9 +1957,10 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
     }
   }
 
-  const isCleared = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+  const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
+  const isCleared = isRecurring
     ? Boolean(dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr))
-    : Boolean(item?.status === 'paid' || item?.auto_cleared);
+    : Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
 
   const allTxns = appState.data.open_banking_transactions || [];
   const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');

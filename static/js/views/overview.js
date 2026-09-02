@@ -704,7 +704,8 @@ export function renderOverviewView(container) {
                               ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
                                 const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = (i.isRecurring || occDateStr) ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid');
+                                const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income' || i.source_type === 'recurring_payment');
+                                const isCleared = isRecurring ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
                                 const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (i.rawDesc || i.desc || '').replace(/'/g, "\\'");
@@ -723,7 +724,8 @@ export function renderOverviewView(container) {
                               }).join('')}
                               ${colDDs.map((d, dIdx) => {
                                 const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = (d.isRecurring || occDateStr) ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid');
+                                const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_income' || d.source_type === 'recurring_payment');
+                                const isCleared = isRecurring ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
                                 const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (d.rawDesc || d.desc || '').replace(/'/g, "\\'");

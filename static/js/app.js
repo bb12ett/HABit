@@ -1366,11 +1366,11 @@ window.budgetApp = {
       return;
     }
 
-    const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
+    const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
     const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
     const isCleared = isRecurring
       ? Boolean(occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr))
-      : Boolean(item.auto_cleared || item.status === 'paid');
+      : Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
 
     if (isCleared) {
       if (isRecurring) {

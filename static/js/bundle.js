@@ -5262,9 +5262,10 @@ function openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, bi
     }
   }
 
-  const isCleared = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
+  const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
+  const isCleared = isRecurring
     ? Boolean(dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr))
-    : Boolean(item?.status === 'paid' || item?.auto_cleared);
+    : Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
 
   const allTxns = appState.data.open_banking_transactions || [];
   const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -6540,7 +6541,8 @@ function renderOverviewView(container) {
                               ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
                                 const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = (i.isRecurring || occDateStr) ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid');
+                                const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income' || i.source_type === 'recurring_payment');
+                                const isCleared = isRecurring ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
                                 const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (i.rawDesc || i.desc || '').replace(/'/g, "\\'");
@@ -6559,7 +6561,8 @@ function renderOverviewView(container) {
                               }).join('')}
                               ${colDDs.map((d, dIdx) => {
                                 const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
-                                const isCleared = (d.isRecurring || occDateStr) ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid');
+                                const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_income' || d.source_type === 'recurring_payment');
+                                const isCleared = isRecurring ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
                                 const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
                                 const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
                                 const cleanDesc = (d.rawDesc || d.desc || '').replace(/'/g, "\\'");
@@ -11307,11 +11310,11 @@ window.budgetApp = {
       return;
     }
 
-    const isRecurring = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr));
+    const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
     const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
     const isCleared = isRecurring
       ? Boolean(occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr))
-      : Boolean(item.auto_cleared || item.status === 'paid');
+      : Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
 
     if (isCleared) {
       if (isRecurring) {
