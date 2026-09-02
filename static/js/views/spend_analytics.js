@@ -2,7 +2,48 @@ import { appState, getSettings, isMultiUserEnabled } from '../state.js';
 import { SPEND_CATEGORIES, calculateCategoryBreakdown } from '../calculations.js';
 import { renderCategoryDonutChart } from '../charts.js';
 
+function matchesAmountFilter(amountNum, filterStr) {
+  if (!filterStr || !filterStr.trim()) return true;
+  const s = filterStr.trim();
+  const absAmt = Math.abs(amountNum);
+
+  if (s.startsWith('>=')) {
+    const val = parseFloat(s.slice(2).trim());
+    return !isNaN(val) ? absAmt >= val : true;
+  }
+  if (s.startsWith('<=')) {
+    const val = parseFloat(s.slice(2).trim());
+    return !isNaN(val) ? absAmt <= val : true;
+  }
+  if (s.startsWith('>')) {
+    const val = parseFloat(s.slice(1).trim());
+    return !isNaN(val) ? absAmt > val : true;
+  }
+  if (s.startsWith('<')) {
+    const val = parseFloat(s.slice(1).trim());
+    return !isNaN(val) ? absAmt < val : true;
+  }
+  if (s.includes('-') && !s.startsWith('-')) {
+    const parts = s.split('-').map(p => parseFloat(p.trim()));
+    if (parts.length === 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+      const min = Math.min(parts[0], parts[1]);
+      const max = Math.max(parts[0], parts[1]);
+      return absAmt >= min && absAmt <= max;
+    }
+  }
+  const cleanFilter = s.replace(/[^0-9.]/g, '');
+  if (!cleanFilter) return true;
+  const exact = parseFloat(cleanFilter);
+  if (!isNaN(exact) && Math.abs(absAmt - exact) < 0.001) return true;
+  return absAmt.toFixed(2).includes(cleanFilter) || String(amountNum).includes(cleanFilter);
+}
+
 export function renderSpendAnalyticsView(container) {
+  const activeEl = document.activeElement;
+  const focusedId = (activeEl && (activeEl.id === 'spendFilterDate' || activeEl.id === 'spendFilterPayee' || activeEl.id === 'spendFilterAmount' || activeEl.id === 'spendSearchInputTop')) ? activeEl.id : null;
+  const cursorStart = focusedId && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  const cursorEnd = focusedId && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
+
   const cfg = getSettings();
   const curr = cfg.currency;
   const isMulti = isMultiUserEnabled();
@@ -15,22 +56,118 @@ export function renderSpendAnalyticsView(container) {
   const searchQuery = (appState.spendSearchQuery || '').toLowerCase().trim();
   const activeUser = isMulti ? (appState.activeUser || 'Joint') : 'all';
 
+  const colFilters = appState.spendColFilters || {
+    date: '',
+    payee: '',
+    account: 'all',
+    owner: 'all',
+    category: 'all',
+    amount: ''
+  };
+
+  const sortCol = appState.spendSortColumn || 'date';
+  const sortDir = appState.spendSortDirection || 'desc';
+
   const breakdown = calculateCategoryBreakdown(allTxns, timeframe, accountFilter, activeUser, customRules);
   const { categoryList, topMerchants, grandTotal, transactionCount, startDate, endDate } = breakdown;
 
-  let displayTxns = breakdown.filteredTransactions;
+  const availableAccounts = Array.from(new Set(breakdown.filteredTransactions.map(t => t.account_name).filter(Boolean))).sort();
+  const availableOwners = Array.from(new Set(breakdown.filteredTransactions.map(t => t.owner || 'Joint').filter(Boolean))).sort();
+
+  let displayTxns = [...breakdown.filteredTransactions];
+
+  // 1. Top Category Filter
   if (categoryFilter !== 'all') {
     displayTxns = displayTxns.filter(t => t.assignedCategory?.id === categoryFilter);
   }
+
+  // 2. Top Global Search Query
   if (searchQuery) {
     displayTxns = displayTxns.filter(t => {
       const p = (t.payee_name || '').toLowerCase();
       const r = (t.raw_info || '').toLowerCase();
       const a = (t.account_name || '').toLowerCase();
+      const m = (t.merchant_name || '').toLowerCase();
+      const d = (t.description || '').toLowerCase();
       const amt = String(Math.abs(Number(t.amount || 0)));
-      return p.includes(searchQuery) || r.includes(searchQuery) || a.includes(searchQuery) || amt.includes(searchQuery);
+      return p.includes(searchQuery) || r.includes(searchQuery) || a.includes(searchQuery) || m.includes(searchQuery) || d.includes(searchQuery) || amt.includes(searchQuery);
     });
   }
+
+  // 3. Column Specific Filters
+  if (colFilters.date && colFilters.date.trim()) {
+    const dQuery = colFilters.date.toLowerCase().trim();
+    displayTxns = displayTxns.filter(t => (t.booking_date || '').toLowerCase().includes(dQuery));
+  }
+
+  if (colFilters.payee && colFilters.payee.trim()) {
+    const pQuery = colFilters.payee.toLowerCase().trim();
+    displayTxns = displayTxns.filter(t => {
+      const p = (t.payee_name || '').toLowerCase();
+      const r = (t.raw_info || '').toLowerCase();
+      const m = (t.merchant_name || '').toLowerCase();
+      const d = (t.description || '').toLowerCase();
+      return p.includes(pQuery) || r.includes(pQuery) || m.includes(pQuery) || d.includes(pQuery);
+    });
+  }
+
+  if (colFilters.account && colFilters.account !== 'all') {
+    displayTxns = displayTxns.filter(t => (t.account_name || '') === colFilters.account);
+  }
+
+  if (isMulti && colFilters.owner && colFilters.owner !== 'all') {
+    displayTxns = displayTxns.filter(t => (t.owner || 'Joint') === colFilters.owner);
+  }
+
+  if (colFilters.category && colFilters.category !== 'all') {
+    displayTxns = displayTxns.filter(t => (t.assignedCategory?.id || '') === colFilters.category);
+  }
+
+  if (colFilters.amount && colFilters.amount.trim()) {
+    displayTxns = displayTxns.filter(t => matchesAmountFilter(Number(t.amount || 0), colFilters.amount));
+  }
+
+  // 4. Column Sorting
+  displayTxns.sort((a, b) => {
+    let cmp = 0;
+    if (sortCol === 'date') {
+      const dA = a.booking_date || '';
+      const dB = b.booking_date || '';
+      cmp = dA.localeCompare(dB);
+    } else if (sortCol === 'payee') {
+      const pA = (a.merchant_name || a.payee_name || a.description || a.raw_info || '').toLowerCase();
+      const pB = (b.merchant_name || b.payee_name || b.description || b.raw_info || '').toLowerCase();
+      cmp = pA.localeCompare(pB);
+    } else if (sortCol === 'account') {
+      const aA = (a.account_name || '').toLowerCase();
+      const aB = (b.account_name || '').toLowerCase();
+      cmp = aA.localeCompare(aB);
+    } else if (sortCol === 'owner') {
+      const oA = (a.owner || 'Joint').toLowerCase();
+      const oB = (b.owner || 'Joint').toLowerCase();
+      cmp = oA.localeCompare(oB);
+    } else if (sortCol === 'category') {
+      const cA = (a.assignedCategory?.label || '').toLowerCase();
+      const cB = (b.assignedCategory?.label || '').toLowerCase();
+      cmp = cA.localeCompare(cB);
+    } else if (sortCol === 'amount') {
+      const amtA = Number(a.amount || 0);
+      const amtB = Number(b.amount || 0);
+      cmp = Math.abs(amtA) - Math.abs(amtB);
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
+
+  const hasActiveFilters = Boolean(
+    (colFilters.date && colFilters.date.trim()) ||
+    (colFilters.payee && colFilters.payee.trim()) ||
+    (colFilters.account && colFilters.account !== 'all') ||
+    (colFilters.owner && colFilters.owner !== 'all') ||
+    (colFilters.category && colFilters.category !== 'all') ||
+    (colFilters.amount && colFilters.amount.trim()) ||
+    searchQuery ||
+    (categoryFilter && categoryFilter !== 'all')
+  );
 
   const now = new Date();
   const sDate = startDate || new Date(now.getFullYear(), now.getMonth(), 1);
@@ -185,10 +322,19 @@ export function renderSpendAnalyticsView(container) {
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
         <div>
           <h3 style="margin:0; font-size:15px; color:var(--heading);">🧾 Categorized Transactions</h3>
-          <span style="font-size:11px; color:var(--text-muted);">Showing ${displayTxns.length} transactions</span>
+          <span style="font-size:11px; color:var(--text-muted);">
+            Showing ${displayTxns.length} of ${breakdown.filteredTransactions.length} transactions
+            ${hasActiveFilters ? '<span style="color:var(--amber, #f59e0b); font-weight:600;">(Filters active)</span>' : ''}
+          </span>
         </div>
 
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          ${hasActiveFilters ? `
+            <button class="btn secondary" style="font-size:11px; padding:4px 10px; display:inline-flex; align-items:center; gap:4px;" onclick="window.budgetApp.clearAllSpendFilters()" title="Reset all column filters and search queries">
+              ✕ Clear Filters
+            </button>
+          ` : ''}
+
           <!-- Category Filter -->
           <select onchange="window.budgetApp.setSpendCategoryFilter(this.value)" style="font-size:11.5px; padding:4px 8px; border-radius:6px;">
             <option value="all" ${categoryFilter === 'all' ? 'selected' : ''}>All Categories</option>
@@ -197,24 +343,113 @@ export function renderSpendAnalyticsView(container) {
 
           <!-- Search Input -->
           <div style="position:relative;">
-            <input type="text" placeholder="🔍 Search merchant..." value="${appState.spendSearchQuery || ''}" oninput="window.budgetApp.setSpendSearchQuery(this.value)" style="font-size:11.5px; padding:4px 8px; width:160px; border-radius:6px;">
+            <input type="text" id="spendSearchInputTop" placeholder="🔍 Search merchant..." value="${appState.spendSearchQuery || ''}" oninput="window.budgetApp.setSpendSearchQuery(this.value)" style="font-size:11.5px; padding:4px 8px; width:160px; border-radius:6px;">
             ${appState.spendSearchQuery ? `<button style="position:absolute; right:4px; top:4px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:11px;" onclick="window.budgetApp.setSpendSearchQuery('')">&times;</button>` : ''}
           </div>
         </div>
       </div>
 
       <div style="overflow-x:auto;">
-        <table class="data-table" style="width:100%; font-size:12px;">
+        <table class="data-table" style="width:100%; font-size:12px; border-collapse:collapse;">
           <thead>
-            <tr>
-              <th style="width:90px;">Date</th>
-              <th>Payee / Merchant</th>
-              <th>Account</th>
-              ${isMulti ? '<th style="width:80px;">Owner</th>' : ''}
-              <th style="width:170px;">Category</th>
-              <th class="text-right" style="width:100px;">Amount</th>
+            <!-- SORTABLE HEADERS -->
+            <tr style="border-bottom:1px solid var(--border);">
+              <th onclick="window.budgetApp.toggleSpendSort('date')" style="width:100px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Date">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                  <span style="${sortCol === 'date' ? 'color:var(--heading); font-weight:700;' : ''}">Date</span>
+                  <span style="font-size:11px; color:${sortCol === 'date' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'date' ? 1 : 0.4};">
+                    ${sortCol === 'date' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </div>
+              </th>
+
+              <th onclick="window.budgetApp.toggleSpendSort('payee')" style="cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Payee / Merchant">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                  <span style="${sortCol === 'payee' ? 'color:var(--heading); font-weight:700;' : ''}">Payee / Merchant</span>
+                  <span style="font-size:11px; color:${sortCol === 'payee' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'payee' ? 1 : 0.4};">
+                    ${sortCol === 'payee' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </div>
+              </th>
+
+              <th onclick="window.budgetApp.toggleSpendSort('account')" style="min-width:130px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Account">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                  <span style="${sortCol === 'account' ? 'color:var(--heading); font-weight:700;' : ''}">Account</span>
+                  <span style="font-size:11px; color:${sortCol === 'account' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'account' ? 1 : 0.4};">
+                    ${sortCol === 'account' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </div>
+              </th>
+
+              ${isMulti ? `
+                <th onclick="window.budgetApp.toggleSpendSort('owner')" style="width:90px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Owner">
+                  <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                    <span style="${sortCol === 'owner' ? 'color:var(--heading); font-weight:700;' : ''}">Owner</span>
+                    <span style="font-size:11px; color:${sortCol === 'owner' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'owner' ? 1 : 0.4};">
+                      ${sortCol === 'owner' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                    </span>
+                  </div>
+                </th>
+              ` : ''}
+
+              <th onclick="window.budgetApp.toggleSpendSort('category')" style="width:170px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Category">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
+                  <span style="${sortCol === 'category' ? 'color:var(--heading); font-weight:700;' : ''}">Category</span>
+                  <span style="font-size:11px; color:${sortCol === 'category' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'category' ? 1 : 0.4};">
+                    ${sortCol === 'category' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </div>
+              </th>
+
+              <th onclick="window.budgetApp.toggleSpendSort('amount')" class="text-right" style="width:110px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Amount">
+                <div style="display:flex; align-items:center; justify-content:flex-end; gap:4px;">
+                  <span style="${sortCol === 'amount' ? 'color:var(--heading); font-weight:700;' : ''}">Amount</span>
+                  <span style="font-size:11px; color:${sortCol === 'amount' ? 'var(--primary, #38bdf8)' : 'var(--text-muted)'}; opacity:${sortCol === 'amount' ? 1 : 0.4};">
+                    ${sortCol === 'amount' ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}
+                  </span>
+                </div>
+              </th>
+            </tr>
+
+            <!-- INLINE COLUMN FILTER ROW -->
+            <tr style="background:rgba(0,0,0,0.12); border-bottom:1px solid var(--border);">
+              <th style="padding:4px 6px;">
+                <input type="text" id="spendFilterDate" placeholder="📅 YYYY-MM..." value="${colFilters.date || ''}" oninput="window.budgetApp.setSpendColFilter('date', this.value)" style="width:100%; font-size:11px; padding:3px 6px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
+              </th>
+
+              <th style="padding:4px 6px;">
+                <input type="text" id="spendFilterPayee" placeholder="🔍 Merchant name..." value="${colFilters.payee || ''}" oninput="window.budgetApp.setSpendColFilter('payee', this.value)" style="width:100%; font-size:11px; padding:3px 6px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
+              </th>
+
+              <th style="padding:4px 6px;">
+                <select id="spendFilterAccount" onchange="window.budgetApp.setSpendColFilter('account', this.value)" style="width:100%; font-size:11px; padding:3px 4px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
+                  <option value="all">All Accounts</option>
+                  ${availableAccounts.map(a => `<option value="${a}" ${colFilters.account === a ? 'selected' : ''}>${a}</option>`).join('')}
+                </select>
+              </th>
+
+              ${isMulti ? `
+                <th style="padding:4px 6px;">
+                  <select id="spendFilterOwner" onchange="window.budgetApp.setSpendColFilter('owner', this.value)" style="width:100%; font-size:11px; padding:3px 4px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
+                    <option value="all">All Owners</option>
+                    ${availableOwners.map(o => `<option value="${o}" ${colFilters.owner === o ? 'selected' : ''}>${o}</option>`).join('')}
+                  </select>
+                </th>
+              ` : ''}
+
+              <th style="padding:4px 6px;">
+                <select id="spendFilterCategory" onchange="window.budgetApp.setSpendColFilter('category', this.value)" style="width:100%; font-size:11px; padding:3px 4px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
+                  <option value="all">All Categories</option>
+                  ${SPEND_CATEGORIES.map(cat => `<option value="${cat.id}" ${(colFilters.category === cat.id || (categoryFilter !== 'all' && categoryFilter === cat.id)) ? 'selected' : ''}>${cat.icon} ${cat.label}</option>`).join('')}
+                </select>
+              </th>
+
+              <th style="padding:4px 6px;">
+                <input type="text" id="spendFilterAmount" placeholder="e.g. >50, 20" value="${colFilters.amount || ''}" oninput="window.budgetApp.setSpendColFilter('amount', this.value)" style="width:100%; font-size:11px; padding:3px 6px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); text-align:right; box-sizing:border-box;">
+              </th>
             </tr>
           </thead>
+
           <tbody>
             ${displayTxns.length > 0 ? displayTxns.map(t => {
               const cat = t.assignedCategory || SPEND_CATEGORIES[SPEND_CATEGORIES.length - 1];
@@ -222,29 +457,35 @@ export function renderSpendAnalyticsView(container) {
               const cleanAttr = merchantDisp.replace(/"/g, '&quot;');
               return `
                 <tr>
-                  <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px;">${t.booking_date}</td>
-                  <td>
+                  <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px; padding:8px;">${t.booking_date}</td>
+                  <td style="padding:8px;">
                     <strong style="color:var(--heading); font-size:12.5px;">${merchantDisp}</strong>
                     ${t.raw_info && t.raw_info !== merchantDisp ? `<div style="font-size:10px; color:var(--text-muted); opacity:0.8;">${t.raw_info}</div>` : ''}
                   </td>
-                  <td style="color:var(--text-muted); font-size:11.5px;">${t.account_name || 'Account'}</td>
-                  ${isMulti ? `<td style="font-size:11px; color:var(--text-muted);">${t.owner || 'Joint'}</td>` : ''}
-                  <td>
+                  <td style="color:var(--text-muted); font-size:11.5px; padding:8px;">${t.account_name || 'Account'}</td>
+                  ${isMulti ? `<td style="font-size:11px; color:var(--text-muted); padding:8px;">${t.owner || 'Joint'}</td>` : ''}
+                  <td style="padding:8px;">
                     <button class="badge" style="background:rgba(255,255,255,0.06); border:1px solid ${cat.color}60; color:${cat.color}; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-weight:600;" onclick="window.budgetApp.openRecategorizeModal(this.dataset.txnid, this.dataset.payee, this.dataset.catid)" data-txnid="${t.transaction_id}" data-payee="${cleanAttr}" data-catid="${cat.id}" title="Click to change category or create custom rule">
                       <span>${cat.icon}</span>
                       <span>${cat.label}</span>
                       <span style="font-size:9px; opacity:0.7;">▾</span>
                     </button>
                   </td>
-                  <td class="text-right" style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap;">
+                  <td class="text-right" style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap; padding:8px;">
                     ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
                   </td>
                 </tr>
               `;
             }).join('') : `
               <tr>
-                <td colspan="${isMulti ? 6 : 5}" style="text-align:center; padding:30px; color:var(--text-muted);">
-                  No transactions found matching the selected filters.
+                <td colspan="${isMulti ? 6 : 5}" style="text-align:center; padding:35px 20px; color:var(--text-muted);">
+                  <div style="font-size:22px; margin-bottom:6px;">🧾</div>
+                  <div style="font-size:13px; font-weight:600; color:var(--heading); margin-bottom:4px;">No transactions match the selected filters.</div>
+                  ${hasActiveFilters ? `
+                    <button class="btn secondary" style="font-size:11px; padding:4px 10px; margin-top:8px;" onclick="window.budgetApp.clearAllSpendFilters()">
+                      ✕ Reset All Filters
+                    </button>
+                  ` : ''}
                 </td>
               </tr>
             `}
@@ -253,6 +494,18 @@ export function renderSpendAnalyticsView(container) {
       </div>
     </div>
   `;
+
+  if (focusedId) {
+    const elToFocus = document.getElementById(focusedId);
+    if (elToFocus) {
+      elToFocus.focus();
+      if (cursorStart !== null && typeof elToFocus.setSelectionRange === 'function') {
+        try {
+          elToFocus.setSelectionRange(cursorStart, cursorEnd);
+        } catch (e) {}
+      }
+    }
+  }
 
   setTimeout(() => {
     const canvas = document.getElementById('spendCategoryDonutCanvas');
@@ -265,3 +518,4 @@ export function renderSpendAnalyticsView(container) {
 if (typeof window !== 'undefined') {
   window.renderSpendAnalyticsView = renderSpendAnalyticsView;
 }
+

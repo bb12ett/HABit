@@ -10,10 +10,12 @@ export function renderBudgetsView(container) {
   const now = new Date();
   const todayIso = `${appState.currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  // Calculate Birthday Stats
+  // Calculate Birthday Stats & Counts
   let totalBirthdayBudget = 0;
   let totalBirthdaySpent = 0;
+  let soonBirthdaysCount = 0;
   let upcomingBirthdaysCount = 0;
+  let pastBirthdaysCount = 0;
 
   const nowTime = now.getTime();
   const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
@@ -25,7 +27,9 @@ export function renderBudgetsView(container) {
     const bTime = bDate.getTime();
     const diffDays = Math.ceil((bTime - nowTime) / (1000 * 60 * 60 * 24));
     
-    if (diffDays >= 0 && diffDays <= 30) upcomingBirthdaysCount++;
+    if (diffDays >= 0 && diffDays <= 30) soonBirthdaysCount++;
+    if (diffDays >= 0) upcomingBirthdaysCount++;
+    if (diffDays < 0) pastBirthdaysCount++;
 
     const bSpent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const bBudget = Number(b.budget_amount) || 0;
@@ -45,6 +49,17 @@ export function renderBudgetsView(container) {
 
   // Sort birthdays chronologically by date in year
   enrichedBirthdays.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+
+  // Filter birthdays by active filter (all, soon, upcoming, past)
+  const activeBirthdayFilter = appState.birthdayFilter || 'soon';
+  let filteredBirthdays = enrichedBirthdays;
+  if (activeBirthdayFilter === 'soon') {
+    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0 && b.diffDays <= 30);
+  } else if (activeBirthdayFilter === 'upcoming') {
+    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0);
+  } else if (activeBirthdayFilter === 'past') {
+    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays < 0);
+  }
 
   let html = `
     <!-- TOP HEADER -->
@@ -73,7 +88,7 @@ export function renderBudgetsView(container) {
 
       <!-- BIRTHDAY KPI SUMMARY -->
       <div class="mini-kpi-grid">
-        <div class="mini-kpi-card">
+        <div class="mini-kpi-card" style="cursor:pointer;" onclick="window.budgetApp.setBirthdayFilter('all')" title="Click to view All occasions">
           <div class="mini-kpi-title">Total Gift Budget</div>
           <div class="mini-kpi-val">${curr}${totalBirthdayBudget.toFixed(2)}</div>
           <div class="mini-kpi-sub">${birthdays.length} Annual Occasions</div>
@@ -91,20 +106,46 @@ export function renderBudgetsView(container) {
           <div class="mini-kpi-sub">Available to spend</div>
         </div>
 
-        <div class="mini-kpi-card">
+        <div class="mini-kpi-card" style="cursor:pointer;" onclick="window.budgetApp.setBirthdayFilter('soon')" title="Click to filter Soon (next 30 days)">
           <div class="mini-kpi-title">Next 30 Days</div>
-          <div class="mini-kpi-val" style="color:#f472b6;">${upcomingBirthdaysCount} Upcoming</div>
+          <div class="mini-kpi-val" style="color:#f472b6;">${soonBirthdaysCount} Soon</div>
           <div class="mini-kpi-sub">Coming up soon</div>
         </div>
       </div>
 
+      <!-- BIRTHDAYS FILTER BAR -->
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin: 14px 0 12px 0;">
+        <div style="display:inline-flex; align-items:center; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:2px; flex-wrap:wrap; gap:2px;">
+          <button class="btn ${activeBirthdayFilter === 'all' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('all')" title="Show all birthdays & occasions">
+            All (${enrichedBirthdays.length})
+          </button>
+          <button class="btn ${activeBirthdayFilter === 'soon' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('soon')" title="Show occasions occurring within the next 30 days">
+            ⏳ Soon (${soonBirthdaysCount})
+          </button>
+          <button class="btn ${activeBirthdayFilter === 'upcoming' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('upcoming')" title="Show all future occasions for this year">
+            📅 Upcoming (${upcomingBirthdaysCount})
+          </button>
+          <button class="btn ${activeBirthdayFilter === 'past' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('past')" title="Show occasions that have already occurred this year">
+            ⏪ Past (${pastBirthdaysCount})
+          </button>
+        </div>
+        ${activeBirthdayFilter !== 'all' ? `
+          <button class="btn secondary" style="font-size:11px; padding:3px 8px;" onclick="window.budgetApp.setBirthdayFilter('all')">
+            ✕ Show All (${enrichedBirthdays.length})
+          </button>
+        ` : ''}
+      </div>
+
       <!-- BIRTHDAYS GRID -->
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap:12px;">
-        ${enrichedBirthdays.length === 0 ? `
-          <div style="grid-column:1/-1; padding:20px; text-align:center; color:var(--text-muted); font-style:italic;">
-            No birthdays or occasions added yet. Click "+ Add Birthday or Occasion" to set gift budgets for family and friends.
+        ${filteredBirthdays.length === 0 ? `
+          <div style="grid-column:1/-1; padding:30px 20px; text-align:center; color:var(--text-muted); background:rgba(0,0,0,0.1); border-radius:8px; border:1px dashed var(--border);">
+            <div style="font-size:24px; margin-bottom:6px;">🎂</div>
+            <div style="font-size:13px; font-weight:600; color:var(--heading);">No occasions found for filter: "${activeBirthdayFilter.charAt(0).toUpperCase() + activeBirthdayFilter.slice(1)}"</div>
+            <p style="font-size:11px; margin:4px 0 10px 0;">${activeBirthdayFilter === 'past' ? 'No occasions have passed yet this year.' : activeBirthdayFilter === 'soon' ? 'No birthdays or occasions coming up in the next 30 days.' : 'No birthdays or occasions found.'}</p>
+            <button class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.setBirthdayFilter('all')">Show All Occasions</button>
           </div>
-        ` : enrichedBirthdays.map(b => {
+        ` : filteredBirthdays.map(b => {
           let countdownBadge = '';
           if (b.diffDays === 0) countdownBadge = `<span class="badge" style="background:#ec4899; color:#fff; font-size:10px;">🎉 Today!</span>`;
           else if (b.diffDays > 0 && b.diffDays <= 7) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">⏳ In ${b.diffDays} days!</span>`;

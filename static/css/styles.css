@@ -1082,6 +1082,32 @@ h1, h2, h3, h4, h5, h6 {
 .table th { color: var(--text-muted); font-weight: 600; }
 .text-right { text-align: right !important; }
 
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-table th, .data-table td {
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.data-table th[onclick] {
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.data-table th[onclick]:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--heading);
+}
+
+.data-table thead tr:first-child th {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .accounts-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

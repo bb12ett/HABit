@@ -1308,11 +1308,53 @@ window.budgetApp = {
 
   setSpendCategoryFilter(catId) {
     appState.spendFilterCategory = (appState.spendFilterCategory === catId) ? 'all' : catId;
+    if (!appState.spendColFilters) appState.spendColFilters = {};
+    appState.spendColFilters.category = appState.spendFilterCategory;
     renderContent();
   },
 
   setSpendSearchQuery(query) {
     appState.spendSearchQuery = query;
+    if (!appState.spendColFilters) appState.spendColFilters = {};
+    appState.spendColFilters.payee = query;
+    renderContent();
+  },
+
+  toggleSpendSort(colKey) {
+    if (appState.spendSortColumn === colKey) {
+      appState.spendSortDirection = appState.spendSortDirection === 'asc' ? 'desc' : 'asc';
+    } else {
+      appState.spendSortColumn = colKey;
+      appState.spendSortDirection = (colKey === 'date' || colKey === 'amount') ? 'desc' : 'asc';
+    }
+    renderContent();
+  },
+
+  setSpendColFilter(colName, value) {
+    if (!appState.spendColFilters) {
+      appState.spendColFilters = { date: '', payee: '', account: 'all', owner: 'all', category: 'all', amount: '' };
+    }
+    appState.spendColFilters[colName] = value;
+    if (colName === 'category') {
+      appState.spendFilterCategory = value;
+    }
+    if (colName === 'payee') {
+      appState.spendSearchQuery = value;
+    }
+    renderContent();
+  },
+
+  clearAllSpendFilters() {
+    appState.spendFilterCategory = 'all';
+    appState.spendSearchQuery = '';
+    appState.spendColFilters = {
+      date: '',
+      payee: '',
+      account: 'all',
+      owner: 'all',
+      category: 'all',
+      amount: ''
+    };
     renderContent();
   },
 
@@ -1962,6 +2004,10 @@ window.budgetApp = {
   // ==========================================
   // BIRTHDAYS & RECURRING PAYMENTS HANDLERS
   // ==========================================
+  setBirthdayFilter(filter) {
+    appState.birthdayFilter = filter;
+    renderContent();
+  },
   openAddBirthdayModal() { this.closeFabMenu(); openAddBirthdayModal(); },
   openEditBirthdayModal(bIdx) { this.closeFabMenu(); openEditBirthdayModal(bIdx); },
   openAddBirthdaySpendModal(bIdx) {

@@ -120,8 +120,18 @@ export const appState = {
   activeUser: 'Joint',
   unlockedUsers: {},
   isMasterUnlocked: false,
-  selectedUserFilter: 'all',
-  unmaskedSalaries: {}
+  unmaskedSalaries: {},
+  birthdayFilter: 'soon',
+  spendSortColumn: 'date',
+  spendSortDirection: 'desc',
+  spendColFilters: {
+    date: '',
+    payee: '',
+    account: 'all',
+    owner: 'all',
+    category: 'all',
+    amount: ''
+  }
 };
 
 export function getPrimarySection(tabName = appState.activeTab) {
