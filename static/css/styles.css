@@ -1921,6 +1921,29 @@ input:focus, select:focus, textarea:focus {
   flex: 0 0 auto;
 }
 
+@keyframes titlePulse {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.93);
+    opacity: 0.8;
+  }
+  60% {
+    transform: scale(1.05);
+    filter: brightness(1.25);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+.title-pulse-active {
+  animation: titlePulse 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+}
+
 .topbar-title-wrapper {
   display: flex;
   align-items: center;
@@ -1929,6 +1952,21 @@ input:focus, select:focus, textarea:focus {
   user-select: none;
   min-width: 0;
   flex: 0 1 auto;
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin-left: -4px;
+  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.topbar-title-wrapper:hover {
+  opacity: 0.88;
+  transform: scale(1.02);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.topbar-title-wrapper:active {
+  transform: scale(0.95);
+  opacity: 0.75;
 }
 
 #topBarMonthTitle {

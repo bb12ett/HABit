@@ -3244,6 +3244,11 @@ function renderCategoryDonutChart(canvasEl, categoryList, curr) {
     return;
   }
 
+  try {
+    const existing = Chart.getChart(canvasEl);
+    if (existing) existing.destroy();
+  } catch (e) {}
+
   const validCategories = (categoryList || []).filter(c => c.totalAmount > 0 && c.category.id !== 'transfers');
 
   if (!validCategories.length) {
@@ -5027,12 +5032,22 @@ function openTransactionLedgerModal(weekIndex = null, targetMonth = null) {
               ? `<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Matched: ${t.matched_bill_id}</span>`
               : (t.auto_cleared ? '<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Auto-Cleared Bill</span>' : '');
 
+            const customRules = cfg.merchant_category_rules || {};
+            const categories = window.SPEND_CATEGORIES || [];
+            const cat = (typeof categorizeTransaction === 'function')
+              ? categorizeTransaction(t, customRules)
+              : (categories.find(c => c.id === t.category) || categories[categories.length - 1]);
+            const merchantDisp = t.payee_name || t.merchant_name || t.description || t.raw_info || 'Transaction';
+            const cleanAttr = merchantDisp.replace(/"/g, '&quot;');
+            const catBadge = cat ? `<button type="button" class="badge" style="background:rgba(255,255,255,0.06); border:1px solid ${cat.color}60; color:${cat.color}; font-size:9.5px; padding:1px 6px; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; font-weight:600;" onclick="window.budgetApp.openRecategorizeModal('${t.transaction_id}', '${cleanAttr.replace(/'/g, "\\'")}', '${cat.id}')" title="Click to change category or create custom rule"><span>${cat.icon}</span><span>${cat.label}</span><span style="font-size:8px; opacity:0.7;">▾</span></button>` : '';
+
             return `
             <div class="txn-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; font-size:11.5px;">
               <div style="min-width:0; flex:1; margin-right:12px;">
-                <div style="font-weight:600; color:var(--heading); word-break:break-word;">${t.payee_name || 'Transaction'}</div>
+                <div style="font-weight:600; color:var(--heading); word-break:break-word;">${merchantDisp}</div>
                 <div style="font-size:10px; color:var(--text-muted); display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:2px;">
                   <span>${t.booking_date} • ${dispAccountName}</span>
+                  ${catBadge}
                   ${matchBadge}
                 </div>
               </div>
@@ -5146,7 +5161,7 @@ function openRecategorizeModal(txnId, merchantName, currentCatId) {
 
   const categories = window.SPEND_CATEGORIES || [];
   if (window.budgetApp) {
-    window.budgetApp._pendingRecategorize = { txnId, merchantName: effectiveMerchant };
+    window.budgetApp._pendingRecategorize = { txnId, merchantName: effectiveMerchant, currentCatId };
   }
 
   // Clean suggested merchant name
@@ -10952,7 +10967,21 @@ window.budgetApp = {
 
   scrollToCurrentWeek,
 
-  handleLogoClick() {
+  handleLogoClick(e) {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
+    const titleWrapper = document.querySelector('.topbar-title-wrapper');
+    const logoBtn = document.querySelector('.logo-btn');
+    [titleWrapper, logoBtn].forEach(el => {
+      if (el) {
+        el.classList.remove('title-pulse-active');
+        void el.offsetWidth;
+        el.classList.add('title-pulse-active');
+        setTimeout(() => el.classList.remove('title-pulse-active'), 500);
+      }
+    });
+
     const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
     const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : (appState.lastActiveMonth || 'Jan'));
     appState.lastActiveMonth = targetMonth;
@@ -14609,9 +14638,9 @@ window.budgetApp = {
 
     const allTxns = appState.data?.open_banking_transactions || [];
 
-    // 1. Direct match on the specific transaction
-    if (txnId) {
-      const match = allTxns.find(t => String(t.transaction_id) === String(txnId));
+    // 1. Direct match on the specific transaction by ID
+    if (txnId && txnId !== 'undefined' && txnId !== 'null') {
+      const match = allTxns.find(t => String(t.transaction_id) === String(txnId) || (t.id && String(t.id) === String(txnId)));
       if (match) {
         match.category = targetCatId;
       }
@@ -14642,10 +14671,21 @@ window.budgetApp = {
       } catch (e) {}
     }
 
+    // If the view was filtering by a specific category that the transaction just left, reset filter to 'all' so it remains visible
+    if (appState.spendFilterCategory && appState.spendFilterCategory !== 'all' && appState.spendFilterCategory !== targetCatId) {
+      appState.spendFilterCategory = 'all';
+    }
+
     closeModal();
     this._pendingRecategorize = null;
-    await saveBudget(appState.data);
+    
+    // Immediate synchronous UI re-render
     renderContent();
+
+    // Persist changes to server
+    if (getSettings().onboarding_complete) {
+      saveBudget(appState.data).catch(err => console.error('Save error after recategorization:', err));
+    }
   },
 
   async syncCategoriesGitHub() {

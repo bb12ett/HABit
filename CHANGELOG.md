@@ -5,6 +5,16 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-09-02
+
+### Fixed & Enhanced
+- **Instant Spend Recategorization Refresh**: Re-renders spend analytics immediately and synchronously upon modal confirmation, ensuring zero latency when updating transaction categories and merchant rules.
+- **Weekly Ledger Recategorization**: Added interactive category badges directly into the Weekly Bank Transactions modal.
+- **Title Bar & Logo Elastic Click Animation**: Restored interactive hover scale, tap feedback, and the spring pulse animation (`titlePulse`) when clicking the title bar/logo to return to the active cycle.
+- **Chart.js Canvas Collision Safeguard**: Ensured reliable canvas lifecycle management when re-rendering spend donut charts.
+
+---
+
 ## [0.2.1] - 2026-09-02
 
 ### Fixed & Enhanced

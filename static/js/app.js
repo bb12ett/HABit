@@ -952,7 +952,21 @@ window.budgetApp = {
 
   scrollToCurrentWeek,
 
-  handleLogoClick() {
+  handleLogoClick(e) {
+    if (e && typeof e.stopPropagation === 'function') {
+      e.stopPropagation();
+    }
+    const titleWrapper = document.querySelector('.topbar-title-wrapper');
+    const logoBtn = document.querySelector('.logo-btn');
+    [titleWrapper, logoBtn].forEach(el => {
+      if (el) {
+        el.classList.remove('title-pulse-active');
+        void el.offsetWidth;
+        el.classList.add('title-pulse-active');
+        setTimeout(() => el.classList.remove('title-pulse-active'), 500);
+      }
+    });
+
     const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
     const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : (appState.lastActiveMonth || 'Jan'));
     appState.lastActiveMonth = targetMonth;
@@ -4609,9 +4623,9 @@ window.budgetApp = {
 
     const allTxns = appState.data?.open_banking_transactions || [];
 
-    // 1. Direct match on the specific transaction
-    if (txnId) {
-      const match = allTxns.find(t => String(t.transaction_id) === String(txnId));
+    // 1. Direct match on the specific transaction by ID
+    if (txnId && txnId !== 'undefined' && txnId !== 'null') {
+      const match = allTxns.find(t => String(t.transaction_id) === String(txnId) || (t.id && String(t.id) === String(txnId)));
       if (match) {
         match.category = targetCatId;
       }
@@ -4642,10 +4656,21 @@ window.budgetApp = {
       } catch (e) {}
     }
 
+    // If the view was filtering by a specific category that the transaction just left, reset filter to 'all' so it remains visible
+    if (appState.spendFilterCategory && appState.spendFilterCategory !== 'all' && appState.spendFilterCategory !== targetCatId) {
+      appState.spendFilterCategory = 'all';
+    }
+
     closeModal();
     this._pendingRecategorize = null;
-    await saveBudget(appState.data);
+    
+    // Immediate synchronous UI re-render
     renderContent();
+
+    // Persist changes to server
+    if (getSettings().onboarding_complete) {
+      saveBudget(appState.data).catch(err => console.error('Save error after recategorization:', err));
+    }
   },
 
   async syncCategoriesGitHub() {

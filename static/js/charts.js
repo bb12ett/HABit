@@ -149,6 +149,11 @@ export function renderCategoryDonutChart(canvasEl, categoryList, curr) {
     return;
   }
 
+  try {
+    const existing = Chart.getChart(canvasEl);
+    if (existing) existing.destroy();
+  } catch (e) {}
+
   const validCategories = (categoryList || []).filter(c => c.totalAmount > 0 && c.category.id !== 'transfers');
 
   if (!validCategories.length) {
