@@ -599,6 +599,8 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
 
   const actuals = getWeekActuals(targetMonth, targetWeek);
 
+  const linkedAccounts = cfg.open_banking?.linked_accounts || [];
+
   showModal({
     title: `📱 Quick Balance Check-In`,
     body: `
@@ -624,9 +626,21 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
           <div style="display:flex; flex-direction:column; gap:6px;">
             ${cfg.current_accounts.map(acc => {
               const val = actuals[`curr_${acc}`] !== undefined ? actuals[`curr_${acc}`] : '';
+              const linkedItem = linkedAccounts.find(item => {
+                const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                return mapped === acc.toLowerCase();
+              });
+              const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
               return `
                 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                  <strong style="color:var(--heading); font-size:13px;">${acc}</strong>
+                  <div>
+                    <strong style="color:var(--heading); font-size:13px;">${acc}</strong>
+                    ${liveBal !== null ? `
+                      <div style="margin-top:2px;">
+                        <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_curr_${acc}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                      </div>
+                    ` : ''}
+                  </div>
                   <div style="display:flex; align-items:center; gap:4px;">
                     <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
                     <input type="number" step="0.01" id="qchk_curr_${acc}" value="${val}" placeholder="Actual balance" style="width:130px; text-align:right; font-weight:600; font-size:13px;">
@@ -644,11 +658,28 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${cfg.credit_accounts.map(c => {
                 const val = actuals[`c_avail_${c.name}`] !== undefined ? actuals[`c_avail_${c.name}`] : '';
+                const linkedItem = linkedAccounts.find(item => {
+                  const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                  return mapped === c.name.toLowerCase() || (item.mapped_habit_account_id || '').toLowerCase() === c.name.toLowerCase();
+                });
+                let liveAvail = null;
+                if (linkedItem) {
+                  if (linkedItem.last_available !== undefined && linkedItem.last_available !== null && Number(linkedItem.last_available) > 0) {
+                    liveAvail = Number(linkedItem.last_available);
+                  } else if (Number(c.limit || 0) > 0 && linkedItem.last_balance !== undefined) {
+                    liveAvail = Math.max(0, Number(c.limit) - Math.abs(Number(linkedItem.last_balance)));
+                  }
+                }
                 return `
                   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                     <div>
                       <strong style="color:var(--heading); font-size:13px;">${c.name}</strong>
                       <span style="font-size:10px; color:var(--text-muted); margin-left:4px;">(Credit Limit: ${curr}${c.limit})</span>
+                      ${liveAvail !== null ? `
+                        <div style="margin-top:2px;">
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_c_avail_${c.name}').value = '${liveAvail.toFixed(2)}'" title="Fill with latest Open Banking available credit">⚡ Live Avail: ${curr}${liveAvail.toFixed(2)}</button>
+                        </div>
+                      ` : ''}
                     </div>
                     <div style="display:flex; align-items:center; gap:4px;">
                       <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
@@ -668,9 +699,21 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${cfg.savings_accounts.map(s => {
                 const val = actuals[`sav_${s}`] !== undefined ? actuals[`sav_${s}`] : '';
+                const linkedItem = linkedAccounts.find(item => {
+                  const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                  return mapped === s.toLowerCase();
+                });
+                const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
                 return `
                   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                    <strong style="color:var(--heading); font-size:13px;">${s}</strong>
+                    <div>
+                      <strong style="color:var(--heading); font-size:13px;">${s}</strong>
+                      ${liveBal !== null ? `
+                        <div style="margin-top:2px;">
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_sav_${s}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                        </div>
+                      ` : ''}
+                    </div>
                     <div style="display:flex; align-items:center; gap:4px;">
                       <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
                       <input type="number" step="0.01" id="qchk_sav_${s}" value="${val}" placeholder="Total balance" style="width:130px; text-align:right; font-weight:600; font-size:13px;">

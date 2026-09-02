@@ -3904,6 +3904,8 @@ function openQuickCheckInModal(selectedWeek, selectedMonth) {
 
   const actuals = getWeekActuals(targetMonth, targetWeek);
 
+  const linkedAccounts = cfg.open_banking?.linked_accounts || [];
+
   showModal({
     title: `📱 Quick Balance Check-In`,
     body: `
@@ -3929,9 +3931,21 @@ function openQuickCheckInModal(selectedWeek, selectedMonth) {
           <div style="display:flex; flex-direction:column; gap:6px;">
             ${cfg.current_accounts.map(acc => {
               const val = actuals[`curr_${acc}`] !== undefined ? actuals[`curr_${acc}`] : '';
+              const linkedItem = linkedAccounts.find(item => {
+                const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                return mapped === acc.toLowerCase();
+              });
+              const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
               return `
                 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                  <strong style="color:var(--heading); font-size:13px;">${acc}</strong>
+                  <div>
+                    <strong style="color:var(--heading); font-size:13px;">${acc}</strong>
+                    ${liveBal !== null ? `
+                      <div style="margin-top:2px;">
+                        <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_curr_${acc}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                      </div>
+                    ` : ''}
+                  </div>
                   <div style="display:flex; align-items:center; gap:4px;">
                     <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
                     <input type="number" step="0.01" id="qchk_curr_${acc}" value="${val}" placeholder="Actual balance" style="width:130px; text-align:right; font-weight:600; font-size:13px;">
@@ -3949,11 +3963,28 @@ function openQuickCheckInModal(selectedWeek, selectedMonth) {
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${cfg.credit_accounts.map(c => {
                 const val = actuals[`c_avail_${c.name}`] !== undefined ? actuals[`c_avail_${c.name}`] : '';
+                const linkedItem = linkedAccounts.find(item => {
+                  const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                  return mapped === c.name.toLowerCase() || (item.mapped_habit_account_id || '').toLowerCase() === c.name.toLowerCase();
+                });
+                let liveAvail = null;
+                if (linkedItem) {
+                  if (linkedItem.last_available !== undefined && linkedItem.last_available !== null && Number(linkedItem.last_available) > 0) {
+                    liveAvail = Number(linkedItem.last_available);
+                  } else if (Number(c.limit || 0) > 0 && linkedItem.last_balance !== undefined) {
+                    liveAvail = Math.max(0, Number(c.limit) - Math.abs(Number(linkedItem.last_balance)));
+                  }
+                }
                 return `
                   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                     <div>
                       <strong style="color:var(--heading); font-size:13px;">${c.name}</strong>
                       <span style="font-size:10px; color:var(--text-muted); margin-left:4px;">(Credit Limit: ${curr}${c.limit})</span>
+                      ${liveAvail !== null ? `
+                        <div style="margin-top:2px;">
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_c_avail_${c.name}').value = '${liveAvail.toFixed(2)}'" title="Fill with latest Open Banking available credit">⚡ Live Avail: ${curr}${liveAvail.toFixed(2)}</button>
+                        </div>
+                      ` : ''}
                     </div>
                     <div style="display:flex; align-items:center; gap:4px;">
                       <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
@@ -3973,9 +4004,21 @@ function openQuickCheckInModal(selectedWeek, selectedMonth) {
             <div style="display:flex; flex-direction:column; gap:6px;">
               ${cfg.savings_accounts.map(s => {
                 const val = actuals[`sav_${s}`] !== undefined ? actuals[`sav_${s}`] : '';
+                const linkedItem = linkedAccounts.find(item => {
+                  const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
+                  return mapped === s.toLowerCase();
+                });
+                const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
                 return `
                   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
-                    <strong style="color:var(--heading); font-size:13px;">${s}</strong>
+                    <div>
+                      <strong style="color:var(--heading); font-size:13px;">${s}</strong>
+                      ${liveBal !== null ? `
+                        <div style="margin-top:2px;">
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_sav_${s}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                        </div>
+                      ` : ''}
+                    </div>
                     <div style="display:flex; align-items:center; gap:4px;">
                       <span style="font-size:12px; color:var(--text-muted);">${curr}</span>
                       <input type="number" step="0.01" id="qchk_sav_${s}" value="${val}" placeholder="Total balance" style="width:130px; text-align:right; font-weight:600; font-size:13px;">
@@ -5798,6 +5841,7 @@ function formatCheckInTimestamp(isoStr) {
 function renderOverviewView(container) {
   const cfg = getSettings();
   const curr = cfg.currency;
+  const isOpenBankingEnabled = Boolean(cfg.open_banking?.enabled);
   const activeTab = appState.activeTab;
   const currentYear = appState.currentYear;
   const globalEditMode = appState.globalEditMode;
@@ -6597,9 +6641,15 @@ function renderOverviewView(container) {
                               const ts = actuals._timestamps && actuals._timestamps[fieldKey];
                               const source = actuals._sources && actuals._sources[fieldKey];
                               const isAuto = source === 'open_banking';
+                              const isManual = source === 'manual';
                               const tsHtml = (hasVal && ts) ? `
-                                <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; gap:3px;">
-                                  ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : '<span>🕒</span>'}<span>${formatCheckInTimestamp(ts)}</span>
+                                <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:3px;">
+                                  <div style="display:flex; align-items:center; gap:3px;">
+                                    ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : (isManual ? '<span style="color:#38bdf8; font-weight:700;">✍️ Manual</span> • ' : '<span>🕒</span>')}<span>${formatCheckInTimestamp(ts)}</span>
+                                  </div>
+                                  ${isManual && isOpenBankingEnabled && globalEditMode ? `
+                                    <button type="button" class="btn secondary" style="height:15px; font-size:8px; padding:0 4px; line-height:1;" onclick="event.stopPropagation(); window.budgetApp.revertActualFieldToBankSync('${w}', '${fieldKey}')" title="Revert to live Open Banking balance">↺ Live</button>
+                                  ` : ''}
                                 </div>
                               ` : '';
 
@@ -10962,10 +11012,14 @@ window.budgetApp = {
         const cObj = currAccounts.find(a => (typeof a === 'string' ? a : (a.name || '')).toLowerCase() === mapped.toLowerCase());
         const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
         const fieldKey = `curr_${cName}`;
-        actuals[fieldKey] = Number(liveBal || 0);
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          actuals[fieldKey] = Number(liveBal || 0);
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
 
       // 2. Savings Account
@@ -10977,10 +11031,14 @@ window.budgetApp = {
         const sObj = savingsAccounts.find(s => (typeof s === 'string' ? s : (s.name || '')).toLowerCase() === mapped.toLowerCase());
         const sName = typeof sObj === 'string' ? sObj : (sObj.name || mapped);
         const fieldKey = `sav_${sName}`;
-        actuals[fieldKey] = Number(liveBal || 0);
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          actuals[fieldKey] = Number(liveBal || 0);
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
 
       // 3. Credit Card
@@ -10990,42 +11048,46 @@ window.budgetApp = {
       });
       if (cObj) {
         const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
-        let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
-        if (limit <= 0 && item.credit_limit) {
-          limit = Number(item.credit_limit);
-          if (typeof cObj === 'object') cObj.limit = limit;
-        }
+        const fieldKey = `c_avail_${cName}`;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
+          if (limit <= 0 && item.credit_limit) {
+            limit = Number(item.credit_limit);
+            if (typeof cObj === 'object') cObj.limit = limit;
+          }
 
-        let debt = Math.abs(Number(liveBal || 0));
-        if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
-          const allTxns = appState.data?.open_banking_transactions || [];
-          const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
-          if (cardTxns.length > 0) {
-            let spentSum = 0;
-            for (const t of cardTxns) {
-              const amt = Number(t.amount || 0);
-              if (amt < 0) spentSum += Math.abs(amt);
-              else if (amt > 0) spentSum -= amt;
-            }
-            if (spentSum > 0) {
-              debt = Math.round(spentSum * 100) / 100;
-              item.last_balance = debt;
+          let debt = Math.abs(Number(liveBal || 0));
+          if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
+            const allTxns = appState.data?.open_banking_transactions || [];
+            const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
+            if (cardTxns.length > 0) {
+              let spentSum = 0;
+              for (const t of cardTxns) {
+                const amt = Number(t.amount || 0);
+                if (amt < 0) spentSum += Math.abs(amt);
+                else if (amt > 0) spentSum -= amt;
+              }
+              if (spentSum > 0) {
+                debt = Math.round(spentSum * 100) / 100;
+                item.last_balance = debt;
+              }
             }
           }
-        }
 
-        let avail = 0;
-        if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
-          avail = Number(item.last_available);
-        } else if (limit > 0) {
-          avail = Math.max(0, limit - debt);
-        }
+          let avail = 0;
+          if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
+            avail = Number(item.last_available);
+          } else if (limit > 0) {
+            avail = Math.max(0, limit - debt);
+          }
 
-        const fieldKey = `c_avail_${cName}`;
-        actuals[fieldKey] = avail;
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+          actuals[fieldKey] = avail;
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
     }
 
@@ -12075,14 +12137,20 @@ window.budgetApp = {
     const month = targetMonth || appState.activeTab;
     const actuals = getWeekActuals(month, targetWeek);
     if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
 
     cfg.current_accounts.forEach(acc => {
       const el = document.getElementById(`qchk_curr_${acc}`);
       if (el) {
         const val = el.value.trim();
         actuals[`curr_${acc}`] = val;
-        if (val !== "") actuals._timestamps[`curr_${acc}`] = new Date().toISOString();
-        else delete actuals._timestamps[`curr_${acc}`];
+        if (val !== "") {
+          actuals._timestamps[`curr_${acc}`] = new Date().toISOString();
+          actuals._sources[`curr_${acc}`] = 'manual';
+        } else {
+          delete actuals._timestamps[`curr_${acc}`];
+          delete actuals._sources[`curr_${acc}`];
+        }
       }
     });
 
@@ -12091,8 +12159,13 @@ window.budgetApp = {
       if (el) {
         const val = el.value.trim();
         actuals[`c_avail_${c.name}`] = val;
-        if (val !== "") actuals._timestamps[`c_avail_${c.name}`] = new Date().toISOString();
-        else delete actuals._timestamps[`c_avail_${c.name}`];
+        if (val !== "") {
+          actuals._timestamps[`c_avail_${c.name}`] = new Date().toISOString();
+          actuals._sources[`c_avail_${c.name}`] = 'manual';
+        } else {
+          delete actuals._timestamps[`c_avail_${c.name}`];
+          delete actuals._sources[`c_avail_${c.name}`];
+        }
       }
     });
 
@@ -12102,8 +12175,13 @@ window.budgetApp = {
         if (el) {
           const val = el.value.trim();
           actuals[`sav_${s}`] = val;
-          if (val !== "") actuals._timestamps[`sav_${s}`] = new Date().toISOString();
-          else delete actuals._timestamps[`sav_${s}`];
+          if (val !== "") {
+            actuals._timestamps[`sav_${s}`] = new Date().toISOString();
+            actuals._sources[`sav_${s}`] = 'manual';
+          } else {
+            delete actuals._timestamps[`sav_${s}`];
+            delete actuals._sources[`sav_${s}`];
+          }
         }
       });
     }
@@ -13213,11 +13291,25 @@ window.budgetApp = {
     const actuals = getWeekActuals(appState.activeTab, weekName);
     actuals[fieldName] = value;
     if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
     if (value !== "" && value !== null && value !== undefined) {
       actuals._timestamps[fieldName] = new Date().toISOString();
+      actuals._sources[fieldName] = 'manual';
     } else {
       delete actuals._timestamps[fieldName];
+      delete actuals._sources[fieldName];
     }
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  async revertActualFieldToBankSync(weekName, fieldKey) {
+    const actuals = getWeekActuals(appState.activeTab, weekName);
+    if (actuals._sources) delete actuals._sources[fieldKey];
+    if (actuals._timestamps) delete actuals._timestamps[fieldKey];
+    delete actuals[fieldKey];
+    this.applyOpenBankingToCheckins();
     calculateAndSyncRollovers();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }

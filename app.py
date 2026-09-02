@@ -33,7 +33,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.1.3")
+    return os.environ.get("APP_VERSION", "0.3.1")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -269,6 +269,163 @@ def load_data():
 
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
+def get_easter_py(year: int) -> datetime.date:
+    G = year % 19
+    C = year // 100
+    H = (C - C // 4 - (8 * C + 13) // 25 + 19 * G + 15) % 30
+    I = H - (H // 28) * (1 - (29 // (H + 1)) * ((21 - G) // 11))
+    J = (year + year // 4 + I + 2 - C + C // 4) % 7
+    L = I - J
+    month = 3 + (L + 40) // 44
+    day = L + 28 - 31 * (month // 4)
+    return datetime.date(year, month, day)
+
+def get_bank_holidays_py(year: int, country: str = 'uk_ew') -> list:
+    if country == 'none':
+        return []
+    hols = [datetime.date(year, 1, 1)]
+    easter = get_easter_py(year)
+    gf = easter - datetime.timedelta(days=2)
+    em = easter + datetime.timedelta(days=1)
+    hols.append(gf)
+    hols.append(em)
+    d = datetime.date(year, 5, 1)
+    while d.weekday() != 0:
+        d += datetime.timedelta(days=1)
+    hols.append(d)
+    d = datetime.date(year, 5, 31)
+    while d.weekday() != 0:
+        d -= datetime.timedelta(days=1)
+    hols.append(d)
+    d = datetime.date(year, 8, 31)
+    while d.weekday() != 0:
+        d -= datetime.timedelta(days=1)
+    hols.append(d)
+    hols.append(datetime.date(year, 12, 25))
+    hols.append(datetime.date(year, 12, 26))
+    return hols
+
+def get_adjusted_working_day_py(date_obj: datetime.date, rule: str = 'previous', holidays: list = None) -> datetime.date:
+    if rule == 'exact':
+        return date_obj
+    curr = date_obj
+    hols = holidays or []
+    if rule == 'previous':
+        while curr.weekday() in [5, 6] or curr in hols:
+            curr -= datetime.timedelta(days=1)
+    else:
+        while curr.weekday() in [5, 6] or curr in hols:
+            curr += datetime.timedelta(days=1)
+    return curr
+
+def get_target_pay_date_py(year: int, month: int, settings: dict, holidays: list = None) -> datetime.date:
+    if month < 1:
+        year -= 1
+        month = 12
+    elif month > 12:
+        year += 1
+        month = 1
+    
+    p_last_work = settings.get('payday_is_last_working_day') or settings.get('payday_day') == 'last_working_day'
+    p_last_day = settings.get('payday_day') == 'last_day'
+    
+    if month in [1,3,5,7,8,10,12]: max_d = 31
+    elif month in [4,6,9,11]: max_d = 30
+    else: max_d = 29 if (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)) else 28
+    
+    if p_last_work:
+        last_day = datetime.date(year, month, max_d)
+        return get_adjusted_working_day_py(last_day, 'previous', holidays)
+    elif p_last_day:
+        return datetime.date(year, month, max_d)
+    else:
+        try:
+            p_day = int(settings.get('payday_day', 26) or 26)
+        except Exception:
+            p_day = 26
+        raw_date = datetime.date(year, month, min(p_day, max_d))
+        rule = settings.get('payday_rule', 'previous')
+        return get_adjusted_working_day_py(raw_date, rule, holidays)
+
+def get_payday_monday_py(d: datetime.date) -> datetime.date:
+    wd = d.weekday()
+    if wd == 6:
+        return d + datetime.timedelta(days=1)
+    elif wd == 5:
+        return d + datetime.timedelta(days=2)
+    else:
+        return d - datetime.timedelta(days=wd)
+
+def calculate_month_schedule_py(year: int, month_idx: int, settings: dict, month_data: dict = None) -> dict:
+    md = month_data or {}
+    override_start = md.get('override_start_date') or md.get('date_overrides', {}).get('start_date')
+    override_end = md.get('override_end_date') or md.get('date_overrides', {}).get('end_date')
+    
+    if override_start and override_end:
+        try:
+            start_date = datetime.date.fromisoformat(override_start)
+            end_date = datetime.date.fromisoformat(override_end)
+            next_start_date = end_date + datetime.timedelta(days=1)
+        except Exception:
+            override_start = None
+            override_end = None
+            
+    if not (override_start and override_end):
+        country = settings.get('bank_holiday_country', 'uk_ew')
+        hols = get_bank_holidays_py(year, country) + get_bank_holidays_py(year - 1, country) + get_bank_holidays_py(year + 1, country)
+        m = month_idx + 1
+        start_ref = get_target_pay_date_py(year, m - 1, settings, hols)
+        end_ref = get_target_pay_date_py(year, m, settings, hols)
+        
+        start_date = get_payday_monday_py(start_ref)
+        next_start_date = get_payday_monday_py(end_ref)
+        end_date = next_start_date - datetime.timedelta(days=1)
+    
+    diff_days = (next_start_date - start_date).days
+    num_weeks = max(1, round(diff_days / 7))
+    
+    weeks = []
+    for i in range(num_weeks):
+        w_start = start_date + datetime.timedelta(days=i * 7)
+        w_end = w_start + datetime.timedelta(days=6)
+        if i == num_weeks - 1 and override_start and override_end:
+            w_end = end_date
+        weeks.append({
+            'name': f'Week {i + 1}',
+            'start_date': w_start,
+            'end_date': w_end
+        })
+        
+    return {
+        'start_date': start_date,
+        'end_date': end_date,
+        'num_weeks': num_weeks,
+        'weeks': weeks,
+        'month_name': MONTH_NAMES[month_idx]
+    }
+
+def detect_current_month_and_week_py(data: dict, today: datetime.date = None) -> tuple:
+    if today is None:
+        today = datetime.date.today()
+    
+    year = today.year
+    settings = data.get('settings', {})
+    year_data = data.get('years', {}).get(str(year), {})
+    
+    for m_idx in range(12):
+        m_name = MONTH_NAMES[m_idx]
+        m_data = year_data.get('months', {}).get(m_name, {})
+        sched = calculate_month_schedule_py(year, m_idx, settings, m_data)
+        if sched['start_date'] <= today <= sched['end_date']:
+            for w in sched['weeks']:
+                if w['start_date'] <= today <= w['end_date']:
+                    return m_name, w['name']
+            return m_name, sched['weeks'][0]['name']
+            
+    cur_m_name = MONTH_NAMES[today.month - 1]
+    return cur_m_name, 'Week 1'
+
+
 def compute_ha_sensors(budget_data):
     """Computes Home Assistant sensor payload dictionary from budget data."""
     if not budget_data or not isinstance(budget_data, dict):
@@ -288,9 +445,8 @@ def compute_ha_sensors(budget_data):
     
     year_data = years.get(current_year_str, {})
     
-    # Identify current month
-    month_idx = max(0, min(11, today.month - 1))
-    current_month_name = MONTH_NAMES[month_idx]
+    # Identify current month & active week
+    current_month_name, active_week_name = detect_current_month_and_week_py(budget_data, today)
     month_data = year_data.get("months", {}).get(current_month_name, {}) if "months" in year_data else year_data.get(current_month_name, {})
     
     # 1. Current Accounts
@@ -397,7 +553,7 @@ def compute_ha_sensors(budget_data):
 
     # 5. Weekly Living Allowance
     weeks = month_data.get("weeks", {})
-    active_week_key = "w1"
+    active_week_key = "w" + active_week_name.replace("Week ", "").strip()
     w_items = weeks.get(active_week_key, []) if isinstance(weeks, dict) else []
     w_actuals = month_data.get("week_actuals", {}).get(active_week_key, {})
     
@@ -2441,11 +2597,7 @@ def sync_open_banking_data(data):
     if auto_update_checkins and linked:
         today = datetime.date.today()
         cur_year_str = str(today.year)
-        month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-        m_idx = today.month - 1
-        m_name = month_names[m_idx]
-        w_idx = min(4, (today.day - 1) // 7)
-        w_name = f"Week {w_idx + 1}"
+        m_name, w_name = detect_current_month_and_week_py(data, today)
 
         year_data = data.setdefault("years", {}).setdefault(cur_year_str, {})
         month_data = year_data.setdefault("months", {}).setdefault(m_name, {})
@@ -2474,25 +2626,36 @@ def sync_open_banking_data(data):
             if is_curr:
                 c_target = next((a if isinstance(a, str) else a.get("name") for a in cfg_curr if (str(a).lower() == mapped.lower() if isinstance(a, str) else str(a.get("name", "")).lower() == mapped.lower())), mapped)
                 f_key = f"curr_{c_target}"
-                week_act[f_key] = float(live_bal or 0)
-                ts_map[f_key] = now_iso
-                sources_map[f_key] = "open_banking"
-                log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
+                if sources_map.get(f_key) == "manual":
+                    log_open_banking_debug(f"Field {f_key} has manual check-in override. Skipping auto-sync.")
+                else:
+                    week_act[f_key] = float(live_bal or 0)
+                    ts_map[f_key] = now_iso
+                    sources_map[f_key] = "open_banking"
+                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
 
             # 2. Savings Account
             is_sav = any((str(s).lower() == mapped.lower() if isinstance(s, str) else str(s.get("name", "")).lower() == mapped.lower()) for s in cfg_sav)
             if is_sav:
                 s_target = next((s if isinstance(s, str) else s.get("name") for s in cfg_sav if (str(s).lower() == mapped.lower() if isinstance(s, str) else str(s.get("name", "")).lower() == mapped.lower())), mapped)
                 f_key = f"sav_{s_target}"
-                week_act[f_key] = float(live_bal or 0)
-                ts_map[f_key] = now_iso
-                sources_map[f_key] = "open_banking"
-                log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
+                if sources_map.get(f_key) == "manual":
+                    log_open_banking_debug(f"Field {f_key} has manual check-in override. Skipping auto-sync.")
+                else:
+                    week_act[f_key] = float(live_bal or 0)
+                    ts_map[f_key] = now_iso
+                    sources_map[f_key] = "open_banking"
+                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
 
             # 3. Credit Card
             for c in cfg_cred:
                 c_name = c if isinstance(c, str) else c.get("name", "")
                 if str(c_name).lower() == mapped.lower() or str(c_name).lower() == mapped_raw.lower():
+                    f_key = f"c_avail_{c_name}"
+                    if sources_map.get(f_key) == "manual":
+                        log_open_banking_debug(f"Field {f_key} has manual check-in override. Skipping auto-sync.")
+                        continue
+
                     card_limit = float(c.get("limit", 0.0) if isinstance(c, dict) else 0.0)
                     if card_limit <= 0 and item.get("credit_limit"):
                         card_limit = float(item["credit_limit"])
@@ -2517,7 +2680,6 @@ def sync_open_banking_data(data):
                     else:
                         avail = 0.0
 
-                    f_key = f"c_avail_{c_name}"
                     week_act[f_key] = avail
                     ts_map[f_key] = now_iso
                     sources_map[f_key] = "open_banking"

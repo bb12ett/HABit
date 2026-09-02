@@ -18,6 +18,7 @@ import { calculateMonthSchedule, calculateLiveDailyPacing, getDDsForWeek, getInc
 export function renderOverviewView(container) {
   const cfg = getSettings();
   const curr = cfg.currency;
+  const isOpenBankingEnabled = Boolean(cfg.open_banking?.enabled);
   const activeTab = appState.activeTab;
   const currentYear = appState.currentYear;
   const globalEditMode = appState.globalEditMode;
@@ -817,9 +818,15 @@ export function renderOverviewView(container) {
                               const ts = actuals._timestamps && actuals._timestamps[fieldKey];
                               const source = actuals._sources && actuals._sources[fieldKey];
                               const isAuto = source === 'open_banking';
+                              const isManual = source === 'manual';
                               const tsHtml = (hasVal && ts) ? `
-                                <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; gap:3px;">
-                                  ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : '<span>🕒</span>'}<span>${formatCheckInTimestamp(ts)}</span>
+                                <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; justify-content:space-between; gap:3px;">
+                                  <div style="display:flex; align-items:center; gap:3px;">
+                                    ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : (isManual ? '<span style="color:#38bdf8; font-weight:700;">✍️ Manual</span> • ' : '<span>🕒</span>')}<span>${formatCheckInTimestamp(ts)}</span>
+                                  </div>
+                                  ${isManual && isOpenBankingEnabled && globalEditMode ? `
+                                    <button type="button" class="btn secondary" style="height:15px; font-size:8px; padding:0 4px; line-height:1;" onclick="event.stopPropagation(); window.budgetApp.revertActualFieldToBankSync('${w}', '${fieldKey}')" title="Revert to live Open Banking balance">↺ Live</button>
+                                  ` : ''}
                                 </div>
                               ` : '';
 

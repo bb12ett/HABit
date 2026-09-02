@@ -1090,10 +1090,14 @@ window.budgetApp = {
         const cObj = currAccounts.find(a => (typeof a === 'string' ? a : (a.name || '')).toLowerCase() === mapped.toLowerCase());
         const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
         const fieldKey = `curr_${cName}`;
-        actuals[fieldKey] = Number(liveBal || 0);
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          actuals[fieldKey] = Number(liveBal || 0);
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
 
       // 2. Savings Account
@@ -1105,10 +1109,14 @@ window.budgetApp = {
         const sObj = savingsAccounts.find(s => (typeof s === 'string' ? s : (s.name || '')).toLowerCase() === mapped.toLowerCase());
         const sName = typeof sObj === 'string' ? sObj : (sObj.name || mapped);
         const fieldKey = `sav_${sName}`;
-        actuals[fieldKey] = Number(liveBal || 0);
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          actuals[fieldKey] = Number(liveBal || 0);
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
 
       // 3. Credit Card
@@ -1118,42 +1126,46 @@ window.budgetApp = {
       });
       if (cObj) {
         const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
-        let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
-        if (limit <= 0 && item.credit_limit) {
-          limit = Number(item.credit_limit);
-          if (typeof cObj === 'object') cObj.limit = limit;
-        }
+        const fieldKey = `c_avail_${cName}`;
+        if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
+          // Manual check-in overrides Open Banking
+        } else {
+          let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
+          if (limit <= 0 && item.credit_limit) {
+            limit = Number(item.credit_limit);
+            if (typeof cObj === 'object') cObj.limit = limit;
+          }
 
-        let debt = Math.abs(Number(liveBal || 0));
-        if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
-          const allTxns = appState.data?.open_banking_transactions || [];
-          const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
-          if (cardTxns.length > 0) {
-            let spentSum = 0;
-            for (const t of cardTxns) {
-              const amt = Number(t.amount || 0);
-              if (amt < 0) spentSum += Math.abs(amt);
-              else if (amt > 0) spentSum -= amt;
-            }
-            if (spentSum > 0) {
-              debt = Math.round(spentSum * 100) / 100;
-              item.last_balance = debt;
+          let debt = Math.abs(Number(liveBal || 0));
+          if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
+            const allTxns = appState.data?.open_banking_transactions || [];
+            const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
+            if (cardTxns.length > 0) {
+              let spentSum = 0;
+              for (const t of cardTxns) {
+                const amt = Number(t.amount || 0);
+                if (amt < 0) spentSum += Math.abs(amt);
+                else if (amt > 0) spentSum -= amt;
+              }
+              if (spentSum > 0) {
+                debt = Math.round(spentSum * 100) / 100;
+                item.last_balance = debt;
+              }
             }
           }
-        }
 
-        let avail = 0;
-        if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
-          avail = Number(item.last_available);
-        } else if (limit > 0) {
-          avail = Math.max(0, limit - debt);
-        }
+          let avail = 0;
+          if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
+            avail = Number(item.last_available);
+          } else if (limit > 0) {
+            avail = Math.max(0, limit - debt);
+          }
 
-        const fieldKey = `c_avail_${cName}`;
-        actuals[fieldKey] = avail;
-        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
-        actuals._sources[fieldKey] = 'open_banking';
-        updated = true;
+          actuals[fieldKey] = avail;
+          actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+          actuals._sources[fieldKey] = 'open_banking';
+          updated = true;
+        }
       }
     }
 
@@ -2203,14 +2215,20 @@ window.budgetApp = {
     const month = targetMonth || appState.activeTab;
     const actuals = getWeekActuals(month, targetWeek);
     if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
 
     cfg.current_accounts.forEach(acc => {
       const el = document.getElementById(`qchk_curr_${acc}`);
       if (el) {
         const val = el.value.trim();
         actuals[`curr_${acc}`] = val;
-        if (val !== "") actuals._timestamps[`curr_${acc}`] = new Date().toISOString();
-        else delete actuals._timestamps[`curr_${acc}`];
+        if (val !== "") {
+          actuals._timestamps[`curr_${acc}`] = new Date().toISOString();
+          actuals._sources[`curr_${acc}`] = 'manual';
+        } else {
+          delete actuals._timestamps[`curr_${acc}`];
+          delete actuals._sources[`curr_${acc}`];
+        }
       }
     });
 
@@ -2219,8 +2237,13 @@ window.budgetApp = {
       if (el) {
         const val = el.value.trim();
         actuals[`c_avail_${c.name}`] = val;
-        if (val !== "") actuals._timestamps[`c_avail_${c.name}`] = new Date().toISOString();
-        else delete actuals._timestamps[`c_avail_${c.name}`];
+        if (val !== "") {
+          actuals._timestamps[`c_avail_${c.name}`] = new Date().toISOString();
+          actuals._sources[`c_avail_${c.name}`] = 'manual';
+        } else {
+          delete actuals._timestamps[`c_avail_${c.name}`];
+          delete actuals._sources[`c_avail_${c.name}`];
+        }
       }
     });
 
@@ -2230,8 +2253,13 @@ window.budgetApp = {
         if (el) {
           const val = el.value.trim();
           actuals[`sav_${s}`] = val;
-          if (val !== "") actuals._timestamps[`sav_${s}`] = new Date().toISOString();
-          else delete actuals._timestamps[`sav_${s}`];
+          if (val !== "") {
+            actuals._timestamps[`sav_${s}`] = new Date().toISOString();
+            actuals._sources[`sav_${s}`] = 'manual';
+          } else {
+            delete actuals._timestamps[`sav_${s}`];
+            delete actuals._sources[`sav_${s}`];
+          }
         }
       });
     }
@@ -3341,11 +3369,25 @@ window.budgetApp = {
     const actuals = getWeekActuals(appState.activeTab, weekName);
     actuals[fieldName] = value;
     if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
     if (value !== "" && value !== null && value !== undefined) {
       actuals._timestamps[fieldName] = new Date().toISOString();
+      actuals._sources[fieldName] = 'manual';
     } else {
       delete actuals._timestamps[fieldName];
+      delete actuals._sources[fieldName];
     }
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  async revertActualFieldToBankSync(weekName, fieldKey) {
+    const actuals = getWeekActuals(appState.activeTab, weekName);
+    if (actuals._sources) delete actuals._sources[fieldKey];
+    if (actuals._timestamps) delete actuals._timestamps[fieldKey];
+    delete actuals[fieldKey];
+    this.applyOpenBankingToCheckins();
     calculateAndSyncRollovers();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
