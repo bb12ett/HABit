@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.2")
+    return os.environ.get("APP_VERSION", "0.3.3")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -919,6 +919,7 @@ def build_bundle():
         "static/js/charts.js",
         "static/js/views/modals.js",
         "static/js/views/wizard.js",
+        "static/js/views/forecast_overview.js",
         "static/js/views/overview.js",
         "static/js/views/accounts.js",
         "static/js/views/budgets.js",

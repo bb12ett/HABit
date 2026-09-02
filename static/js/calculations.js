@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, getAccountConfig, months } from './state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, getAccountConfig, months, isAccountTrackedWeekly, isAccountIncludedInNet } from './state.js';
 
 export function getEaster(year) {
   const f = Math.floor,
@@ -436,10 +436,19 @@ export function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = app
   return result;
 }
 
-export function calculateLiveDailyPacing(wObj, p, actuals, cfg) {
+export function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
+  if (!wObj || !wObj.startDate || !wObj.endDate || !p) {
+    return { isPacingActive: false };
+  }
+  const sDate = (wObj.startDate instanceof Date) ? wObj.startDate : new Date(wObj.startDate);
+  const eDate = (wObj.endDate instanceof Date) ? wObj.endDate : new Date(wObj.endDate);
+  if (isNaN(sDate.getTime()) || isNaN(eDate.getTime())) {
+    return { isPacingActive: false };
+  }
+
   const now = new Date();
-  const wStart = new Date(wObj.startDate.getFullYear(), wObj.startDate.getMonth(), wObj.startDate.getDate(), 0, 0, 0);
-  const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
+  const wStart = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate(), 0, 0, 0);
+  const wEnd = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate(), 23, 59, 59);
 
   const oneDayMs = 1000 * 60 * 60 * 24;
   const totalDays = Math.max(1, Math.round((wEnd.getTime() - wStart.getTime()) / oneDayMs));
@@ -2131,10 +2140,428 @@ export function calculateCategoryBreakdown(transactions, timeframe = 'this_month
   };
 }
 
+export function calculateMonthForecast(monthName = appState.activeTab, year = appState.currentYear) {
+  const cfg = getSettings();
+  let targetMonth = monthName;
+  if (!targetMonth || targetMonth === 'Overview' || !months.includes(targetMonth)) {
+    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(year) : null;
+    targetMonth = (detected && detected.month) ? detected.month : 'Jan';
+  }
+
+  const mIdx = months.indexOf(targetMonth);
+  const schedule = calculateMonthSchedule(year, mIdx);
+  const mData = getMonthData(targetMonth, year);
+
+  const deducts = mData.deductions_list || [];
+  let totalCurrentInflow = 0;
+  let totalSalarySavingsIn = 0;
+  const personTotals = {};
+  (cfg.people || []).forEach(p => personTotals[p] = { salary: 0, out: 0, leftover: 0 });
+
+  deducts.forEach(d => {
+    (cfg.people || []).forEach(p => {
+      let amt = 0;
+      if (d.is_salary) {
+        amt = getDeductionSalaryForMonth(d, p, schedule).total;
+        personTotals[p].salary += amt;
+        if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
+        if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
+      } else {
+        if (d.amounts && typeof d.amounts[p] !== 'undefined') {
+          amt = Number(d.amounts[p]) || 0;
+        } else if (d.person) {
+          amt = (d.person === p) ? (Number(d.amount) || 0) : 0;
+        }
+        personTotals[p].out += amt;
+        if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
+        if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
+      }
+    });
+  });
+
+  (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
+
+  const yData = getYearData(year);
+  const allYearlyBills = yData.yearly_recurring || [];
+  const allYearlyIncome = yData.yearly_income || [];
+  const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year) : [];
+  const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(targetMonth, mIdx, year) : [];
+  const allBirthdays = yData.birthdays || cfg.birthdays || [];
+  const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
+
+  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => yb.month === targetMonth).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+
+  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => yi.month === targetMonth).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+
+  let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
+  schedule.weeks.forEach(wObj => {
+    const items = getWeekItems(targetMonth, wObj.name, year);
+    items.forEach(i => {
+      const amt = Number(i.amount) || 0;
+      if (i.is_income) totalWeeklyIncome += amt;
+      else {
+        totalWeeklySpend += amt;
+        const isCurrent = i.account_type === 'current' || (i.desc && i.desc.toLowerCase().includes('cash'));
+        if (isCurrent) totalWeeklyCurrentSpend += amt;
+      }
+    });
+  });
+
+  let totalCurrentOpening = 0;
+  const runningCurrentByAcc = {};
+  (cfg.current_accounts || []).forEach(acc => {
+    const val = Number(mData.current_data[acc] && mData.current_data[acc].opening) || 0;
+    totalCurrentOpening += val;
+    runningCurrentByAcc[acc] = val;
+  });
+
+  deducts.forEach(d => {
+    if (cfg.current_accounts.includes(d.target_account)) {
+      (cfg.people || []).forEach(p => {
+        const amount = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        if (runningCurrentByAcc[d.target_account] !== undefined) {
+          runningCurrentByAcc[d.target_account] += amount || 0;
+        }
+      });
+    }
+  });
+
+  let totalCreditOpeningSpent = 0, totalCreditLimit = 0;
+  const runningCreditByCard = {};
+  (cfg.credit_accounts || []).forEach(c => {
+    const spent = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+    totalCreditLimit += Number(c.limit) || 0;
+    totalCreditOpeningSpent += spent;
+    runningCreditByCard[c.name] = spent;
+  });
+
+  const autoSavingsFromDD = {};
+  (cfg.savings_accounts || []).forEach(acc => autoSavingsFromDD[acc] = 0);
+  (mData.direct_debits || []).forEach(dd => {
+    if (dd.transfer_to && cfg.savings_accounts.includes(dd.transfer_to)) {
+      autoSavingsFromDD[dd.transfer_to] += Number(dd.amount) || 0;
+    }
+  });
+
+  let totalSavingsOpening = 0;
+  const runningSavingsByAcc = {};
+  (cfg.savings_accounts || []).forEach(acc => {
+    const val = Number(mData.savings_data[acc] && mData.savings_data[acc].opening) || 0;
+    totalSavingsOpening += val;
+    runningSavingsByAcc[acc] = val;
+  });
+
+  deducts.forEach(d => {
+    if (cfg.savings_accounts.includes(d.target_account)) {
+      (cfg.people || []).forEach(p => {
+        const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        if (runningSavingsByAcc[d.target_account] !== undefined) runningSavingsByAcc[d.target_account] += amt || 0;
+      });
+    }
+  });
+
+  // Calculate week-by-week cashflow predictions
+  const weeklyPredictions = [];
+  schedule.weeks.forEach((wObj, wIdx) => {
+    const isFinalWeek = (wIdx === schedule.weeks.length - 1);
+    const items = getWeekItems(targetMonth, wObj.name, year);
+    const actuals = getWeekActuals(targetMonth, wObj.name, year);
+
+    let wExpenseSum = 0, wIncomeSum = 0;
+    items.forEach(it => {
+      const amt = Number(it.amount) || 0;
+      if (it.is_income) wIncomeSum += amt;
+      else wExpenseSum += amt;
+    });
+
+    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = (yData.yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
+    const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
+    const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
+
+    const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, year) : [];
+    const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, year) : [];
+
+    const wDDs = [...baseDDs, ...wRecurring, ...wBirthdays];
+    const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+
+    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = (yData.yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
+    const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, year);
+    const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, year) : [];
+    const wIncomes = [...baseIncomes, ...wRecurringIncomes];
+    const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+
+    // 1. Process Outgoings
+    wDDs.forEach(dd => {
+      const paidFrom = dd.account || cfg.current_accounts[0];
+      const amt = Number(dd.amount) || 0;
+      if (runningCurrentByAcc[paidFrom] !== undefined) {
+        runningCurrentByAcc[paidFrom] -= amt;
+      }
+      if (runningCreditByCard[paidFrom] !== undefined) {
+        runningCreditByCard[paidFrom] += amt;
+      }
+      if (runningSavingsByAcc[paidFrom] !== undefined) {
+        runningSavingsByAcc[paidFrom] -= amt;
+      }
+      if (dd.transfer_to && cfg.savings_accounts.includes(dd.transfer_to)) {
+        if (runningSavingsByAcc[dd.transfer_to] !== undefined) {
+          runningSavingsByAcc[dd.transfer_to] += amt;
+        }
+      }
+    });
+
+    // 2. Process Inflows
+    wIncomes.forEach(pi => {
+      const creditedTo = pi.account || cfg.current_accounts[0];
+      const amt = Number(pi.amount) || 0;
+      if (runningCurrentByAcc[creditedTo] !== undefined) {
+        runningCurrentByAcc[creditedTo] += amt;
+      }
+      if (runningCreditByCard[creditedTo] !== undefined) {
+        runningCreditByCard[creditedTo] = Math.max(0, runningCreditByCard[creditedTo] - amt);
+      }
+      if (runningSavingsByAcc[creditedTo] !== undefined) {
+        runningSavingsByAcc[creditedTo] += amt;
+      }
+    });
+
+    const autopaysDue = [];
+    (cfg.credit_accounts || []).forEach(c => {
+      if (c.autopay_enabled) {
+        let isDueThisWeek = (c.autopay_when === `week_${wIdx + 1}`);
+        if (isDueThisWeek) {
+          const openingDebt = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+          const payAmt = c.autopay_type === 'full' ? openingDebt : Math.min(openingDebt, Number(c.autopay_fixed_amt) || 0);
+          if (payAmt > 0) {
+            const fundingAcc = c.autopay_from || cfg.current_accounts[0];
+            if (runningCurrentByAcc[fundingAcc] !== undefined) runningCurrentByAcc[fundingAcc] -= payAmt;
+            runningCreditByCard[c.name] = Math.max(0, runningCreditByCard[c.name] - payAmt);
+            autopaysDue.push({ card: c.name, from: fundingAcc, amount: payAmt });
+          }
+        }
+      }
+    });
+
+    items.forEach(it => {
+      const amt = Number(it.amount) || 0;
+      if (it.account_type === 'current') {
+        const acc = it.account_name || cfg.current_accounts[0];
+        if (runningCurrentByAcc[acc] !== undefined) runningCurrentByAcc[acc] = it.is_income ? runningCurrentByAcc[acc] + amt : runningCurrentByAcc[acc] - amt;
+      } else if (it.account_type === 'credit') {
+        const cName = it.account_name || cfg.credit_accounts[0]?.name;
+        if (cName && runningCreditByCard[cName] !== undefined) runningCreditByCard[cName] = it.is_income ? runningCreditByCard[cName] - amt : runningCreditByCard[cName] + amt;
+      } else if (it.account_type === 'savings') {
+        const sName = it.account_name || cfg.savings_accounts[0];
+        if (sName && runningSavingsByAcc[sName] !== undefined) runningSavingsByAcc[sName] = it.is_income ? runningSavingsByAcc[sName] + amt : runningSavingsByAcc[sName] - amt;
+      }
+    });
+
+    const weekCurrentSnap = { ...runningCurrentByAcc };
+    const weekCreditSnap = { ...runningCreditByCard };
+    const weekSavingsSnap = { ...runningSavingsByAcc };
+
+    let sumWeekCurrent = 0, sumWeekCredit = 0, sumWeekSavings = 0;
+    (cfg.current_accounts || []).forEach(acc => sumWeekCurrent += (weekCurrentSnap[acc] || 0));
+    (cfg.credit_accounts || []).forEach(c => sumWeekCredit += (weekCreditSnap[c.name] || 0));
+    if (cfg.track_savings) {
+      (cfg.savings_accounts || []).forEach(s => sumWeekSavings += (weekSavingsSnap[s] || 0));
+    }
+
+    let predictedNet = 0;
+    if (isFinalWeek) {
+      cfg.current_accounts.filter(a => isAccountIncludedInNet('current', a)).forEach(a => predictedNet += (weekCurrentSnap[a] || 0));
+      if (cfg.track_savings) {
+        cfg.savings_accounts.filter(s => isAccountIncludedInNet('savings', s)).forEach(s => predictedNet += (weekSavingsSnap[s] || 0));
+      }
+      cfg.credit_accounts.filter(c => isAccountIncludedInNet('credit', c.name)).forEach(c => predictedNet -= (weekCreditSnap[c.name] || 0));
+    } else {
+      cfg.current_accounts.filter(a => isAccountTrackedWeekly('current', a) && isAccountIncludedInNet('current', a)).forEach(a => predictedNet += (weekCurrentSnap[a] || 0));
+      if (cfg.track_savings) {
+        cfg.savings_accounts.filter(s => isAccountTrackedWeekly('savings', s) && isAccountIncludedInNet('savings', s)).forEach(s => predictedNet += (weekSavingsSnap[s] || 0));
+      }
+      cfg.credit_accounts.filter(c => isAccountTrackedWeekly('credit', c.name) && isAccountIncludedInNet('credit', c.name)).forEach(c => predictedNet -= (weekCreditSnap[c.name] || 0));
+    }
+
+    const checkinCurrentAccounts = cfg.current_accounts.filter(acc => isFinalWeek || isAccountTrackedWeekly('current', acc));
+    const checkinCreditAccounts = cfg.credit_accounts.filter(c => isFinalWeek || isAccountTrackedWeekly('credit', c.name));
+    const checkinSavingsAccounts = cfg.track_savings ? cfg.savings_accounts.filter(s => isFinalWeek || isAccountTrackedWeekly('savings', s)) : [];
+
+    let actCurrentSum = 0, actCreditSpentSum = 0, actSavingsSum = 0;
+    let hasActualEntry = false;
+
+    checkinCurrentAccounts.forEach(acc => {
+      if (actuals[`curr_${acc}`] !== undefined && actuals[`curr_${acc}`] !== "" && actuals[`curr_${acc}`] !== null) {
+        hasActualEntry = true;
+        if (isAccountIncludedInNet('current', acc)) {
+          actCurrentSum += parseFloat(actuals[`curr_${acc}`]) || 0;
+        }
+      } else if (isAccountIncludedInNet('current', acc)) {
+        actCurrentSum += (weekCurrentSnap[acc] || 0);
+      }
+    });
+
+    checkinCreditAccounts.forEach(c => {
+      let cardSpent = 0;
+      if (actuals[`c_avail_${c.name}`] !== undefined && actuals[`c_avail_${c.name}`] !== "") {
+        cardSpent = (Number(c.limit) || 0) - (parseFloat(actuals[`c_avail_${c.name}`]) || 0);
+        hasActualEntry = true;
+      } else if (actuals[`c_spent_${c.name}`] !== undefined && actuals[`c_spent_${c.name}`] !== "") {
+        cardSpent = parseFloat(actuals[`c_spent_${c.name}`]) || 0;
+        hasActualEntry = true;
+      } else {
+        cardSpent = (weekCreditSnap[c.name] || 0);
+      }
+      if (isAccountIncludedInNet('credit', c.name)) {
+        actCreditSpentSum += cardSpent;
+      }
+    });
+
+    checkinSavingsAccounts.forEach(s => {
+      if (actuals[`sav_${s}`] !== undefined && actuals[`sav_${s}`] !== "") {
+        hasActualEntry = true;
+        if (isAccountIncludedInNet('savings', s)) {
+          actSavingsSum += parseFloat(actuals[`sav_${s}`]) || 0;
+        }
+      } else if (isAccountIncludedInNet('savings', s)) {
+        actSavingsSum += (weekSavingsSnap[s] || 0);
+      }
+    });
+
+    let actualNet = null, variance = null;
+    if (hasActualEntry) {
+      actualNet = actCurrentSum + actSavingsSum - actCreditSpentSum;
+      variance = actualNet - predictedNet;
+    }
+
+    weeklyPredictions.push({
+      wIdx,
+      wObj,
+      wSpend: wExpenseSum,
+      wIncomeSum: wIncomeSum,
+      wDDs: wDDs,
+      wDDTotal: wDDTotal,
+      wIncomes: wIncomes,
+      wIncomeTotal: wIncomeTotal,
+      autopaysDue: autopaysDue,
+      weekCurrentSnap: weekCurrentSnap,
+      weekCreditSnap: weekCreditSnap,
+      weekSavingsSnap: weekSavingsSnap,
+      sumWeekCurrent: sumWeekCurrent,
+      sumWeekCredit: sumWeekCredit,
+      sumWeekSavings: sumWeekSavings,
+      predictedNet: predictedNet,
+      actualNet: actualNet,
+      variance: variance
+    });
+  });
+
+  const finalWeekPred = weeklyPredictions.length > 0 ? weeklyPredictions[weeklyPredictions.length - 1] : { sumWeekCurrent: 0, sumWeekCredit: 0, sumWeekSavings: 0, predictedNet: 0, weekCurrentSnap: {}, weekCreditSnap: {}, weekSavingsSnap: {} };
+  const projectedMonthEndCurrent = finalWeekPred.sumWeekCurrent;
+  const projectedMonthEndCredit = finalWeekPred.sumWeekCredit;
+  const projectedMonthEndSavings = finalWeekPred.sumWeekSavings;
+
+  let projectedMonthEndNet = 0;
+  cfg.current_accounts.filter(a => isAccountIncludedInNet('current', a)).forEach(a => projectedMonthEndNet += (finalWeekPred.weekCurrentSnap[a] || 0));
+  if (cfg.track_savings) {
+    cfg.savings_accounts.filter(s => isAccountIncludedInNet('savings', s)).forEach(s => projectedMonthEndNet += (finalWeekPred.weekSavingsSnap[s] || 0));
+  }
+  cfg.credit_accounts.filter(c => isAccountIncludedInNet('credit', c.name)).forEach(c => projectedMonthEndNet -= (finalWeekPred.weekCreditSnap[c.name] || 0));
+
+  const totalOutgoings = totalDD + totalWeeklySpend;
+  const weeklyAvg = schedule.numWeeks > 0 ? totalWeeklySpend / schedule.numWeeks : 0;
+
+  const totalAutoPayMonth = cfg.credit_accounts.reduce((sum, c) => {
+    if (c.autopay_enabled) {
+      const debt = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+      return sum + (c.autopay_type === 'full' ? debt : Math.min(debt, Number(c.autopay_fixed_amt) || 0));
+    }
+    return sum;
+  }, 0);
+
+  let latestVariance = null;
+  for (let i = weeklyPredictions.length - 1; i >= 0; i--) {
+    if (weeklyPredictions[i].variance !== null) {
+      latestVariance = weeklyPredictions[i].variance;
+      break;
+    }
+  }
+
+  // Detect current week info
+  const now = new Date();
+  let activeWeekIndex = -1;
+  const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(year) : null;
+  const isCurrentMonth = (detected && detected.month === targetMonth);
+
+  if (isCurrentMonth) {
+    schedule.weeks.forEach((wObj, idx) => {
+      const wEndInc = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
+      if (now.getTime() >= wObj.startDate.getTime() && now.getTime() <= wEndInc.getTime()) {
+        activeWeekIndex = idx;
+      }
+    });
+    if (activeWeekIndex === -1 && detected && detected.week) {
+      activeWeekIndex = schedule.weeks.findIndex(w => w.name === detected.week);
+    }
+  }
+
+  // Cycle progress
+  let cycleStart = schedule.weeks[0]?.startDate || new Date(year, mIdx, 1);
+  let cycleEnd = schedule.weeks[schedule.weeks.length - 1]?.endDate || new Date(year, mIdx + 1, 0);
+  let totalCycleDays = Math.max(1, Math.round((cycleEnd.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+  let percentElapsed = Math.min(100, Math.max(0, Math.round((elapsedCycleDays / totalCycleDays) * 100)));
+
+  return {
+    month: targetMonth,
+    year,
+    schedule,
+    mData,
+    deducts,
+    personTotals,
+    totalCurrentInflow,
+    totalSalarySavingsIn,
+    totalDD,
+    totalMonthPaymentsIn,
+    totalWeeklySpend,
+    totalWeeklyCurrentSpend,
+    totalCurrentOpening,
+    totalCreditOpeningSpent,
+    totalCreditLimit,
+    totalSavingsOpening,
+    autoSavingsFromDD,
+    weeklyPredictions,
+    projectedMonthEndCurrent,
+    projectedMonthEndCredit,
+    projectedMonthEndSavings,
+    projectedMonthEndNet,
+    totalOutgoings,
+    weeklyAvg,
+    totalAutoPayMonth,
+    latestVariance,
+    isCurrentMonth,
+    activeWeekIndex,
+    cycleStart,
+    cycleEnd,
+    totalCycleDays,
+    elapsedCycleDays,
+    percentElapsed
+  };
+}
+
 if (typeof window !== 'undefined') {
   window.calculateLiveDailyPacing = calculateLiveDailyPacing;
   window.SPEND_CATEGORIES = SPEND_CATEGORIES;
   window.getCategoryById = getCategoryById;
   window.categorizeTransaction = categorizeTransaction;
   window.calculateCategoryBreakdown = calculateCategoryBreakdown;
+  window.calculateMonthForecast = calculateMonthForecast;
 }

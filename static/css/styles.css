@@ -3670,3 +3670,967 @@ body.val-picker-mode {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* =========================================================
+   MATERIAL DESIGN 3 FORECAST OVERVIEW PAGE STYLES
+   ========================================================= */
+
+.forecast-overview-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1360px;
+  width: 100%;
+  margin: 0 auto;
+  padding-bottom: 24px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* 1. HERO CYCLE BANNER */
+.forecast-hero-card {
+  background: linear-gradient(135deg, var(--card-bg) 0%, var(--panel-bg) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 14px);
+  padding: 16px 20px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.forecast-hero-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--purple) 50%, var(--green) 100%);
+}
+
+.forecast-hero-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.forecast-hero-title-group {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.forecast-hero-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.md3-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.md3-chip-primary {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--primary);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.md3-chip-tonal {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.md3-chip-user {
+  background: rgba(168, 85, 247, 0.15);
+  color: var(--purple);
+  border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.forecast-hero-title {
+  margin: 0 0 4px 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+
+.forecast-hero-subtitle {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+.forecast-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Payday Cycle Progress */
+.forecast-cycle-bar-wrap {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.forecast-cycle-bar-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.forecast-cycle-percent {
+  font-weight: 600;
+  color: var(--heading);
+}
+
+.forecast-cycle-track {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.forecast-cycle-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary) 0%, var(--green) 100%);
+  border-radius: 6px;
+  transition: width 0.4s ease;
+}
+
+/* 2. KEY METRIC KPI GRID */
+.forecast-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 210px), 1fr));
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.forecast-kpi-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 14px);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.forecast-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+
+.forecast-kpi-card.accent-green { border-left: 4px solid var(--green); }
+.forecast-kpi-card.accent-red { border-left: 4px solid var(--red); }
+.forecast-kpi-card.accent-blue { border-left: 4px solid var(--primary); }
+.forecast-kpi-card.accent-amber { border-left: 4px solid var(--amber); }
+.forecast-kpi-card.accent-purple { border-left: 4px solid var(--purple); }
+.forecast-kpi-card.accent-teal { border-left: 4px solid #14b8a6; }
+
+.forecast-kpi-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.forecast-kpi-icon {
+  font-size: 16px;
+}
+
+.forecast-kpi-tag {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.forecast-kpi-label {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.forecast-kpi-val {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+  color: var(--heading);
+}
+
+.val-green { color: var(--green) !important; }
+.val-red { color: var(--red) !important; }
+.val-blue { color: var(--primary) !important; }
+.val-amber { color: var(--amber) !important; }
+.val-purple { color: var(--purple) !important; }
+.val-teal { color: #14b8a6 !important; }
+
+.forecast-kpi-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+}
+
+.forecast-kpi-change {
+  font-weight: 600;
+}
+
+.forecast-kpi-sub {
+  color: var(--text-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.forecast-mini-progress {
+  height: 4px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 3px 0 4px 0;
+}
+
+.forecast-mini-bar {
+  height: 100%;
+  background: var(--amber);
+  border-radius: 4px;
+}
+
+/* 3. MAIN SECTIONS TWO-COLUMN LAYOUT */
+.forecast-sections-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 1024px) {
+  .forecast-sections-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+}
+
+.forecast-column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-card {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card, 14px);
+  padding: 16px 18px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.forecast-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.forecast-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--heading);
+}
+
+/* Active Week Spotlight */
+.forecast-week-spotlight-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.forecast-spotlight-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.forecast-spotlight-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-spotlight-value {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 2px;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-spotlight-sub {
+  font-size: 10px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Chips scroll for clearing bills */
+.forecast-chips-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-bill-chip {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.forecast-bill-chip-icon {
+  font-size: 14px;
+}
+
+.forecast-bill-chip-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.forecast-bill-chip-title {
+  font-weight: 600;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-bill-chip-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-bill-chip-amt {
+  font-weight: 700;
+  color: var(--red);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* Multi-Week Runway Grid */
+.forecast-week-runway-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.forecast-week-runway-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.forecast-week-runway-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--primary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.forecast-week-runway-card.current {
+  border: 1.5px solid var(--primary);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+  background: linear-gradient(180deg, var(--card-bg) 0%, rgba(59, 130, 246, 0.08) 100%);
+}
+
+.forecast-week-runway-card.past {
+  opacity: 0.78;
+}
+
+.forecast-week-runway-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+  gap: 6px;
+}
+
+.forecast-week-runway-name {
+  font-size: 12.5px;
+  color: var(--heading);
+}
+
+.forecast-week-runway-date {
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.forecast-week-status-pill {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.status-active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.status-past {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+}
+
+.status-upcoming {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.forecast-week-runway-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+
+.forecast-week-runway-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--text-muted);
+  gap: 6px;
+  min-width: 0;
+}
+
+.forecast-week-runway-row span:first-child {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-week-runway-row strong {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.forecast-week-runway-closing {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+  gap: 6px;
+  min-width: 0;
+}
+
+.forecast-week-runway-closing span:first-child {
+  white-space: nowrap;
+}
+
+.forecast-week-runway-closing strong {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.forecast-week-variance-tag {
+  margin-top: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.tag-green {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--green);
+}
+
+.tag-red {
+  background: rgba(244, 63, 94, 0.15);
+  color: var(--red);
+}
+
+@media (max-width: 768px) {
+  .forecast-week-runway-grid {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 10px;
+    padding-bottom: 8px;
+    padding-top: 2px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .forecast-week-runway-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .forecast-week-runway-card {
+    flex: 0 0 160px !important;
+    min-width: 160px !important;
+    max-width: 175px !important;
+    scroll-snap-align: start;
+    box-sizing: border-box;
+  }
+}
+
+/* Monthly Cashflow Segments Bar */
+.forecast-cashflow-segments-bar {
+  display: flex;
+  height: 12px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  margin-bottom: 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-segment-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.fill-bills { background: var(--red); }
+.fill-discretionary { background: var(--primary); }
+.fill-surplus { background: var(--green); }
+
+.forecast-cashflow-legend {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-bills { background: var(--red); }
+.dot-discretionary { background: var(--primary); }
+.dot-surplus { background: var(--green); }
+
+.forecast-cashflow-breakdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-cashflow-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 5px 0;
+  color: var(--text-muted);
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.forecast-cashflow-row span:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.forecast-cashflow-row strong {
+  flex-shrink: 0;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.forecast-cashflow-total {
+  border-top: 2px solid var(--border);
+  padding-top: 8px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--heading);
+}
+
+/* Upcoming Bills List */
+.forecast-upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-upcoming-item {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.forecast-upcoming-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.forecast-upcoming-left > div {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.forecast-upcoming-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.forecast-upcoming-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-upcoming-meta {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.forecast-upcoming-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.forecast-upcoming-amount {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--red);
+  white-space: nowrap;
+}
+
+.due-pill {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.due-today {
+  background: rgba(244, 63, 94, 0.2);
+  color: var(--red);
+  border: 1px solid rgba(244, 63, 94, 0.4);
+}
+
+.due-tomorrow {
+  background: rgba(245, 158, 11, 0.2);
+  color: var(--amber);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+/* 3-Month Forward Horizon Grid */
+.forecast-forward-months-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr));
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.forecast-forward-month-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.forecast-forward-month-card.current {
+  border-color: var(--primary);
+}
+
+.forecast-forward-month-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12.5px;
+  margin-bottom: 8px;
+}
+
+.forecast-current-mini-tag {
+  font-size: 9.5px;
+  background: var(--primary);
+  color: #fff;
+  padding: 1px 5px;
+  border-radius: 8px;
+  font-weight: 600;
+}
+
+.forecast-forward-month-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.forecast-forward-stat {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+}
+
+.forecast-forward-btn {
+  font-size: 11px;
+  padding: 4px 8px;
+  width: 100%;
+}
+
+@media (max-width: 640px) {
+  .forecast-forward-months-grid {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 10px;
+    padding-bottom: 8px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .forecast-forward-months-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .forecast-forward-month-card {
+    flex: 0 0 170px !important;
+    min-width: 170px !important;
+    scroll-snap-align: start;
+    box-sizing: border-box;
+  }
+}
+
+.forecast-empty-note {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-style: italic;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+}
+
+/* MOBILE COMPREHENSIVE RESPONSIVE ADJUSTMENTS */
+@media (max-width: 640px) {
+  .forecast-overview-container {
+    gap: 12px;
+    padding-bottom: 16px;
+  }
+
+  .forecast-hero-card {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .forecast-hero-title {
+    font-size: 17px;
+  }
+
+  .forecast-hero-actions {
+    width: 100%;
+  }
+
+  .forecast-hero-actions .btn {
+    flex: 1 1 calc(50% - 4px);
+    font-size: 11px;
+    padding: 6px 8px;
+    text-align: center;
+    justify-content: center;
+  }
+
+  .forecast-card {
+    padding: 12px 12px;
+    border-radius: 12px;
+  }
+
+  .forecast-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .forecast-kpi-card {
+    padding: 10px 12px;
+    border-radius: 10px;
+  }
+
+  .forecast-kpi-card:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+
+  .forecast-kpi-val {
+    font-size: 18px;
+  }
+
+  .forecast-week-spotlight-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .forecast-spotlight-item {
+    padding: 8px 10px;
+  }
+
+  .forecast-spotlight-value {
+    font-size: 14.5px;
+  }
+}

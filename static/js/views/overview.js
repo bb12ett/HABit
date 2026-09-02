@@ -19,7 +19,7 @@ export function renderOverviewView(container) {
   const cfg = getSettings();
   const curr = cfg.currency;
   const isOpenBankingEnabled = Boolean(cfg.open_banking?.enabled);
-  const activeTab = appState.activeTab;
+  const activeTab = months.includes(appState.activeTab) ? appState.activeTab : ((typeof detectCurrentMonthAndWeek === 'function' && detectCurrentMonthAndWeek(appState.currentYear).month) || 'Jan');
   const currentYear = appState.currentYear;
   const globalEditMode = appState.globalEditMode;
   const isMulti = isMultiUserEnabled();

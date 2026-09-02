@@ -109,9 +109,9 @@ export const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "
 export const appState = {
   data: {},
   currentYear: 2026,
-  activeTab: "Jan",
+  activeTab: "Overview",
   activeSubTab: "overview",
-  lastActiveMonth: "Jan",
+  lastActiveMonth: "Overview",
   lastBudgetsTab: "Budgets",
   lastAnalyticsTab: "Spend",
   globalEditMode: false,
@@ -135,7 +135,7 @@ export const appState = {
 };
 
 export function getPrimarySection(tabName = appState.activeTab) {
-  if (months.includes(tabName)) return 'monthly';
+  if (tabName === 'Overview' || months.includes(tabName)) return 'monthly';
   if (tabName === 'Budgets' || tabName === 'Bills') return 'budgets';
   if (tabName === 'Spend' || tabName === 'Year') return 'analytics';
   if (tabName === 'Settings') return 'settings';

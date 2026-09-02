@@ -5,6 +5,22 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.3] - 2026-09-02
+
+### Added & Enhanced
+- **Forecast Overview Dashboard**:
+  - Added a Material Design 3 Forecast Overview page highlighting key metrics from weekly and monthly cashflow forecasting.
+  - Positioned as the first page on the monthly view (`⚡ Overview` pill).
+  - Auto-selects this Overview dashboard upon launching the app or clicking the HABit logo.
+  - Removed startup auto-scrolling to the current week card, presenting a clean top-level overview first.
+  - Features a Payday Cycle Hero Banner with progress track, 5 elevated MD3 KPI cards (Projected Net Worth, Current Cash, Credit Runway & Utilization, Savings Portfolio & Growth, Safe-to-Spend Daily Pace), Active Week Spotlight, Weekly Cashflow Runway, Monthly Cashflow Inflows vs Outflows distribution, Upcoming 14-Day Bills countdown, and a 3-Month Forward Horizon outlook.
+- **Mobile Responsive Enhancements**:
+  - Implemented smooth horizontal swipe-snapping for the Multi-Week Runway and 3-Month Horizon cards on mobile devices.
+  - Added robust null-safety guards and parameter validations in `calculateLiveDailyPacing` and bill date resolvers.
+  - Optimized layouts with responsive 2x2 grids, word-wrapping, and text truncation to eliminate horizontal page overflow on small viewports.
+
+---
+
 ## [0.3.2] - 2026-09-02
 
 ### Fixed & Enhanced

@@ -112,9 +112,9 @@ const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 const appState = {
   data: {},
   currentYear: 2026,
-  activeTab: "Jan",
+  activeTab: "Overview",
   activeSubTab: "overview",
-  lastActiveMonth: "Jan",
+  lastActiveMonth: "Overview",
   lastBudgetsTab: "Budgets",
   lastAnalyticsTab: "Spend",
   globalEditMode: false,
@@ -138,7 +138,7 @@ const appState = {
 };
 
 function getPrimarySection(tabName = appState.activeTab) {
-  if (months.includes(tabName)) return 'monthly';
+  if (tabName === 'Overview' || months.includes(tabName)) return 'monthly';
   if (tabName === 'Budgets' || tabName === 'Bills') return 'budgets';
   if (tabName === 'Spend' || tabName === 'Year') return 'analytics';
   if (tabName === 'Settings') return 'settings';
@@ -1466,10 +1466,19 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
   return result;
 }
 
-function calculateLiveDailyPacing(wObj, p, actuals, cfg) {
+function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
+  if (!wObj || !wObj.startDate || !wObj.endDate || !p) {
+    return { isPacingActive: false };
+  }
+  const sDate = (wObj.startDate instanceof Date) ? wObj.startDate : new Date(wObj.startDate);
+  const eDate = (wObj.endDate instanceof Date) ? wObj.endDate : new Date(wObj.endDate);
+  if (isNaN(sDate.getTime()) || isNaN(eDate.getTime())) {
+    return { isPacingActive: false };
+  }
+
   const now = new Date();
-  const wStart = new Date(wObj.startDate.getFullYear(), wObj.startDate.getMonth(), wObj.startDate.getDate(), 0, 0, 0);
-  const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
+  const wStart = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate(), 0, 0, 0);
+  const wEnd = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate(), 23, 59, 59);
 
   const oneDayMs = 1000 * 60 * 60 * 24;
   const totalDays = Math.max(1, Math.round((wEnd.getTime() - wStart.getTime()) / oneDayMs));
@@ -3161,12 +3170,430 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
   };
 }
 
+function calculateMonthForecast(monthName = appState.activeTab, year = appState.currentYear) {
+  const cfg = getSettings();
+  let targetMonth = monthName;
+  if (!targetMonth || targetMonth === 'Overview' || !months.includes(targetMonth)) {
+    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(year) : null;
+    targetMonth = (detected && detected.month) ? detected.month : 'Jan';
+  }
+
+  const mIdx = months.indexOf(targetMonth);
+  const schedule = calculateMonthSchedule(year, mIdx);
+  const mData = getMonthData(targetMonth, year);
+
+  const deducts = mData.deductions_list || [];
+  let totalCurrentInflow = 0;
+  let totalSalarySavingsIn = 0;
+  const personTotals = {};
+  (cfg.people || []).forEach(p => personTotals[p] = { salary: 0, out: 0, leftover: 0 });
+
+  deducts.forEach(d => {
+    (cfg.people || []).forEach(p => {
+      let amt = 0;
+      if (d.is_salary) {
+        amt = getDeductionSalaryForMonth(d, p, schedule).total;
+        personTotals[p].salary += amt;
+        if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
+        if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
+      } else {
+        if (d.amounts && typeof d.amounts[p] !== 'undefined') {
+          amt = Number(d.amounts[p]) || 0;
+        } else if (d.person) {
+          amt = (d.person === p) ? (Number(d.amount) || 0) : 0;
+        }
+        personTotals[p].out += amt;
+        if (cfg.current_accounts.includes(d.target_account)) totalCurrentInflow += amt;
+        if (cfg.savings_accounts.includes(d.target_account)) totalSalarySavingsIn += amt;
+      }
+    });
+  });
+
+  (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
+
+  const yData = getYearData(year);
+  const allYearlyBills = yData.yearly_recurring || [];
+  const allYearlyIncome = yData.yearly_income || [];
+  const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year) : [];
+  const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(targetMonth, mIdx, year) : [];
+  const allBirthdays = yData.birthdays || cfg.birthdays || [];
+  const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
+
+  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => yb.month === targetMonth).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+
+  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => yi.month === targetMonth).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+
+  let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
+  schedule.weeks.forEach(wObj => {
+    const items = getWeekItems(targetMonth, wObj.name, year);
+    items.forEach(i => {
+      const amt = Number(i.amount) || 0;
+      if (i.is_income) totalWeeklyIncome += amt;
+      else {
+        totalWeeklySpend += amt;
+        const isCurrent = i.account_type === 'current' || (i.desc && i.desc.toLowerCase().includes('cash'));
+        if (isCurrent) totalWeeklyCurrentSpend += amt;
+      }
+    });
+  });
+
+  let totalCurrentOpening = 0;
+  const runningCurrentByAcc = {};
+  (cfg.current_accounts || []).forEach(acc => {
+    const val = Number(mData.current_data[acc] && mData.current_data[acc].opening) || 0;
+    totalCurrentOpening += val;
+    runningCurrentByAcc[acc] = val;
+  });
+
+  deducts.forEach(d => {
+    if (cfg.current_accounts.includes(d.target_account)) {
+      (cfg.people || []).forEach(p => {
+        const amount = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        if (runningCurrentByAcc[d.target_account] !== undefined) {
+          runningCurrentByAcc[d.target_account] += amount || 0;
+        }
+      });
+    }
+  });
+
+  let totalCreditOpeningSpent = 0, totalCreditLimit = 0;
+  const runningCreditByCard = {};
+  (cfg.credit_accounts || []).forEach(c => {
+    const spent = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+    totalCreditLimit += Number(c.limit) || 0;
+    totalCreditOpeningSpent += spent;
+    runningCreditByCard[c.name] = spent;
+  });
+
+  const autoSavingsFromDD = {};
+  (cfg.savings_accounts || []).forEach(acc => autoSavingsFromDD[acc] = 0);
+  (mData.direct_debits || []).forEach(dd => {
+    if (dd.transfer_to && cfg.savings_accounts.includes(dd.transfer_to)) {
+      autoSavingsFromDD[dd.transfer_to] += Number(dd.amount) || 0;
+    }
+  });
+
+  let totalSavingsOpening = 0;
+  const runningSavingsByAcc = {};
+  (cfg.savings_accounts || []).forEach(acc => {
+    const val = Number(mData.savings_data[acc] && mData.savings_data[acc].opening) || 0;
+    totalSavingsOpening += val;
+    runningSavingsByAcc[acc] = val;
+  });
+
+  deducts.forEach(d => {
+    if (cfg.savings_accounts.includes(d.target_account)) {
+      (cfg.people || []).forEach(p => {
+        const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+        if (runningSavingsByAcc[d.target_account] !== undefined) runningSavingsByAcc[d.target_account] += amt || 0;
+      });
+    }
+  });
+
+  // Calculate week-by-week cashflow predictions
+  const weeklyPredictions = [];
+  schedule.weeks.forEach((wObj, wIdx) => {
+    const isFinalWeek = (wIdx === schedule.weeks.length - 1);
+    const items = getWeekItems(targetMonth, wObj.name, year);
+    const actuals = getWeekActuals(targetMonth, wObj.name, year);
+
+    let wExpenseSum = 0, wIncomeSum = 0;
+    items.forEach(it => {
+      const amt = Number(it.amount) || 0;
+      if (it.is_income) wIncomeSum += amt;
+      else wExpenseSum += amt;
+    });
+
+    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = (yData.yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
+    const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
+    const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
+
+    const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, year) : [];
+    const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, year) : [];
+
+    const wDDs = [...baseDDs, ...wRecurring, ...wBirthdays];
+    const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+
+    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = (yData.yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
+    const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, year);
+    const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, year) : [];
+    const wIncomes = [...baseIncomes, ...wRecurringIncomes];
+    const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+
+    // 1. Process Outgoings
+    wDDs.forEach(dd => {
+      const paidFrom = dd.account || cfg.current_accounts[0];
+      const amt = Number(dd.amount) || 0;
+      if (runningCurrentByAcc[paidFrom] !== undefined) {
+        runningCurrentByAcc[paidFrom] -= amt;
+      }
+      if (runningCreditByCard[paidFrom] !== undefined) {
+        runningCreditByCard[paidFrom] += amt;
+      }
+      if (runningSavingsByAcc[paidFrom] !== undefined) {
+        runningSavingsByAcc[paidFrom] -= amt;
+      }
+      if (dd.transfer_to && cfg.savings_accounts.includes(dd.transfer_to)) {
+        if (runningSavingsByAcc[dd.transfer_to] !== undefined) {
+          runningSavingsByAcc[dd.transfer_to] += amt;
+        }
+      }
+    });
+
+    // 2. Process Inflows
+    wIncomes.forEach(pi => {
+      const creditedTo = pi.account || cfg.current_accounts[0];
+      const amt = Number(pi.amount) || 0;
+      if (runningCurrentByAcc[creditedTo] !== undefined) {
+        runningCurrentByAcc[creditedTo] += amt;
+      }
+      if (runningCreditByCard[creditedTo] !== undefined) {
+        runningCreditByCard[creditedTo] = Math.max(0, runningCreditByCard[creditedTo] - amt);
+      }
+      if (runningSavingsByAcc[creditedTo] !== undefined) {
+        runningSavingsByAcc[creditedTo] += amt;
+      }
+    });
+
+    const autopaysDue = [];
+    (cfg.credit_accounts || []).forEach(c => {
+      if (c.autopay_enabled) {
+        let isDueThisWeek = (c.autopay_when === `week_${wIdx + 1}`);
+        if (isDueThisWeek) {
+          const openingDebt = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+          const payAmt = c.autopay_type === 'full' ? openingDebt : Math.min(openingDebt, Number(c.autopay_fixed_amt) || 0);
+          if (payAmt > 0) {
+            const fundingAcc = c.autopay_from || cfg.current_accounts[0];
+            if (runningCurrentByAcc[fundingAcc] !== undefined) runningCurrentByAcc[fundingAcc] -= payAmt;
+            runningCreditByCard[c.name] = Math.max(0, runningCreditByCard[c.name] - payAmt);
+            autopaysDue.push({ card: c.name, from: fundingAcc, amount: payAmt });
+          }
+        }
+      }
+    });
+
+    items.forEach(it => {
+      const amt = Number(it.amount) || 0;
+      if (it.account_type === 'current') {
+        const acc = it.account_name || cfg.current_accounts[0];
+        if (runningCurrentByAcc[acc] !== undefined) runningCurrentByAcc[acc] = it.is_income ? runningCurrentByAcc[acc] + amt : runningCurrentByAcc[acc] - amt;
+      } else if (it.account_type === 'credit') {
+        const cName = it.account_name || cfg.credit_accounts[0]?.name;
+        if (cName && runningCreditByCard[cName] !== undefined) runningCreditByCard[cName] = it.is_income ? runningCreditByCard[cName] - amt : runningCreditByCard[cName] + amt;
+      } else if (it.account_type === 'savings') {
+        const sName = it.account_name || cfg.savings_accounts[0];
+        if (sName && runningSavingsByAcc[sName] !== undefined) runningSavingsByAcc[sName] = it.is_income ? runningSavingsByAcc[sName] + amt : runningSavingsByAcc[sName] - amt;
+      }
+    });
+
+    const weekCurrentSnap = { ...runningCurrentByAcc };
+    const weekCreditSnap = { ...runningCreditByCard };
+    const weekSavingsSnap = { ...runningSavingsByAcc };
+
+    let sumWeekCurrent = 0, sumWeekCredit = 0, sumWeekSavings = 0;
+    (cfg.current_accounts || []).forEach(acc => sumWeekCurrent += (weekCurrentSnap[acc] || 0));
+    (cfg.credit_accounts || []).forEach(c => sumWeekCredit += (weekCreditSnap[c.name] || 0));
+    if (cfg.track_savings) {
+      (cfg.savings_accounts || []).forEach(s => sumWeekSavings += (weekSavingsSnap[s] || 0));
+    }
+
+    let predictedNet = 0;
+    if (isFinalWeek) {
+      cfg.current_accounts.filter(a => isAccountIncludedInNet('current', a)).forEach(a => predictedNet += (weekCurrentSnap[a] || 0));
+      if (cfg.track_savings) {
+        cfg.savings_accounts.filter(s => isAccountIncludedInNet('savings', s)).forEach(s => predictedNet += (weekSavingsSnap[s] || 0));
+      }
+      cfg.credit_accounts.filter(c => isAccountIncludedInNet('credit', c.name)).forEach(c => predictedNet -= (weekCreditSnap[c.name] || 0));
+    } else {
+      cfg.current_accounts.filter(a => isAccountTrackedWeekly('current', a) && isAccountIncludedInNet('current', a)).forEach(a => predictedNet += (weekCurrentSnap[a] || 0));
+      if (cfg.track_savings) {
+        cfg.savings_accounts.filter(s => isAccountTrackedWeekly('savings', s) && isAccountIncludedInNet('savings', s)).forEach(s => predictedNet += (weekSavingsSnap[s] || 0));
+      }
+      cfg.credit_accounts.filter(c => isAccountTrackedWeekly('credit', c.name) && isAccountIncludedInNet('credit', c.name)).forEach(c => predictedNet -= (weekCreditSnap[c.name] || 0));
+    }
+
+    const checkinCurrentAccounts = cfg.current_accounts.filter(acc => isFinalWeek || isAccountTrackedWeekly('current', acc));
+    const checkinCreditAccounts = cfg.credit_accounts.filter(c => isFinalWeek || isAccountTrackedWeekly('credit', c.name));
+    const checkinSavingsAccounts = cfg.track_savings ? cfg.savings_accounts.filter(s => isFinalWeek || isAccountTrackedWeekly('savings', s)) : [];
+
+    let actCurrentSum = 0, actCreditSpentSum = 0, actSavingsSum = 0;
+    let hasActualEntry = false;
+
+    checkinCurrentAccounts.forEach(acc => {
+      if (actuals[`curr_${acc}`] !== undefined && actuals[`curr_${acc}`] !== "" && actuals[`curr_${acc}`] !== null) {
+        hasActualEntry = true;
+        if (isAccountIncludedInNet('current', acc)) {
+          actCurrentSum += parseFloat(actuals[`curr_${acc}`]) || 0;
+        }
+      } else if (isAccountIncludedInNet('current', acc)) {
+        actCurrentSum += (weekCurrentSnap[acc] || 0);
+      }
+    });
+
+    checkinCreditAccounts.forEach(c => {
+      let cardSpent = 0;
+      if (actuals[`c_avail_${c.name}`] !== undefined && actuals[`c_avail_${c.name}`] !== "") {
+        cardSpent = (Number(c.limit) || 0) - (parseFloat(actuals[`c_avail_${c.name}`]) || 0);
+        hasActualEntry = true;
+      } else if (actuals[`c_spent_${c.name}`] !== undefined && actuals[`c_spent_${c.name}`] !== "") {
+        cardSpent = parseFloat(actuals[`c_spent_${c.name}`]) || 0;
+        hasActualEntry = true;
+      } else {
+        cardSpent = (weekCreditSnap[c.name] || 0);
+      }
+      if (isAccountIncludedInNet('credit', c.name)) {
+        actCreditSpentSum += cardSpent;
+      }
+    });
+
+    checkinSavingsAccounts.forEach(s => {
+      if (actuals[`sav_${s}`] !== undefined && actuals[`sav_${s}`] !== "") {
+        hasActualEntry = true;
+        if (isAccountIncludedInNet('savings', s)) {
+          actSavingsSum += parseFloat(actuals[`sav_${s}`]) || 0;
+        }
+      } else if (isAccountIncludedInNet('savings', s)) {
+        actSavingsSum += (weekSavingsSnap[s] || 0);
+      }
+    });
+
+    let actualNet = null, variance = null;
+    if (hasActualEntry) {
+      actualNet = actCurrentSum + actSavingsSum - actCreditSpentSum;
+      variance = actualNet - predictedNet;
+    }
+
+    weeklyPredictions.push({
+      wIdx,
+      wObj,
+      wSpend: wExpenseSum,
+      wIncomeSum: wIncomeSum,
+      wDDs: wDDs,
+      wDDTotal: wDDTotal,
+      wIncomes: wIncomes,
+      wIncomeTotal: wIncomeTotal,
+      autopaysDue: autopaysDue,
+      weekCurrentSnap: weekCurrentSnap,
+      weekCreditSnap: weekCreditSnap,
+      weekSavingsSnap: weekSavingsSnap,
+      sumWeekCurrent: sumWeekCurrent,
+      sumWeekCredit: sumWeekCredit,
+      sumWeekSavings: sumWeekSavings,
+      predictedNet: predictedNet,
+      actualNet: actualNet,
+      variance: variance
+    });
+  });
+
+  const finalWeekPred = weeklyPredictions.length > 0 ? weeklyPredictions[weeklyPredictions.length - 1] : { sumWeekCurrent: 0, sumWeekCredit: 0, sumWeekSavings: 0, predictedNet: 0, weekCurrentSnap: {}, weekCreditSnap: {}, weekSavingsSnap: {} };
+  const projectedMonthEndCurrent = finalWeekPred.sumWeekCurrent;
+  const projectedMonthEndCredit = finalWeekPred.sumWeekCredit;
+  const projectedMonthEndSavings = finalWeekPred.sumWeekSavings;
+
+  let projectedMonthEndNet = 0;
+  cfg.current_accounts.filter(a => isAccountIncludedInNet('current', a)).forEach(a => projectedMonthEndNet += (finalWeekPred.weekCurrentSnap[a] || 0));
+  if (cfg.track_savings) {
+    cfg.savings_accounts.filter(s => isAccountIncludedInNet('savings', s)).forEach(s => projectedMonthEndNet += (finalWeekPred.weekSavingsSnap[s] || 0));
+  }
+  cfg.credit_accounts.filter(c => isAccountIncludedInNet('credit', c.name)).forEach(c => projectedMonthEndNet -= (finalWeekPred.weekCreditSnap[c.name] || 0));
+
+  const totalOutgoings = totalDD + totalWeeklySpend;
+  const weeklyAvg = schedule.numWeeks > 0 ? totalWeeklySpend / schedule.numWeeks : 0;
+
+  const totalAutoPayMonth = cfg.credit_accounts.reduce((sum, c) => {
+    if (c.autopay_enabled) {
+      const debt = Number(mData.credit_data[c.name] && mData.credit_data[c.name].opening_spent) || 0;
+      return sum + (c.autopay_type === 'full' ? debt : Math.min(debt, Number(c.autopay_fixed_amt) || 0));
+    }
+    return sum;
+  }, 0);
+
+  let latestVariance = null;
+  for (let i = weeklyPredictions.length - 1; i >= 0; i--) {
+    if (weeklyPredictions[i].variance !== null) {
+      latestVariance = weeklyPredictions[i].variance;
+      break;
+    }
+  }
+
+  // Detect current week info
+  const now = new Date();
+  let activeWeekIndex = -1;
+  const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(year) : null;
+  const isCurrentMonth = (detected && detected.month === targetMonth);
+
+  if (isCurrentMonth) {
+    schedule.weeks.forEach((wObj, idx) => {
+      const wEndInc = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
+      if (now.getTime() >= wObj.startDate.getTime() && now.getTime() <= wEndInc.getTime()) {
+        activeWeekIndex = idx;
+      }
+    });
+    if (activeWeekIndex === -1 && detected && detected.week) {
+      activeWeekIndex = schedule.weeks.findIndex(w => w.name === detected.week);
+    }
+  }
+
+  // Cycle progress
+  let cycleStart = schedule.weeks[0]?.startDate || new Date(year, mIdx, 1);
+  let cycleEnd = schedule.weeks[schedule.weeks.length - 1]?.endDate || new Date(year, mIdx + 1, 0);
+  let totalCycleDays = Math.max(1, Math.round((cycleEnd.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+  let percentElapsed = Math.min(100, Math.max(0, Math.round((elapsedCycleDays / totalCycleDays) * 100)));
+
+  return {
+    month: targetMonth,
+    year,
+    schedule,
+    mData,
+    deducts,
+    personTotals,
+    totalCurrentInflow,
+    totalSalarySavingsIn,
+    totalDD,
+    totalMonthPaymentsIn,
+    totalWeeklySpend,
+    totalWeeklyCurrentSpend,
+    totalCurrentOpening,
+    totalCreditOpeningSpent,
+    totalCreditLimit,
+    totalSavingsOpening,
+    autoSavingsFromDD,
+    weeklyPredictions,
+    projectedMonthEndCurrent,
+    projectedMonthEndCredit,
+    projectedMonthEndSavings,
+    projectedMonthEndNet,
+    totalOutgoings,
+    weeklyAvg,
+    totalAutoPayMonth,
+    latestVariance,
+    isCurrentMonth,
+    activeWeekIndex,
+    cycleStart,
+    cycleEnd,
+    totalCycleDays,
+    elapsedCycleDays,
+    percentElapsed
+  };
+}
+
 if (typeof window !== 'undefined') {
   window.calculateLiveDailyPacing = calculateLiveDailyPacing;
   window.SPEND_CATEGORIES = SPEND_CATEGORIES;
   window.getCategoryById = getCategoryById;
   window.categorizeTransaction = categorizeTransaction;
   window.calculateCategoryBreakdown = calculateCategoryBreakdown;
+  window.calculateMonthForecast = calculateMonthForecast;
 }
 
 // --- static/js/charts.js ---
@@ -5966,6 +6393,631 @@ function closeOnboarding() {
   }
 }
 
+// --- static/js/views/forecast_overview.js ---
+
+
+
+function renderForecastOverviewView(container) {
+  const cfg = getSettings();
+  const curr = cfg.currency || '£';
+  const currentYear = appState.currentYear || new Date().getFullYear();
+  const isMulti = isMultiUserEnabled();
+  const activeUser = isMulti ? getActiveUser() : 'Joint';
+
+  // 1. Determine active month to anchor the forecast overview
+  const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(currentYear) : null;
+  const currentMonthName = (detected && detected.month) ? detected.month : 'Jan';
+  
+  // Calculate full forecast for current month
+  const forecast = (typeof calculateMonthForecast === 'function')
+    ? calculateMonthForecast(currentMonthName, currentYear)
+    : null;
+
+  if (!forecast) {
+    container.innerHTML = '<div style="padding:40px; text-align:center; color:var(--text-muted);">Loading forecasting data...</div>';
+    return;
+  }
+
+  const {
+    schedule,
+    weeklyPredictions,
+    projectedMonthEndCurrent,
+    projectedMonthEndCredit,
+    projectedMonthEndSavings,
+    projectedMonthEndNet,
+    totalCurrentOpening,
+    totalCurrentInflow,
+    totalDD,
+    totalWeeklySpend,
+    totalWeeklyCurrentSpend,
+    totalCreditOpeningSpent,
+    totalCreditLimit,
+    totalSavingsOpening,
+    totalSalarySavingsIn,
+    totalAutoPayMonth,
+    latestVariance,
+    activeWeekIndex,
+    cycleStart,
+    cycleEnd,
+    totalCycleDays,
+    elapsedCycleDays,
+    percentElapsed
+  } = forecast;
+
+  // Active week data and pacing
+  const currentWeekIdx = activeWeekIndex >= 0 ? activeWeekIndex : 0;
+  const activeWeekPred = weeklyPredictions[currentWeekIdx] || weeklyPredictions[0] || {};
+  const activeWeekObj = schedule.weeks[currentWeekIdx] || schedule.weeks[0];
+  
+  // Active week actual spend vs planned
+  const activeWeekActuals = (typeof getMonthData === 'function')
+    ? (getMonthData(currentMonthName, currentYear).weekly_actuals?.[activeWeekObj?.name] || {})
+    : {};
+
+  let livePacing = null;
+  if (typeof calculateLiveDailyPacing === 'function' && activeWeekObj && activeWeekPred) {
+    livePacing = calculateLiveDailyPacing(activeWeekObj, activeWeekPred, activeWeekActuals, cfg);
+  }
+  
+  // Calculate total money in vs money out for monthly cashflow
+  const totalInflows = totalCurrentInflow + forecast.totalMonthPaymentsIn;
+  const totalCommittedBills = totalDD;
+  const totalDiscretionaryBudget = totalWeeklySpend;
+  const totalOutflows = totalCommittedBills + totalDiscretionaryBudget + totalAutoPayMonth;
+  const netMonthlySurplus = totalInflows - totalOutflows;
+
+  // Credit utilization percentage
+  const creditUtilPercent = totalCreditLimit > 0
+    ? Math.min(100, Math.max(0, Math.round((projectedMonthEndCredit / totalCreditLimit) * 100)))
+    : 0;
+
+  // Savings growth
+  const savingsGrowth = projectedMonthEndSavings - totalSavingsOpening;
+
+  // Net position delta from starting
+  const totalStartingNet = totalCurrentOpening + totalSavingsOpening - totalCreditOpeningSpent;
+  const netPositionDelta = projectedMonthEndNet - totalStartingNet;
+
+  // Safe to spend today
+  let safeDailySpend = 0;
+  let pacingStatusText = 'On Track';
+  let pacingStatusClass = 'badge-green';
+
+  if (livePacing && livePacing.isPacingActive) {
+    const daysRemainingInWeek = Math.max(1, livePacing.totalDays - livePacing.elapsedDays + 1);
+    const unspentBudget = Math.max(0, activeWeekPred.wSpend - livePacing.pacedDiscretionarySpendToDate);
+    safeDailySpend = unspentBudget / daysRemainingInWeek;
+
+    if (livePacing.liveDailyVariance !== null) {
+      if (livePacing.liveDailyVariance >= 15) {
+        pacingStatusText = 'Ahead of Budget';
+        pacingStatusClass = 'badge-green';
+      } else if (livePacing.liveDailyVariance < -25) {
+        pacingStatusText = 'Over Budget Pace';
+        pacingStatusClass = 'badge-red';
+      } else {
+        pacingStatusText = 'On Track';
+        pacingStatusClass = 'badge-blue';
+      }
+    }
+  } else if (activeWeekObj) {
+    safeDailySpend = (activeWeekPred.wSpend || 0) / 7;
+  }
+
+  // Upcoming scheduled bills in next 14 days
+  const now = new Date();
+  const in14Days = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  const upcomingBills = [];
+
+  weeklyPredictions.forEach(wp => {
+    (wp.wDDs || []).forEach(b => {
+      let billDate = null;
+      if (b.actualPaymentDate) {
+        billDate = new Date(b.actualPaymentDate);
+      } else {
+        const dueDay = parseInt(b.due_day || 1, 10);
+        const mIdx = months.indexOf(currentMonthName);
+        billDate = new Date(currentYear, mIdx, dueDay);
+      }
+      
+      if (billDate && !isNaN(billDate.getTime())) {
+        const diffDays = Math.ceil((billDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays <= 14) {
+          upcomingBills.push({
+            ...b,
+            dueDay: billDate.getDate(),
+            diffDays,
+            billDate
+          });
+        }
+      }
+    });
+  });
+
+  upcomingBills.sort((a, b) => a.diffDays - b.diffDays);
+
+  // 3-Month forward trajectory
+  const currentMonthIdx = months.indexOf(currentMonthName);
+  const forwardMonths = [];
+  for (let offset = 0; offset < 3; offset++) {
+    const targetIdx = (currentMonthIdx + offset) % 12;
+    const targetYear = currentMonthIdx + offset >= 12 ? currentYear + 1 : currentYear;
+    const targetMName = months[targetIdx];
+    try {
+      const f = calculateMonthForecast(targetMName, targetYear);
+      if (f) {
+        forwardMonths.push({
+          month: targetMName,
+          year: targetYear,
+          isCurrent: offset === 0,
+          projectedNet: f.projectedMonthEndNet,
+          projectedCurrent: f.projectedMonthEndCurrent,
+          totalInflow: f.totalCurrentInflow + f.totalMonthPaymentsIn,
+          totalOutgoings: f.totalOutgoings + f.totalAutoPayMonth
+        });
+      }
+    } catch (e) {
+      console.warn("Error calculating forward forecast for", targetMName, e);
+    }
+  }
+
+  // Render HTML with MD3 surface elevation & styling
+  let html = `
+    <div class="forecast-overview-container">
+      
+      <!-- HERO PAYDAY CYCLE & FORECAST BANNER -->
+      <div class="forecast-hero-card">
+        <div class="forecast-hero-content">
+          <div class="forecast-hero-header">
+            <div class="forecast-hero-title-group">
+              <div class="forecast-hero-badge-row">
+                <span class="md3-chip md3-chip-primary">⚡ Forecasting Overview</span>
+                <span class="md3-chip md3-chip-tonal">📅 ${currentMonthName} ${currentYear}</span>
+                ${isMulti ? `<span class="md3-chip md3-chip-user">👤 ${activeUser}</span>` : ''}
+              </div>
+              <h2 class="forecast-hero-title">Financial Runway & Projections</h2>
+              <p class="forecast-hero-subtitle">
+                Pay Cycle: <strong>${schedule.dateRangeStr}</strong> &bull; Week <strong>${currentWeekIdx + 1}</strong> of <strong>${schedule.numWeeks}</strong> &bull; Day <strong>${elapsedCycleDays}</strong> of <strong>${totalCycleDays}</strong>
+              </p>
+            </div>
+            
+            <div class="forecast-hero-actions">
+              <button class="btn primary" onclick="window.budgetApp.setTab('${currentMonthName}')" title="Jump to detailed weekly spreadsheet for ${currentMonthName}">
+                📅 View ${currentMonthName} Detail
+              </button>
+              <button class="btn secondary" onclick="window.budgetApp.setTab('Bills')" title="View recurring direct debits and standing orders">
+                📋 Scheduled Bills
+              </button>
+              <button class="btn secondary" onclick="window.budgetApp.setTab('Year')" title="View 12-month annual trajectory and net worth chart">
+                📊 Annual Trajectory
+              </button>
+            </div>
+          </div>
+
+          <!-- CYCLE PROGRESS BAR -->
+          <div class="forecast-cycle-bar-wrap">
+            <div class="forecast-cycle-bar-labels">
+              <span>Payday Cycle Progress</span>
+              <span class="forecast-cycle-percent">${percentElapsed}% elapsed (${totalCycleDays - elapsedCycleDays} days remaining)</span>
+            </div>
+            <div class="forecast-cycle-track">
+              <div class="forecast-cycle-fill" style="width: ${percentElapsed}%;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- KEY METRIC KPI CARDS (MATERIAL DESIGN 3 ELEVATED SURFACES) -->
+      <div class="forecast-kpi-grid">
+        
+        <!-- 1. PROJECTED NET POSITION -->
+        <div class="forecast-kpi-card ${projectedMonthEndNet >= 0 ? 'accent-green' : 'accent-red'}">
+          <div class="forecast-kpi-top">
+            <span class="forecast-kpi-icon">💎</span>
+            <span class="forecast-kpi-tag">Month-End Position</span>
+          </div>
+          <div class="forecast-kpi-label">Projected Net Worth</div>
+          <div class="forecast-kpi-val ${projectedMonthEndNet >= 0 ? 'val-green' : 'val-red'}">
+            ${curr}${projectedMonthEndNet.toFixed(2)}
+          </div>
+          <div class="forecast-kpi-footer">
+            <span class="forecast-kpi-change ${netPositionDelta >= 0 ? 'text-green' : 'text-red'}">
+              ${netPositionDelta >= 0 ? '▲ +' : '▼ -'}${curr}${Math.abs(netPositionDelta).toFixed(2)}
+            </span>
+            <span class="forecast-kpi-sub">vs starting balances</span>
+          </div>
+        </div>
+
+        <!-- 2. CURRENT ACCOUNTS FORECAST -->
+        <div class="forecast-kpi-card accent-blue">
+          <div class="forecast-kpi-top">
+            <span class="forecast-kpi-icon">🏦</span>
+            <span class="forecast-kpi-tag">Current Accounts</span>
+          </div>
+          <div class="forecast-kpi-label">Month-End Cash Balance</div>
+          <div class="forecast-kpi-val ${projectedMonthEndCurrent >= 0 ? 'val-blue' : 'val-red'}">
+            ${curr}${projectedMonthEndCurrent.toFixed(2)}
+          </div>
+          <div class="forecast-kpi-footer">
+            <span class="forecast-kpi-sub">
+              Start: <strong>${curr}${totalCurrentOpening.toFixed(0)}</strong> &bull; In: <strong class="text-green">+${curr}${totalCurrentInflow.toFixed(0)}</strong> &bull; Out: <strong class="text-red">-${curr}${(totalDD + totalWeeklyCurrentSpend + totalAutoPayMonth).toFixed(0)}</strong>
+            </span>
+          </div>
+        </div>
+
+        <!-- 3. CREDIT CARDS RUNWAY -->
+        <div class="forecast-kpi-card accent-amber">
+          <div class="forecast-kpi-top">
+            <span class="forecast-kpi-icon">💳</span>
+            <span class="forecast-kpi-tag">Credit Cards</span>
+          </div>
+          <div class="forecast-kpi-label">Projected Month-End Debt</div>
+          <div class="forecast-kpi-val ${projectedMonthEndCredit > 0 ? 'val-amber' : 'val-green'}">
+            -${curr}${projectedMonthEndCredit.toFixed(2)}
+          </div>
+          <div class="forecast-kpi-footer">
+            <div class="forecast-mini-progress">
+              <div class="forecast-mini-bar" style="width:${creditUtilPercent}%;"></div>
+            </div>
+            <span class="forecast-kpi-sub">
+              ${curr}${(totalCreditLimit - projectedMonthEndCredit).toFixed(0)} avail of ${curr}${totalCreditLimit.toFixed(0)} line (${creditUtilPercent}% utilized)
+            </span>
+          </div>
+        </div>
+
+        <!-- 4. SAVINGS PORTFOLIO & GROWTH -->
+        <div class="forecast-kpi-card accent-purple">
+          <div class="forecast-kpi-top">
+            <span class="forecast-kpi-icon">📈</span>
+            <span class="forecast-kpi-tag">Savings Portfolio</span>
+          </div>
+          <div class="forecast-kpi-label">Projected Total Savings</div>
+          <div class="forecast-kpi-val val-purple">
+            ${curr}${projectedMonthEndSavings.toFixed(2)}
+          </div>
+          <div class="forecast-kpi-footer">
+            <span class="forecast-kpi-change text-purple">
+              +${curr}${savingsGrowth.toFixed(2)}
+            </span>
+            <span class="forecast-kpi-sub">net wealth growth this month</span>
+          </div>
+        </div>
+
+        <!-- 5. WEEKLY PACING & VARIANCE -->
+        <div class="forecast-kpi-card accent-teal">
+          <div class="forecast-kpi-top">
+            <span class="forecast-kpi-icon">🎯</span>
+            <span class="forecast-kpi-tag">${pacingStatusText}</span>
+          </div>
+          <div class="forecast-kpi-label">Safe-To-Spend Daily Pace</div>
+          <div class="forecast-kpi-val val-teal">
+            ${curr}${safeDailySpend.toFixed(2)}<span style="font-size:14px; font-weight:500; color:var(--text-muted);">/day</span>
+          </div>
+          <div class="forecast-kpi-footer">
+            <span class="forecast-kpi-sub">
+              Week ${currentWeekIdx + 1} pace &bull; ${latestVariance !== null ? `<strong class="${latestVariance >= 0 ? 'text-green' : 'text-red'}">${latestVariance >= 0 ? '+' : ''}${curr}${latestVariance.toFixed(2)}</strong> actual variance` : 'No actuals entered'}
+            </span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- MAIN FORECASTING SECTIONS GRID -->
+      <div class="forecast-sections-grid">
+        
+        <!-- LEFT COLUMN: WEEKLY FORECASTING FOCUS -->
+        <div class="forecast-column">
+          
+          <!-- ACTIVE WEEK SPOTLIGHT CARD -->
+          <div class="forecast-card">
+            <div class="forecast-card-header">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">⚡</span>
+                <h3 class="forecast-card-title">Active Week Spotlight: ${activeWeekObj?.label || 'Current Week'}</h3>
+              </div>
+              <span class="md3-badge md3-badge-active">Active Week</span>
+            </div>
+
+            <div class="forecast-card-body">
+              <div class="forecast-week-spotlight-metrics">
+                <div class="forecast-spotlight-item">
+                  <span class="forecast-spotlight-label">Discretionary Budget</span>
+                  <span class="forecast-spotlight-value">${curr}${(activeWeekPred.wSpend || 0).toFixed(2)}</span>
+                  <span class="forecast-spotlight-sub">Planned living & grocery allowance</span>
+                </div>
+
+                <div class="forecast-spotlight-item">
+                  <span class="forecast-spotlight-label">Bills Due This Week</span>
+                  <span class="forecast-spotlight-value text-amber">${curr}${(activeWeekPred.wDDTotal || 0).toFixed(2)}</span>
+                  <span class="forecast-spotlight-sub">${(activeWeekPred.wDDs || []).length} scheduled items</span>
+                </div>
+
+                <div class="forecast-spotlight-item">
+                  <span class="forecast-spotlight-label">Expected Inflow</span>
+                  <span class="forecast-spotlight-value text-green">+${curr}${(activeWeekPred.wIncomeTotal || 0).toFixed(2)}</span>
+                  <span class="forecast-spotlight-sub">Income & paydays</span>
+                </div>
+
+                <div class="forecast-spotlight-item">
+                  <span class="forecast-spotlight-label">Projected Week-End Net</span>
+                  <span class="forecast-spotlight-value ${(activeWeekPred.predictedNet || 0) >= 0 ? 'text-green' : 'text-red'}">${curr}${(activeWeekPred.predictedNet || 0).toFixed(2)}</span>
+                  <span class="forecast-spotlight-sub">Closing cash position</span>
+                </div>
+              </div>
+
+              <!-- Scheduled Bills Clearing This Week -->
+              <div style="margin-top:16px;">
+                <h4 style="font-size:13px; font-weight:600; color:var(--heading); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <span>Direct Debits Clearing in ${activeWeekObj?.name || 'This Week'}:</span>
+                  <span style="font-size:11.5px; color:var(--text-muted);">${(activeWeekPred.wDDs || []).length} items</span>
+                </h4>
+
+                ${(activeWeekPred.wDDs || []).length === 0 ? `
+                  <div class="forecast-empty-note">No scheduled direct debits clearing during this week.</div>
+                ` : `
+                  <div class="forecast-chips-scroll">
+                    ${(activeWeekPred.wDDs || []).map(d => `
+                      <div class="forecast-bill-chip">
+                        <span class="forecast-bill-chip-icon">${d.source_type === 'yearly_recurring' ? '🗓️' : '⚡'}</span>
+                        <div class="forecast-bill-chip-info">
+                          <span class="forecast-bill-chip-title">${d.desc || d.name || 'Direct Debit'}</span>
+                          <span class="forecast-bill-chip-meta">Due ${d.due_day ? `Day ${d.due_day}` : 'this week'} &bull; ${d.account || cfg.current_accounts[0]}</span>
+                        </div>
+                        <span class="forecast-bill-chip-amt">-${curr}${Number(d.amount || 0).toFixed(2)}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                `}
+              </div>
+
+              <div style="margin-top:16px; display:flex; justify-content:flex-end;">
+                <button class="btn secondary" style="font-size:12px; padding:5px 12px;" onclick="window.budgetApp.setTab('${currentMonthName}')">
+                  🔍 View Detailed Week Table &rarr;
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- MULTI-WEEK CASHFLOW RUNWAY -->
+          <div class="forecast-card">
+            <div class="forecast-card-header">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">📅</span>
+                <h3 class="forecast-card-title">Weekly Cashflow Runway (${schedule.numWeeks} Weeks)</h3>
+              </div>
+              <span style="font-size:11.5px; color:var(--text-muted);">Swipe or click a week</span>
+            </div>
+
+            <div class="forecast-card-body">
+              <div class="forecast-week-runway-grid">
+                ${weeklyPredictions.map((wp, idx) => {
+                  const wObj = wp.wObj;
+                  const isCurrent = (idx === currentWeekIdx);
+                  const isPast = (idx < currentWeekIdx);
+                  const statusLabel = isCurrent ? 'Active' : (isPast ? 'Completed' : 'Upcoming');
+                  const statusClass = isCurrent ? 'status-active' : (isPast ? 'status-past' : 'status-upcoming');
+
+                  return `
+                    <div class="forecast-week-runway-card ${isCurrent ? 'current' : ''} ${isPast ? 'past' : ''}" onclick="window.budgetApp.setTab('${currentMonthName}')" title="Open ${wObj?.name} in ${currentMonthName}">
+                      <div class="forecast-week-runway-top">
+                        <div>
+                          <strong class="forecast-week-runway-name">${wObj?.name}</strong>
+                          <div class="forecast-week-runway-date">${wObj?.label ? wObj.label.replace(/^Week \d+ /, '') : ''}</div>
+                        </div>
+                        <span class="forecast-week-status-pill ${statusClass}">${statusLabel}</span>
+                      </div>
+
+                      <div class="forecast-week-runway-rows">
+                        <div class="forecast-week-runway-row">
+                          <span>Budget:</span>
+                          <strong>${curr}${wp.wSpend.toFixed(2)}</strong>
+                        </div>
+                        <div class="forecast-week-runway-row">
+                          <span>Scheduled:</span>
+                          <strong class="text-red">-${curr}${wp.wDDTotal.toFixed(2)}</strong>
+                        </div>
+                        ${wp.wIncomeTotal > 0 ? `
+                          <div class="forecast-week-runway-row">
+                            <span>Inflows:</span>
+                            <strong class="text-green">+${curr}${wp.wIncomeTotal.toFixed(2)}</strong>
+                          </div>
+                        ` : ''}
+                      </div>
+
+                      <div class="forecast-week-runway-closing">
+                        <span>Net Pos:</span>
+                        <strong class="${wp.predictedNet >= 0 ? 'text-green' : 'text-red'}">${curr}${wp.predictedNet.toFixed(2)}</strong>
+                      </div>
+
+                      ${wp.variance !== null ? `
+                        <div class="forecast-week-variance-tag ${wp.variance >= 0 ? 'tag-green' : 'tag-red'}">
+                          ${wp.variance >= 0 ? '▲ +' : '▼ -'}${curr}${Math.abs(wp.variance).toFixed(2)} vs plan
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN: MONTHLY CASHFLOW & UPCOMING BILLS -->
+        <div class="forecast-column">
+          
+          <!-- MONTHLY CASHFLOW ARCHITECTURE (INFLOWS VS OUTFLOWS) -->
+          <div class="forecast-card">
+            <div class="forecast-card-header">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">⚖️</span>
+                <h3 class="forecast-card-title">${currentMonthName} Cashflow Architecture</h3>
+              </div>
+              <span class="md3-badge ${netMonthlySurplus >= 0 ? 'md3-badge-green' : 'md3-badge-red'}">
+                ${netMonthlySurplus >= 0 ? 'Surplus' : 'Deficit'} ${curr}${Math.abs(netMonthlySurplus).toFixed(0)}
+              </span>
+            </div>
+
+            <div class="forecast-card-body">
+              <div class="forecast-cashflow-segments-bar">
+                <div class="forecast-segment-fill fill-bills" style="width: ${totalInflows > 0 ? Math.min(100, (totalCommittedBills / totalInflows) * 100) : 40}%;" title="Fixed Bills: ${curr}${totalCommittedBills.toFixed(2)}"></div>
+                <div class="forecast-segment-fill fill-discretionary" style="width: ${totalInflows > 0 ? Math.min(100, (totalDiscretionaryBudget / totalInflows) * 100) : 40}%;" title="Weekly Spend: ${curr}${totalDiscretionaryBudget.toFixed(2)}"></div>
+                <div class="forecast-segment-fill fill-surplus" style="width: ${totalInflows > 0 ? Math.max(0, (netMonthlySurplus / totalInflows) * 100) : 20}%;" title="Projected Surplus: ${curr}${Math.max(0, netMonthlySurplus).toFixed(2)}"></div>
+              </div>
+
+              <div class="forecast-cashflow-legend">
+                <div class="forecast-legend-item">
+                  <span class="legend-dot dot-bills"></span>
+                  <span class="legend-text">Fixed Bills: <strong>${curr}${totalCommittedBills.toFixed(2)}</strong> (${totalInflows > 0 ? Math.round((totalCommittedBills / totalInflows) * 100) : 0}%)</span>
+                </div>
+                <div class="forecast-legend-item">
+                  <span class="legend-dot dot-discretionary"></span>
+                  <span class="legend-text">Discretionary: <strong>${curr}${totalDiscretionaryBudget.toFixed(2)}</strong> (${totalInflows > 0 ? Math.round((totalDiscretionaryBudget / totalInflows) * 100) : 0}%)</span>
+                </div>
+                <div class="forecast-legend-item">
+                  <span class="legend-dot dot-surplus"></span>
+                  <span class="legend-text">Surplus: <strong>${curr}${Math.max(0, netMonthlySurplus).toFixed(2)}</strong></span>
+                </div>
+              </div>
+
+              <div class="forecast-cashflow-breakdown-list" style="margin-top:16px;">
+                <div class="forecast-cashflow-row">
+                  <span>Expected Inflow (Salary & In):</span>
+                  <strong class="text-green">+${curr}${totalInflows.toFixed(2)}</strong>
+                </div>
+                <div class="forecast-cashflow-row">
+                  <span>Direct Debits & Subscriptions:</span>
+                  <strong class="text-red">-${curr}${totalCommittedBills.toFixed(2)}</strong>
+                </div>
+                <div class="forecast-cashflow-row">
+                  <span>Weekly Living Budget:</span>
+                  <strong class="text-red">-${curr}${totalDiscretionaryBudget.toFixed(2)}</strong>
+                </div>
+                ${totalAutoPayMonth > 0 ? `
+                  <div class="forecast-cashflow-row">
+                    <span>Credit Auto-Pay Transfers:</span>
+                    <strong class="text-amber">-${curr}${totalAutoPayMonth.toFixed(2)}</strong>
+                  </div>
+                ` : ''}
+                <div class="forecast-cashflow-row forecast-cashflow-total">
+                  <span>Projected Month-End Surplus:</span>
+                  <strong class="${netMonthlySurplus >= 0 ? 'text-green' : 'text-red'}">
+                    ${netMonthlySurplus >= 0 ? '+' : ''}${curr}${netMonthlySurplus.toFixed(2)}
+                  </strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- UPCOMING BILLS (NEXT 14 DAYS) -->
+          <div class="forecast-card">
+            <div class="forecast-card-header">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">🔔</span>
+                <h3 class="forecast-card-title">Upcoming Bills (Next 14 Days)</h3>
+              </div>
+              <span class="md3-badge md3-badge-neutral">${upcomingBills.length} Due Soon</span>
+            </div>
+
+            <div class="forecast-card-body">
+              ${upcomingBills.length === 0 ? `
+                <div class="forecast-empty-note">🎉 No upcoming bills due in the next 14 days!</div>
+              ` : `
+                <div class="forecast-upcoming-list">
+                  ${upcomingBills.slice(0, 7).map(b => {
+                    let dueTag = '';
+                    if (b.diffDays === 0) dueTag = '<span class="due-pill due-today">Today</span>';
+                    else if (b.diffDays === 1) dueTag = '<span class="due-pill due-tomorrow">Tomorrow</span>';
+                    else dueTag = `<span class="due-pill">In ${b.diffDays} days</span>`;
+
+                    return `
+                      <div class="forecast-upcoming-item">
+                        <div class="forecast-upcoming-left">
+                          <span class="forecast-upcoming-icon">${b.source_type === 'yearly_recurring' ? '🗓️' : '⚡'}</span>
+                          <div>
+                            <div class="forecast-upcoming-title">${b.desc || b.name || 'Direct Debit'}</div>
+                            <div class="forecast-upcoming-meta">Due Day ${b.dueDay} &bull; ${b.account || cfg.current_accounts[0]}</div>
+                          </div>
+                        </div>
+
+                        <div class="forecast-upcoming-right">
+                          <span class="forecast-upcoming-amount">-${curr}${Number(b.amount || 0).toFixed(2)}</span>
+                          ${dueTag}
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+                ${upcomingBills.length > 7 ? `
+                  <div style="text-align:center; margin-top:10px;">
+                    <button class="btn secondary" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.setTab('Bills')">
+                      + View all ${upcomingBills.length} upcoming bills
+                    </button>
+                  </div>
+                ` : ''}
+              `}
+            </div>
+          </div>
+
+          <!-- 3-MONTH HORIZON OUTLOOK -->
+          <div class="forecast-card">
+            <div class="forecast-card-header">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <span style="font-size:18px;">🔭</span>
+                <h3 class="forecast-card-title">3-Month Forecast Runway</h3>
+              </div>
+              <button class="btn secondary" style="font-size:11px; padding:3px 8px;" onclick="window.budgetApp.setTab('Year')">
+                View Full Year &rarr;
+              </button>
+            </div>
+
+            <div class="forecast-card-body">
+              <div class="forecast-forward-months-grid">
+                ${forwardMonths.map(fm => `
+                  <div class="forecast-forward-month-card ${fm.isCurrent ? 'current' : ''}">
+                    <div class="forecast-forward-month-header">
+                      <strong>${fm.month} ${fm.year}</strong>
+                      ${fm.isCurrent ? '<span class="forecast-current-mini-tag">Current</span>' : ''}
+                    </div>
+
+                    <div class="forecast-forward-month-stats">
+                      <div class="forecast-forward-stat">
+                        <span>Projected Net:</span>
+                        <strong class="${fm.projectedNet >= 0 ? 'text-green' : 'text-red'}">${curr}${fm.projectedNet.toFixed(0)}</strong>
+                      </div>
+                      <div class="forecast-forward-stat">
+                        <span>Month Cash:</span>
+                        <strong>${curr}${fm.projectedCurrent.toFixed(0)}</strong>
+                      </div>
+                      <div class="forecast-forward-stat">
+                        <span>Total Inflow:</span>
+                        <strong class="text-green">+${curr}${fm.totalInflow.toFixed(0)}</strong>
+                      </div>
+                      <div class="forecast-forward-stat">
+                        <span>Total Out:</span>
+                        <strong class="text-red">-${curr}${fm.totalOutgoings.toFixed(0)}</strong>
+                      </div>
+                    </div>
+
+                    <button class="btn secondary forecast-forward-btn" onclick="window.budgetApp.setTab('${fm.month}')">
+                      Explore ${fm.month}
+                    </button>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  `;
+
+  container.innerHTML = html;
+}
+
 // --- static/js/views/overview.js ---
 function formatCheckInTimestamp(isoStr) {
   if (!isoStr) return '';
@@ -5988,7 +7040,7 @@ function renderOverviewView(container) {
   const cfg = getSettings();
   const curr = cfg.currency;
   const isOpenBankingEnabled = Boolean(cfg.open_banking?.enabled);
-  const activeTab = appState.activeTab;
+  const activeTab = months.includes(appState.activeTab) ? appState.activeTab : ((typeof detectCurrentMonthAndWeek === 'function' && detectCurrentMonthAndWeek(appState.currentYear).month) || 'Jan');
   const currentYear = appState.currentYear;
   const globalEditMode = appState.globalEditMode;
   const isMulti = isMultiUserEnabled();
@@ -10727,6 +11779,7 @@ if (typeof window !== 'undefined') {
 
 
 
+
 ﻿
 
 
@@ -10769,7 +11822,10 @@ function updateTopBarTitle() {
   let desktopTitle = 'Budget';
   let mobileTitle = 'Budget';
 
-  if (months.includes(appState.activeTab)) {
+  if (appState.activeTab === 'Overview') {
+    desktopTitle = `Forecast Overview ${yr}`;
+    mobileTitle = `Overview ${shortYr}`;
+  } else if (months.includes(appState.activeTab)) {
     const fullMonth = fullMonthNames[appState.activeTab] || appState.activeTab;
     desktopTitle = `${fullMonth} ${yr}`;
     mobileTitle = `${appState.activeTab} ${shortYr}`;
@@ -11003,6 +12059,7 @@ function renderNav() {
   if (activeSec === 'monthly') {
     const yData = getYearData();
     let html = `<div class="month-pills-bar">`;
+    html += `<button class="tab-btn month-pill ${appState.activeTab === 'Overview' ? 'active' : ''}" onclick="window.budgetApp.setTab('Overview')">⚡ Overview</button>`;
     months.forEach(m => {
       const md = yData.months[m] || {};
       if (md.archived) return;
@@ -11089,6 +12146,10 @@ function renderContent() {
     }
     if (appState.activeTab === 'Year') {
       renderYearOverviewView(container);
+      return;
+    }
+    if (appState.activeTab === 'Overview') {
+      renderForecastOverviewView(container);
       return;
     }
 
@@ -11430,10 +12491,8 @@ async function init() {
         appState.currentYear = now.getFullYear();
       }
       const detected = detectCurrentMonthAndWeek(appState.currentYear);
-      if (detected && detected.month) {
-        appState.activeTab = detected.month;
-        appState.lastActiveMonth = detected.month;
-      }
+      appState.activeTab = 'Overview';
+      appState.lastActiveMonth = 'Overview';
 
       if (window.budgetApp && typeof window.budgetApp.applyOpenBankingToCheckins === 'function') {
         window.budgetApp.applyOpenBankingToCheckins();
@@ -11444,7 +12503,6 @@ async function init() {
       renderNav();
       renderContent();
       scrollToActiveMonthPill(false);
-      scrollToCurrentWeek(false);
 
       if (typeof window.budgetApp.updateLockNavBtn === 'function') {
         window.budgetApp.updateLockNavBtn();
@@ -11480,6 +12538,7 @@ async function init() {
 window.budgetApp = {
   init,
   renderContent,
+  renderForecastOverviewView,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
@@ -11524,7 +12583,7 @@ window.budgetApp = {
   setTab(tabName, shouldScrollToWeek = false) {
     const isSwitching = appState.activeTab !== tabName;
     appState.activeTab = tabName;
-    if (months.includes(tabName)) {
+    if (months.includes(tabName) || tabName === 'Overview') {
       appState.lastActiveMonth = tabName;
     } else if (tabName === 'Budgets' || tabName === 'Bills') {
       appState.lastBudgetsTab = tabName;
@@ -11547,8 +12606,7 @@ window.budgetApp = {
 
   setPrimarySection(section) {
     if (section === 'monthly') {
-      const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
-      const targetMonth = appState.lastActiveMonth || (detected && detected.month ? detected.month : 'Jan');
+      const targetMonth = appState.lastActiveMonth || 'Overview';
       this.setTab(targetMonth);
     } else if (section === 'budgets') {
       const target = appState.lastBudgetsTab || 'Budgets';
@@ -11578,14 +12636,14 @@ window.budgetApp = {
       }
     });
 
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
-    const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : (appState.lastActiveMonth || 'Jan'));
-    appState.lastActiveMonth = targetMonth;
-    appState.activeTab = targetMonth;
+    appState.lastActiveMonth = 'Overview';
+    appState.activeTab = 'Overview';
     appState.activeSubTab = 'overview';
     renderNav();
     renderContent();
-    scrollToCurrentWeek(true);
+    const container = document.getElementById('appBody');
+    if (container) container.scrollTop = 0;
+    window.scrollTo(0, 0);
   },
 
   openBankLinkModal,

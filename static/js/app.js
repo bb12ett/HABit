@@ -105,6 +105,7 @@ import { renderBillsView } from './views/bills.js';
 import { renderYearOverviewView } from './views/year_overview.js';
 import { renderSettingsView } from './views/settings.js';
 import { renderSpendAnalyticsView } from './views/spend_analytics.js';
+import { renderForecastOverviewView } from './views/forecast_overview.js';
 
 import {
   openCalculator,
@@ -176,7 +177,10 @@ export function updateTopBarTitle() {
   let desktopTitle = 'Budget';
   let mobileTitle = 'Budget';
 
-  if (months.includes(appState.activeTab)) {
+  if (appState.activeTab === 'Overview') {
+    desktopTitle = `Forecast Overview ${yr}`;
+    mobileTitle = `Overview ${shortYr}`;
+  } else if (months.includes(appState.activeTab)) {
     const fullMonth = fullMonthNames[appState.activeTab] || appState.activeTab;
     desktopTitle = `${fullMonth} ${yr}`;
     mobileTitle = `${appState.activeTab} ${shortYr}`;
@@ -410,6 +414,7 @@ export function renderNav() {
   if (activeSec === 'monthly') {
     const yData = getYearData();
     let html = `<div class="month-pills-bar">`;
+    html += `<button class="tab-btn month-pill ${appState.activeTab === 'Overview' ? 'active' : ''}" onclick="window.budgetApp.setTab('Overview')">⚡ Overview</button>`;
     months.forEach(m => {
       const md = yData.months[m] || {};
       if (md.archived) return;
@@ -496,6 +501,10 @@ export function renderContent() {
     }
     if (appState.activeTab === 'Year') {
       renderYearOverviewView(container);
+      return;
+    }
+    if (appState.activeTab === 'Overview') {
+      renderForecastOverviewView(container);
       return;
     }
 
@@ -837,10 +846,8 @@ export async function init() {
         appState.currentYear = now.getFullYear();
       }
       const detected = detectCurrentMonthAndWeek(appState.currentYear);
-      if (detected && detected.month) {
-        appState.activeTab = detected.month;
-        appState.lastActiveMonth = detected.month;
-      }
+      appState.activeTab = 'Overview';
+      appState.lastActiveMonth = 'Overview';
 
       if (window.budgetApp && typeof window.budgetApp.applyOpenBankingToCheckins === 'function') {
         window.budgetApp.applyOpenBankingToCheckins();
@@ -851,7 +858,6 @@ export async function init() {
       renderNav();
       renderContent();
       scrollToActiveMonthPill(false);
-      scrollToCurrentWeek(false);
 
       if (typeof window.budgetApp.updateLockNavBtn === 'function') {
         window.budgetApp.updateLockNavBtn();
@@ -887,6 +893,7 @@ export async function init() {
 window.budgetApp = {
   init,
   renderContent,
+  renderForecastOverviewView,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
@@ -931,7 +938,7 @@ window.budgetApp = {
   setTab(tabName, shouldScrollToWeek = false) {
     const isSwitching = appState.activeTab !== tabName;
     appState.activeTab = tabName;
-    if (months.includes(tabName)) {
+    if (months.includes(tabName) || tabName === 'Overview') {
       appState.lastActiveMonth = tabName;
     } else if (tabName === 'Budgets' || tabName === 'Bills') {
       appState.lastBudgetsTab = tabName;
@@ -954,8 +961,7 @@ window.budgetApp = {
 
   setPrimarySection(section) {
     if (section === 'monthly') {
-      const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
-      const targetMonth = appState.lastActiveMonth || (detected && detected.month ? detected.month : 'Jan');
+      const targetMonth = appState.lastActiveMonth || 'Overview';
       this.setTab(targetMonth);
     } else if (section === 'budgets') {
       const target = appState.lastBudgetsTab || 'Budgets';
@@ -985,14 +991,14 @@ window.budgetApp = {
       }
     });
 
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(appState.currentYear) : null;
-    const targetMonth = (detected && detected.month) ? detected.month : (months.includes(appState.activeTab) ? appState.activeTab : (appState.lastActiveMonth || 'Jan'));
-    appState.lastActiveMonth = targetMonth;
-    appState.activeTab = targetMonth;
+    appState.lastActiveMonth = 'Overview';
+    appState.activeTab = 'Overview';
     appState.activeSubTab = 'overview';
     renderNav();
     renderContent();
-    scrollToCurrentWeek(true);
+    const container = document.getElementById('appBody');
+    if (container) container.scrollTop = 0;
+    window.scrollTo(0, 0);
   },
 
   openBankLinkModal,
