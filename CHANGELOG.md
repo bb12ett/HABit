@@ -5,6 +5,15 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.5] - 2026-09-02
+
+### Enhanced
+- **Overview Odd-Card Responsive Expansion**:
+  - Automatically expands the final KPI card across the full row (`grid-column: 1 / -1`) on mobile and 2-column viewports whenever an odd number of tiles is displayed (e.g. 5 tiles, 3 tiles, 7 tiles).
+  - Eliminates the awkward empty grid slot beside the last card, providing an expansive full-width presentation for that metric and its description.
+
+---
+
 ## [0.3.4] - 2026-09-02
 
 ### Fixed & Enhanced

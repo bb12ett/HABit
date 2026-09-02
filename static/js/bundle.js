@@ -7136,11 +7136,13 @@ function renderForecastOverviewView(container) {
         ${visibleKpiTiles.map((tile, idx) => {
           const m = metricsData[tile.id] || { val: '—', sub: '', tag: tile.title, valClass: '', cardClass: '' };
           const isFlipped = flippedTileIds.has(tile.id);
+          const isLastOdd = (visibleKpiTiles.length % 2 !== 0 && idx === visibleKpiTiles.length - 1);
 
           return `
-            <div class="forecast-tile-wrapper" 
+            <div class="forecast-tile-wrapper ${isLastOdd ? 'tile-last-odd' : ''}" 
                  id="tile-wrap-${tile.id}" 
                  data-tile-id="${tile.id}"
+                 data-is-last-odd="${isLastOdd}"
                  ${globalEditMode ? `
                    draggable="true"
                    ondragstart="window.budgetApp.onForecastTileDragStart(event, '${tile.id}')"

@@ -4598,6 +4598,17 @@ body.global-edit-mode-active #pullToRefreshContainer {
 }
 
 @media (max-width: 768px) {
+  .forecast-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .forecast-tile-wrapper:last-child:nth-child(odd),
+  .forecast-tile-wrapper.tile-last-odd,
+  .forecast-tile-wrapper[data-is-last-odd="true"] {
+    grid-column: 1 / -1;
+  }
+
   .forecast-week-runway-grid {
     display: flex !important;
     flex-wrap: nowrap !important;
@@ -4958,7 +4969,9 @@ body.global-edit-mode-active #pullToRefreshContainer {
     border-radius: 10px;
   }
 
-  .forecast-kpi-card:nth-child(5) {
+  .forecast-tile-wrapper:last-child:nth-child(odd),
+  .forecast-tile-wrapper.tile-last-odd,
+  .forecast-tile-wrapper[data-is-last-odd="true"] {
     grid-column: 1 / -1;
   }
 
