@@ -1957,29 +1957,57 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
     }
   }
 
+  const isIncome = Boolean(item?.is_income || sourceType === 'recurring_income' || sourceType === 'monthly_payment_in' || sourceType === 'yearly_income');
   const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
-  const isCleared = isRecurring
-    ? Boolean(dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr))
-    : Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
 
-  const allTxns = appState.data.open_banking_transactions || [];
+  let targetDateStr = dateStr || '';
+  if (!targetDateStr && isRecurring && item?.cleared_dates && mName) {
+    const mMatch = item.cleared_dates.find(d => {
+      const dt = new Date(d);
+      return months[dt.getMonth()] === mName && dt.getFullYear() === appState.currentYear;
+    });
+    if (mMatch) targetDateStr = mMatch;
+  }
+
+  const isCleared = isRecurring
+    ? Boolean(targetDateStr ? (item?.cleared_dates && item.cleared_dates.includes(targetDateStr)) : (item?.cleared_dates && item.cleared_dates.some(d => months[new Date(d).getMonth()] === mName && new Date(d).getFullYear() === appState.currentYear)))
+    : Boolean(item?.status === 'paid' || item?.auto_cleared || (targetDateStr && item?.cleared_dates && item.cleared_dates.includes(targetDateStr)));
+
   const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
+  const allTxns = (appState.data.open_banking_transactions || []).filter(t => {
+    const rawAmt = Number(t.amount) || 0;
+    if (Math.abs(rawAmt) < 0.01) return false;
+    return isIncome ? (rawAmt > 0) : (rawAmt < 0);
+  });
+
   const sortedTxns = [...allTxns].sort((a, b) => {
-    if (dateStr && a.booking_date && b.booking_date) {
-      const targetTime = new Date(dateStr).getTime();
+    const aAmt = Math.abs(Number(a.amount) || 0);
+    const bAmt = Math.abs(Number(b.amount) || 0);
+    const aAmtMatch = Math.abs(aAmt - amt) < 0.05;
+    const bAmtMatch = Math.abs(bAmt - amt) < 0.05;
+
+    const aPayee = (a.payee_name || a.merchant_name || a.description || '').toLowerCase();
+    const bPayee = (b.payee_name || b.merchant_name || b.description || '').toLowerCase();
+    const aNameMatch = cleanDesc && aPayee.replace(/[^a-z0-9]/g, '').includes(cleanDesc);
+    const bNameMatch = cleanDesc && bPayee.replace(/[^a-z0-9]/g, '').includes(cleanDesc);
+
+    const aExact = aAmtMatch && aNameMatch;
+    const bExact = bAmtMatch && bNameMatch;
+    if (aExact && !bExact) return -1;
+    if (!aExact && bExact) return 1;
+
+    const aEither = aAmtMatch || aNameMatch;
+    const bEither = bAmtMatch || bNameMatch;
+    if (aEither && !bEither) return -1;
+    if (!aEither && bEither) return 1;
+
+    if (targetDateStr && a.booking_date && b.booking_date) {
+      const targetTime = new Date(targetDateStr).getTime();
       const aTimeDiff = Math.abs(new Date(a.booking_date).getTime() - targetTime);
       const bTimeDiff = Math.abs(new Date(b.booking_date).getTime() - targetTime);
-      const aNear = aTimeDiff <= (14 * 86400000);
-      const bNear = bTimeDiff <= (14 * 86400000);
-      if (aNear && !bNear) return -1;
-      if (!aNear && bNear) return 1;
-      if (aNear && bNear) return aTimeDiff - bTimeDiff;
+      return aTimeDiff - bTimeDiff;
     }
-    const aAmtDiff = Math.abs(Math.abs(Number(a.amount) || 0) - amt);
-    const bAmtDiff = Math.abs(Math.abs(Number(b.amount) || 0) - amt);
-    if (aAmtDiff < 0.05 && bAmtDiff >= 0.05) return -1;
-    if (bAmtDiff < 0.05 && aAmtDiff >= 0.05) return 1;
     return new Date(b.booking_date || 0) - new Date(a.booking_date || 0);
   });
 
@@ -1992,14 +2020,14 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
           </div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
             Status: <strong style="color:${isCleared ? 'var(--green)' : 'var(--amber)'};">${isCleared ? '✓ Cleared / Paid' : '⚠️ Due'}</strong>
-            ${item?.matched_payee ? ` • Matched with <em>${item.matched_payee}</em> (${item.matched_date || ''})` : ''}
+            ${(isCleared && item?.matched_payee) ? ` • Matched with <em>${item.matched_payee}</em> (${targetDateStr || item.matched_date || ''})` : ''}
           </div>
         </div>
         <div style="display:flex; gap:6px;">
           ${isCleared ? `
-            <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">❌ Set as Due / Un-match</button>
+            <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${targetDateStr || ''}'); window.budgetApp.closeModal();">❌ Set as Due / Un-match</button>
           ` : `
-            <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">⚡ Mark Cleared (Manual)</button>
+            <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${targetDateStr || ''}'); window.budgetApp.closeModal();">⚡ Mark Cleared (Manual)</button>
           `}
         </div>
       </div>
@@ -2011,15 +2039,15 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
         </div>
         <div id="billMatchTxnList" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--border); border-radius:6px; padding:6px; background:#0c0d14;">
           ${sortedTxns.length === 0 ? `
-            <div style="font-size:11px; color:var(--text-muted); text-align:center; padding:16px;">No Open Banking transactions available. Run a Sync in Settings first.</div>
+            <div style="font-size:11px; color:var(--text-muted); text-align:center; padding:16px;">No matching Open Banking transactions available. Run a Sync in Settings first.</div>
           ` : sortedTxns.map(t => {
             const tAmt = Math.abs(Number(t.amount) || 0);
             const isAmtMatch = Math.abs(tAmt - amt) <= 0.05;
             const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
             const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
             const isRecMatch = isAmtMatch || isNameMatch;
-            const isCurrentMatch = (sourceType === 'recurring_income' || sourceType === 'recurring_payment' || Boolean(dateStr))
-              ? Boolean(dateStr && t.booking_date && t.booking_date.startsWith(dateStr) && (t.matched_bill_id === desc || item?.matched_txn_id === t.transaction_id))
+            const isCurrentMatch = (isRecurring || Boolean(targetDateStr))
+              ? Boolean(targetDateStr && t.booking_date && t.booking_date.startsWith(targetDateStr) && (t.matched_bill_id === desc || item?.matched_txn_id === t.transaction_id))
               : (item?.matched_txn_id === t.transaction_id);
 
             return `
@@ -2038,7 +2066,7 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
                   <span style="font-weight:700; font-size:12px; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'};">
                     ${t.amount < 0 ? '-' : '+'}${curr}${tAmt.toFixed(2)}
                   </span>
-                  <button type="button" class="btn ${isCurrentMatch ? 'secondary' : 'green'}" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.linkBillToTransaction('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', '${t.transaction_id}', '${dateStr || ''}')">
+                  <button type="button" class="btn ${isCurrentMatch ? 'secondary' : 'green'}" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.linkBillToTransaction('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', '${t.transaction_id}', '${targetDateStr || ''}')">
                     ${isCurrentMatch ? 'Re-link' : '🔗 Match & Clear'}
                   </button>
                 </div>

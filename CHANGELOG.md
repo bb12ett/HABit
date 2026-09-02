@@ -5,6 +5,14 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-09-02
+
+### Fixed
+- **Bill Matching Modal & Income/Expense Transaction Isolation**: Filtered manual match transaction list strictly to Incomes for income items (and Expenses for debit items) so debit expenses never appear when matching an income like Child Benefit.
+- **Match Status Consistency in Modal**: Fixed recurring item clearance resolution when opened from the Scheduled Bills tab and eliminated contradictory "Due • Matched with..." labels when an occurrence is not yet cleared.
+
+---
+
 ## [0.1.7] - 2026-09-02
 
 ### Fixed
