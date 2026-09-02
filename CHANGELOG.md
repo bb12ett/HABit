@@ -5,6 +5,13 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-09-02
+
+### Fixed & Enhanced
+- **Current Week Auto-Scroll Alignment**: Updated `scrollToCurrentWeek` to align the scroll viewport with the top of the current week card and its first account (`block: 'start'`) instead of centering the card, ensuring the week header, scheduled items, and primary account are immediately visible without being cut off.
+
+---
+
 ## [0.3.1] - 2026-09-02
 
 ### Added & Enhanced

@@ -680,7 +680,7 @@ export function scrollToCurrentWeek(smooth = true) {
     if (currentWeekEl) {
       currentWeekEl.scrollIntoView({
         behavior: smooth ? 'smooth' : 'auto',
-        block: 'center',
+        block: 'start',
         inline: 'nearest'
       });
       currentWeekEl.classList.remove('week-highlight-pulse');
