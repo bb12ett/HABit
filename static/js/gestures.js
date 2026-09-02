@@ -18,6 +18,11 @@ export function initMobileGestures() {
 
   // 1. TOUCH START ON MAIN BODY
   appBody.addEventListener('touchstart', (e) => {
+    if (appState.globalEditMode) {
+      isPulling = false;
+      isSwiping = false;
+      return;
+    }
     if (!e.touches || e.touches.length !== 1) return;
     const t = e.touches[0];
     startX = t.clientX;
@@ -29,7 +34,7 @@ export function initMobileGestures() {
 
     // Exclude touches starting inside interactive or horizontally scrollable elements
     const target = e.target;
-    if (target.closest('.month-pills-bar, pre, table, .data-table, canvas, input, textarea, select, .calc-widget, #genericModal, #sideDrawer, .dropdown-content')) {
+    if (target.closest('.month-pills-bar, pre, table, .data-table, canvas, input, textarea, select, .calc-widget, #genericModal, #sideDrawer, .dropdown-content, .tile-drag-handle, .forecast-tile-wrapper, .widget-reorder-card, [draggable="true"]')) {
       return;
     }
     isSwiping = true;
@@ -37,6 +42,11 @@ export function initMobileGestures() {
 
   // 2. TOUCH MOVE ON MAIN BODY
   appBody.addEventListener('touchmove', (e) => {
+    if (appState.globalEditMode) {
+      isPulling = false;
+      isSwiping = false;
+      return;
+    }
     if (!e.touches || e.touches.length !== 1) return;
     const t = e.touches[0];
     const diffX = t.clientX - startX;
@@ -62,6 +72,15 @@ export function initMobileGestures() {
 
   // 3. TOUCH END ON MAIN BODY
   appBody.addEventListener('touchend', (e) => {
+    if (appState.globalEditMode) {
+      isPulling = false;
+      isSwiping = false;
+      if (pullContainer) {
+        pullContainer.classList.remove('visible');
+        pullContainer.style.transform = 'translateY(-60px)';
+      }
+      return;
+    }
     const elapsed = Date.now() - startTime;
 
     // A. Handle Pull-to-Refresh Release

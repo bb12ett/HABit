@@ -2476,6 +2476,9 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
   }
   cfg.credit_accounts.filter(c => isAccountIncludedInNet('credit', c.name)).forEach(c => projectedMonthEndNet -= (finalWeekPred.weekCreditSnap[c.name] || 0));
 
+  const projectedMonthEndTotalNet = projectedMonthEndCurrent + (cfg.track_savings ? projectedMonthEndSavings : 0) - projectedMonthEndCredit;
+  const totalStartingTotalNet = totalCurrentOpening + (cfg.track_savings ? totalSavingsOpening : 0) - totalCreditOpeningSpent;
+
   const totalOutgoings = totalDD + totalWeeklySpend;
   const weeklyAvg = schedule.numWeeks > 0 ? totalWeeklySpend / schedule.numWeeks : 0;
 
@@ -2543,6 +2546,8 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
     projectedMonthEndCredit,
     projectedMonthEndSavings,
     projectedMonthEndNet,
+    projectedMonthEndTotalNet,
+    totalStartingTotalNet,
     totalOutgoings,
     weeklyAvg,
     totalAutoPayMonth,

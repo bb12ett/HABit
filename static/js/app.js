@@ -105,7 +105,31 @@ import { renderBillsView } from './views/bills.js';
 import { renderYearOverviewView } from './views/year_overview.js';
 import { renderSettingsView } from './views/settings.js';
 import { renderSpendAnalyticsView } from './views/spend_analytics.js';
-import { renderForecastOverviewView } from './views/forecast_overview.js';
+import {
+  renderForecastOverviewView,
+  flipForecastTile,
+  navigateForecastTile,
+  handleForecastTileClick,
+  handleForecastTilePointerDown,
+  handleForecastTilePointerMove,
+  handleForecastTilePointerUp,
+  handleForecastTilePointerCancel,
+  onForecastTileDragStart,
+  onForecastTileDragOver,
+  onForecastTileDragEnter,
+  onForecastTileDragLeave,
+  onForecastTileDrop,
+  onForecastTileDragEnd,
+  onTouchDragStart,
+  onTouchDragMove,
+  onTouchDragEnd,
+  reorderOverviewTiles,
+  moveOverviewTileOrder,
+  toggleOverviewTileVisibility,
+  resetOverviewTilesToDefault,
+  openOverviewTilesModal,
+  filterOverviewTilesModal
+} from './views/forecast_overview.js';
 
 import {
   openCalculator,
@@ -894,6 +918,28 @@ window.budgetApp = {
   init,
   renderContent,
   renderForecastOverviewView,
+  flipForecastTile,
+  navigateForecastTile,
+  handleForecastTileClick,
+  handleForecastTilePointerDown,
+  handleForecastTilePointerMove,
+  handleForecastTilePointerUp,
+  handleForecastTilePointerCancel,
+  onForecastTileDragStart,
+  onForecastTileDragOver,
+  onForecastTileDragEnter,
+  onForecastTileDragLeave,
+  onForecastTileDrop,
+  onForecastTileDragEnd,
+  onTouchDragStart,
+  onTouchDragMove,
+  onTouchDragEnd,
+  reorderOverviewTiles,
+  moveOverviewTileOrder,
+  toggleOverviewTileVisibility,
+  resetOverviewTilesToDefault,
+  openOverviewTilesModal,
+  filterOverviewTilesModal,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
@@ -1957,6 +2003,16 @@ window.budgetApp = {
 
   toggleGlobalEditMode() {
     appState.globalEditMode = !appState.globalEditMode;
+    if (appState.globalEditMode) {
+      document.body.classList.add('global-edit-mode-active');
+      const pullContainer = document.getElementById('pullToRefreshContainer');
+      if (pullContainer) {
+        pullContainer.classList.remove('visible');
+        pullContainer.style.transform = 'translateY(-60px)';
+      }
+    } else {
+      document.body.classList.remove('global-edit-mode-active');
+    }
     const btn = document.getElementById('globalModeBtn');
     if (btn) {
       const btnIcon = btn.querySelector('.btn-icon');

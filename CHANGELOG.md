@@ -5,6 +5,27 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.4] - 2026-09-02
+
+### Fixed & Enhanced
+- **Projected Net Worth Calculation Consistency**:
+  - Fixed an apples-to-oranges calculation bug on the `Projected Net Worth` overview tile where month-end net worth (which omitted accounts with `include_in_net: false`) was being compared against starting holdings that unconditionally added all savings, causing a phantom deficit equal to the entire savings portfolio.
+  - Aligned Projected Net Worth and starting holdings to evaluate total household financial position across all holdings (Current + Savings - Credit) consistently, accurately reflecting real net worth and monthly net accumulation.
+  - Updated 3-Month Forward Outlook cards to project consolidated net worth identically.
+- **Account Tracking Modal Default Net Check**:
+  - Fixed account tracking checkbox initialization in `openAccountTrackingModal` to use `include_in_net !== false` instead of truthy check, preventing unconfigured accounts from unintentionally saving as excluded from Net Position.
+- **Overview Metric Tile Refinements**:
+  - **Savings Growth**: Formatted negative savings movement cleanly with `-£X.XX` rather than `£-X.XX`.
+  - **Safe-to-Spend Daily Pace**: Dynamically calculates calendar days remaining in the active week when intra-week live pacing is not active.
+  - **Active Week Discretionary Budget**: Added spent and remaining budget breakdown in card subtitle when pacing/actuals are tracked.
+  - **Emergency Runway**: Properly factors overdrafts into liquid reserves calculation and ensures infinite runway (`∞`) renders with positive green styling.
+  - **Savings Rate**: Accurately displays `Projected Deficit: -£X` in red when outflows exceed inflows instead of clamping to zero.
+  - **Upcoming 14-Day Bills**: Improved due-date calculation using calendar day midnight comparisons to prevent late-evening false omissions, and added deduplication.
+- **Tile Customization & Gesture Safety**:
+  - Integrated mobile touch and drag gesture isolation when Global Edit Mode is active.
+
+---
+
 ## [0.3.3] - 2026-09-02
 
 ### Added & Enhanced

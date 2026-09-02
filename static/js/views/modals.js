@@ -299,7 +299,7 @@ export function openAccountTrackingModal() {
                       ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
-                      <input type="checkbox" id="m_net_c_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
+                      <input type="checkbox" id="m_net_c_${idx}" ${conf.include_in_net !== false ? 'checked' : ''}> Include in Net
                     </label>
                   </div>
                 </div>
@@ -352,7 +352,7 @@ export function openAccountTrackingModal() {
                       ` : ''}
                     </div>
                     <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
-                      <input type="checkbox" id="m_net_cr_${idx}" ${conf.include_in_net ? 'checked' : ''}> Include in Net
+                      <input type="checkbox" id="m_net_cr_${idx}" ${conf.include_in_net !== false ? 'checked' : ''}> Include in Net
                     </label>
                   </div>
                 </div>
@@ -403,7 +403,7 @@ export function openAccountTrackingModal() {
                           </select>
                         ` : ''}
                         <label style="font-size:11px; cursor:pointer; display:flex; align-items:center; gap:4px; margin:0; font-weight:600; color:var(--text);">
-                          <input type="checkbox" id="m_net_s_${idx}" ${conf.include_in_net ? 'checked' : ''}> Net
+                          <input type="checkbox" id="m_net_s_${idx}" ${conf.include_in_net !== false ? 'checked' : ''}> Net
                         </label>
                       </div>
                     </div>
