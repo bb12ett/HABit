@@ -126,6 +126,7 @@ import {
   reorderOverviewTiles,
   moveOverviewTileOrder,
   toggleOverviewTileVisibility,
+  toggleOverviewTileExpansion,
   resetOverviewTilesToDefault,
   openOverviewTilesModal,
   filterOverviewTilesModal
@@ -937,6 +938,7 @@ window.budgetApp = {
   reorderOverviewTiles,
   moveOverviewTileOrder,
   toggleOverviewTileVisibility,
+  toggleOverviewTileExpansion,
   resetOverviewTilesToDefault,
   openOverviewTilesModal,
   filterOverviewTilesModal,

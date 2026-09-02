@@ -5,6 +5,17 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.6] - 2026-09-02
+
+### Enhanced
+- **User-Controlled Expandable KPI Cards in Edit Mode**:
+  - Replaced automatic forced expansion of odd-numbered cards with user-controlled expand/contract toggles on every KPI tile in Edit Mode (`globalEditMode`).
+  - Each tile's edit toolbar now features an **`↔️ Expand`** / **`⇤⇥ Shrink`** button allowing users to make any card full-width (`grid-column: 1 / -1`) or standard width.
+  - Added full-width expansion toggles directly inside the "Customize Overview Tiles" modal for quick configuration.
+  - Expansion settings persist across sessions in local storage (`habit_overview_expanded_tiles`) and budget configuration.
+
+---
+
 ## [0.3.5] - 2026-09-02
 
 ### Enhanced

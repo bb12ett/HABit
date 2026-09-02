@@ -292,13 +292,25 @@ export function getOverviewTileConfig() {
     visibleTiles = FORECAST_OVERVIEW_TILES.filter(t => t.defaultVisible).map(t => t.id);
   }
 
-  return { allOrder, visibleTiles };
+  let expandedTiles = cfg.expanded_overview_tiles;
+  if (!expandedTiles || !Array.isArray(expandedTiles)) {
+    try {
+      const local = localStorage.getItem('habit_overview_expanded_tiles');
+      if (local) expandedTiles = JSON.parse(local);
+    } catch (e) {}
+  }
+  if (!expandedTiles || !Array.isArray(expandedTiles)) {
+    expandedTiles = [];
+  }
+
+  return { allOrder, visibleTiles, expandedTiles };
 }
 
 export async function saveOverviewTilePreferences(cfg) {
   try {
     localStorage.setItem('habit_overview_tiles', JSON.stringify(cfg.overview_tiles));
     localStorage.setItem('habit_overview_tile_order', JSON.stringify(cfg.all_overview_tile_order));
+    localStorage.setItem('habit_overview_expanded_tiles', JSON.stringify(cfg.expanded_overview_tiles || []));
   } catch (e) {}
 
   if (typeof saveBudget === 'function' && appState.data) {
@@ -513,8 +525,8 @@ export function renderForecastOverviewView(container) {
     }
   }
 
-  // Get tile order and visibility
-  const { allOrder, visibleTiles } = getOverviewTileConfig();
+  // Get tile order, visibility, and user expansion preferences
+  const { allOrder, visibleTiles, expandedTiles } = getOverviewTileConfig();
 
   // Metrics Data Dictionary for rendering KPI cards
   const metricsData = {
@@ -735,13 +747,13 @@ export function renderForecastOverviewView(container) {
         ${visibleKpiTiles.map((tile, idx) => {
           const m = metricsData[tile.id] || { val: '—', sub: '', tag: tile.title, valClass: '', cardClass: '' };
           const isFlipped = flippedTileIds.has(tile.id);
-          const isLastOdd = (visibleKpiTiles.length % 2 !== 0 && idx === visibleKpiTiles.length - 1);
+          const isExpanded = expandedTiles.includes(tile.id);
 
           return `
-            <div class="forecast-tile-wrapper ${isLastOdd ? 'tile-last-odd' : ''}" 
+            <div class="forecast-tile-wrapper ${isExpanded ? 'tile-expanded' : ''}" 
                  id="tile-wrap-${tile.id}" 
                  data-tile-id="${tile.id}"
-                 data-is-last-odd="${isLastOdd}"
+                 data-is-expanded="${isExpanded}"
                  ${globalEditMode ? `
                    draggable="true"
                    ondragstart="window.budgetApp.onForecastTileDragStart(event, '${tile.id}')"
@@ -766,7 +778,7 @@ export function renderForecastOverviewView(container) {
                   <!-- EDIT MODE CONTROLS (only when active) -->
                   ${globalEditMode ? `
                     <div class="tile-edit-bar">
-                      <div style="display:flex; align-items:center; gap:6px;">
+                      <div style="display:flex; align-items:center; gap:5px; flex-wrap:wrap;">
                         <span class="tile-drag-handle" 
                               title="Drag to reorder" 
                               draggable="true"
@@ -776,6 +788,9 @@ export function renderForecastOverviewView(container) {
                         </span>
                         <button type="button" class="tile-edit-btn" onclick="event.stopPropagation(); window.budgetApp.moveOverviewTileOrder('${tile.id}', -1)" ${idx === 0 ? 'disabled' : ''} title="Move Left / Up">⬅️</button>
                         <button type="button" class="tile-edit-btn" onclick="event.stopPropagation(); window.budgetApp.moveOverviewTileOrder('${tile.id}', 1)" ${idx === visibleKpiTiles.length - 1 ? 'disabled' : ''} title="Move Right / Down">➡️</button>
+                        <button type="button" class="tile-edit-btn expand-btn ${isExpanded ? 'active' : ''}" onclick="event.stopPropagation(); window.budgetApp.toggleOverviewTileExpansion('${tile.id}')" title="${isExpanded ? 'Collapse to standard width' : 'Expand to full width'}">
+                          ${isExpanded ? '⇤⇥ Shrink' : '↔️ Expand'}
+                        </button>
                       </div>
                       <button type="button" class="tile-edit-btn hide-btn" onclick="event.stopPropagation(); window.budgetApp.toggleOverviewTileVisibility('${tile.id}', false)" title="Hide tile">👁️ Hide</button>
                     </div>
@@ -1575,6 +1590,24 @@ export function toggleOverviewTileVisibility(tileId, isVisible) {
   if (container) renderForecastOverviewView(container);
 }
 
+export function toggleOverviewTileExpansion(tileId) {
+  const cfg = getSettings();
+  const { expandedTiles } = getOverviewTileConfig();
+
+  let newExpanded = [...expandedTiles];
+  if (newExpanded.includes(tileId)) {
+    newExpanded = newExpanded.filter(id => id !== tileId);
+  } else {
+    newExpanded.push(tileId);
+  }
+
+  cfg.expanded_overview_tiles = newExpanded;
+  saveOverviewTilePreferences(cfg);
+
+  const container = document.getElementById('appBody');
+  if (container) renderForecastOverviewView(container);
+}
+
 export function resetOverviewTilesToDefault() {
   const cfg = getSettings();
   const allTileIds = FORECAST_OVERVIEW_TILES.map(t => t.id);
@@ -1582,6 +1615,7 @@ export function resetOverviewTilesToDefault() {
 
   cfg.all_overview_tile_order = [...allTileIds];
   cfg.overview_tiles = [...defaultVisible];
+  cfg.expanded_overview_tiles = [];
   saveOverviewTilePreferences(cfg);
 
   const container = document.getElementById('appBody');
@@ -1589,11 +1623,11 @@ export function resetOverviewTilesToDefault() {
 }
 
 export function openOverviewTilesModal() {
-  const { allOrder, visibleTiles } = getOverviewTileConfig();
+  const { allOrder, visibleTiles, expandedTiles } = getOverviewTileConfig();
 
   const bodyHtml = `
     <div style="font-size:12.5px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
-      Customize which tiles and sections appear on your Forecast Overview dashboard. Toggle any card on or off:
+      Customize which tiles and sections appear on your Forecast Overview dashboard. Toggle any card on or off, or expand KPI cards to full-width:
     </div>
 
     <div style="margin-bottom:10px;">
@@ -1605,6 +1639,7 @@ export function openOverviewTilesModal() {
         const tile = FORECAST_OVERVIEW_TILES.find(t => t.id === tileId);
         if (!tile) return '';
         const isChecked = visibleTiles.includes(tileId);
+        const isExpanded = expandedTiles.includes(tileId);
 
         return `
           <div class="overview-modal-tile-row" data-search="${tile.title.toLowerCase()} ${tile.desc.toLowerCase()}" style="background:var(--card-bg); border:1px solid ${isChecked ? 'var(--primary)' : 'var(--border)'}; border-radius:10px; padding:10px 12px; display:flex; align-items:center; justify-content:space-between; gap:10px; box-sizing:border-box;">
@@ -1618,7 +1653,14 @@ export function openOverviewTilesModal() {
                 <div style="font-size:11px; color:var(--text-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${tile.desc}</div>
               </div>
             </div>
-            <span class="md3-chip md3-chip-tonal" style="font-size:9.5px; flex-shrink:0;">${tile.category}</span>
+            <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+              ${tile.type === 'kpi' ? `
+                <button type="button" class="tile-edit-btn expand-btn ${isExpanded ? 'active' : ''}" onclick="window.budgetApp.toggleOverviewTileExpansion('${tile.id}'); const btn = this; const exp = btn.classList.toggle('active'); btn.textContent = exp ? '⇤⇥ Full' : '↔️ Half'; btn.title = exp ? 'Collapse to standard width' : 'Expand to full width';" title="${isExpanded ? 'Collapse to standard width' : 'Expand to full width'}" style="height:22px; font-size:10px;">
+                  ${isExpanded ? '⇤⇥ Full' : '↔️ Half'}
+                </button>
+              ` : ''}
+              <span class="md3-chip md3-chip-tonal" style="font-size:9.5px; flex-shrink:0;">${tile.category}</span>
+            </div>
           </div>
         `;
       }).join('')}
@@ -1681,6 +1723,7 @@ if (typeof window !== 'undefined') {
   window.reorderOverviewTiles = reorderOverviewTiles;
   window.moveOverviewTileOrder = moveOverviewTileOrder;
   window.toggleOverviewTileVisibility = toggleOverviewTileVisibility;
+  window.toggleOverviewTileExpansion = toggleOverviewTileExpansion;
   window.resetOverviewTilesToDefault = resetOverviewTilesToDefault;
   window.openOverviewTilesModal = openOverviewTilesModal;
   window.filterOverviewTilesModal = filterOverviewTilesModal;
