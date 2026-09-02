@@ -126,3 +126,95 @@ export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
     }
   });
 }
+
+let categoryChartInstance = null;
+
+export function destroyCategoryChart() {
+  if (categoryChartInstance) {
+    try {
+      categoryChartInstance.destroy();
+    } catch (e) {
+      console.warn("Category chart destroy error:", e);
+    }
+    categoryChartInstance = null;
+  }
+}
+
+export function renderCategoryDonutChart(canvasEl, categoryList, curr) {
+  if (!canvasEl) return;
+  destroyCategoryChart();
+
+  if (typeof Chart === 'undefined') {
+    canvasEl.parentElement.innerHTML = '<div style="padding:20px; color:var(--amber); text-align:center;">⚠️ Chart engine blocked by browser tracking prevention.</div>';
+    return;
+  }
+
+  const validCategories = (categoryList || []).filter(c => c.totalAmount > 0 && c.category.id !== 'transfers');
+
+  if (!validCategories.length) {
+    const parent = canvasEl.parentElement;
+    parent.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted); font-size:12.5px; text-align:center; padding:30px;">
+        <span style="font-size:32px; margin-bottom:8px;">📊</span>
+        <span>No categorized spend found for this period.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const ctx = canvasEl.getContext('2d');
+  const labels = validCategories.map(c => `${c.category.icon} ${c.category.label}`);
+  const data = validCategories.map(c => Number(c.totalAmount.toFixed(2)));
+  const backgroundColors = validCategories.map(c => c.category.color);
+
+  categoryChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: backgroundColors,
+        borderWidth: 2,
+        borderColor: '#0f172a',
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            color: '#cbd5e1',
+            boxWidth: 12,
+            font: { size: 11, family: 'Inter, -apple-system, sans-serif' },
+            padding: 10
+          }
+        },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: '#475569',
+          borderWidth: 1,
+          padding: 10,
+          callbacks: {
+            label: function(context) {
+              const val = Number(context.raw || 0);
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+              return ` ${curr}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.renderCategoryDonutChart = renderCategoryDonutChart;
+  window.destroyCategoryChart = destroyCategoryChart;
+}

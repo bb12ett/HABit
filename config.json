@@ -3,7 +3,7 @@
   "slug": "habit",
   "description": "A private payday-to-payday household budget and cashflow manager for Home Assistant",
   "url": "https://github.com/bb12ett/HABit",
-  "version": "0.1.2a",
+  "version": "0.1.3",
   "arch": [
     "aarch64",
     "amd64"

@@ -385,6 +385,289 @@ export function renderSettingsView(container) {
         <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addPerson()">+ Add Household Member</button>
       ` : ''}
 
+      <h3 style="margin-top:24px;">⚡ Open Banking & Automated Sync</h3>
+      <div style="margin:10px 0 16px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:700; font-size:13px; color:var(--heading); display:flex; align-items:center; gap:6px;">
+              <span>⚡ Live Bank Connection & Feed</span>
+              ${cfg.open_banking && cfg.open_banking.enabled ? '<span class="badge" style="background:#10b981; color:#fff; font-size:10px;">Active</span>' : '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:10px;">Disabled</span>'}
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.4;">
+              Automatically synchronize bank balances, auto-clear scheduled Direct Debits, and track daily spending.
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:12px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="cfg-openbanking-enabled" ${cfg.open_banking && cfg.open_banking.enabled ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingEnabled(this.checked)"> Enable Open Banking
+            </label>
+          </div>
+        </div>
+
+        ${cfg.open_banking && cfg.open_banking.enabled ? `
+          <div style="border-top:1px dashed var(--border); padding-top:12px; margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:4px;">Integration Provider:</label>
+              <select id="cfg-openbanking-provider" onchange="window.budgetApp.updateOpenBankingProvider(this.value)" style="width:100%; font-weight:600; font-size:12.5px;">
+                <option value="truelayer" ${(!cfg.open_banking.provider || cfg.open_banking.provider === 'truelayer') ? 'selected' : ''}>🟢 TrueLayer (UK - Supported & Verified)</option>
+                <option value="enablebanking" ${cfg.open_banking.provider === 'enablebanking' ? 'selected' : ''}>🧪 Enable Banking (UK & Europe - Experimental)</option>
+                <option value="gocardless" ${cfg.open_banking.provider === 'gocardless' ? 'selected' : ''}>🧪 GoCardless (UK & Europe - Experimental)</option>
+                <option value="simplefin" ${cfg.open_banking.provider === 'simplefin' ? 'selected' : ''}>🧪 SimpleFIN Bridge (US & Canada - Experimental)</option>
+                <option value="file_import" ${cfg.open_banking.provider === 'file_import' ? 'selected' : ''}>📁 Direct Statement Import (Offline CSV / OFX / QIF)</option>
+              </select>
+            </div>
+
+            ${(cfg.open_banking.provider === 'file_import') ? `
+              <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px; margin-bottom:12px;">
+                <div style="font-weight:600; font-size:12px; color:var(--heading); margin-bottom:4px;">📁 Offline Bank Statement Importer</div>
+                <div style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:10px;">
+                  Import your downloaded bank statements (.CSV, .OFX, .QIF) from any bank without registering any API credentials.
+                </div>
+                <button type="button" class="btn green" style="font-size:11.5px; padding:6px 14px;" onclick="window.budgetApp.openBankStatementUploadModal()">📥 Upload Bank Statement</button>
+              </div>
+            ` : `
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">
+                ${(!cfg.open_banking.provider || cfg.open_banking.provider === 'truelayer') ? `
+                  Get free developer credentials from <a href="https://truelayer.com/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">truelayer.com ↗</a> (Fully supported & verified for UK banks and credit cards).
+                ` : cfg.open_banking.provider === 'enablebanking' ? `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> Get free developer credentials from <a href="https://enablebanking.com/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">enablebanking.com ↗</a> (Community tested).
+                ` : cfg.open_banking.provider === 'simplefin' ? `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> Claim a token from <a href="https://bridge.simplefin.org/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">bridge.simplefin.org ↗</a> (\$1.50/month for US/Canada).
+                ` : `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> For existing developer accounts on <a href="https://bankaccountdata.gocardless.com/overview/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">bankaccountdata.gocardless.com ↗</a>.
+                `}
+              </div>
+
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:10px; margin-bottom:12px;">
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    ${cfg.open_banking.provider === 'simplefin' ? 'Access URL or Setup Token:' : cfg.open_banking.provider === 'enablebanking' ? 'Application ID:' : cfg.open_banking.provider === 'truelayer' ? 'Client ID:' : 'Secret ID (Client ID):'}
+                  </label>
+                  <input type="password" id="cfg-openbanking-secret-id" value="${cfg.open_banking.secret_id || ''}" placeholder="${cfg.open_banking.provider === 'simplefin' ? 'https://bridge.simplefin.org/...' : 'e.g. 7a8b9c...'}" style="width:100%;">
+                </div>
+                ${cfg.open_banking.provider !== 'simplefin' ? `
+                  <div>
+                    <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                      ${cfg.open_banking.provider === 'enablebanking' ? 'Application Key / Secret:' : cfg.open_banking.provider === 'truelayer' ? 'Client Secret:' : 'Secret Key:'}
+                    </label>
+                    <input type="password" id="cfg-openbanking-secret-key" value="${cfg.open_banking.secret_key || ''}" placeholder="••••••••••••••••" style="width:100%;">
+                  </div>
+                ` : ''}
+                ${(cfg.open_banking.provider === 'truelayer' || cfg.open_banking.provider === 'enablebanking') ? `
+                  <div>
+                    <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                      Environment:
+                    </label>
+                    <select id="cfg-openbanking-env" style="width:100%; font-size:12px;">
+                      <option value="live" ${cfg.open_banking.environment !== 'sandbox' ? 'selected' : ''}>🟢 Live (Real Bank Accounts)</option>
+                      <option value="sandbox" ${cfg.open_banking.environment === 'sandbox' ? 'selected' : ''}>🟡 Sandbox (Test Mock Banks)</option>
+                    </select>
+                  </div>
+                ` : ''}
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    Auto-Sync Frequency:
+                  </label>
+                  <select id="cfg-openbanking-interval" style="width:100%; font-size:12px;">
+                    <option value="2" ${Number(cfg.open_banking.auto_sync_interval_hours) === 2 ? 'selected' : ''}>Every 2 Hours</option>
+                    <option value="4" ${Number(cfg.open_banking.auto_sync_interval_hours) === 4 ? 'selected' : ''}>Every 4 Hours</option>
+                    <option value="6" ${(!cfg.open_banking.auto_sync_interval_hours || Number(cfg.open_banking.auto_sync_interval_hours) === 6) ? 'selected' : ''}>Every 6 Hours (Recommended)</option>
+                    <option value="12" ${Number(cfg.open_banking.auto_sync_interval_hours) === 12 ? 'selected' : ''}>Every 12 Hours</option>
+                    <option value="24" ${Number(cfg.open_banking.auto_sync_interval_hours) === 24 ? 'selected' : ''}>Once a Day (24 Hours)</option>
+                    <option value="0" ${Number(cfg.open_banking.auto_sync_interval_hours) === 0 ? 'selected' : ''}>Manual Only (Disabled)</option>
+                  </select>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    Registered Redirect URI (Must match developer console exactly):
+                  </label>
+                  <input type="text" id="cfg-openbanking-redirect-uri" value="${cfg.open_banking.redirect_uri || ''}" placeholder="e.g. https://home.bb12ett.uk/ or leave blank for auto-detect" style="width:100%;">
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; margin-top:4px;">
+                    <input type="checkbox" id="cfg-openbanking-auto-checkins" ${cfg.open_banking.auto_update_checkins !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingAutoCheckins(this.checked)">
+                    <span>⚡ <strong>Auto-Update Weekly Check-Ins:</strong> Automatically populate current week's actual balances from live bank accounts</span>
+                  </label>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; margin-top:4px;">
+                    <input type="checkbox" id="cfg-openbanking-live-daily-variance" ${cfg.open_banking.live_daily_variance !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingLiveDailyVariance(this.checked)">
+                    <span>📊 <strong>Live Intra-Week Daily Variance:</strong> Calculate budget pace to the day and factor in cleared vs upcoming scheduled bills for a true live-to-the-day variance</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+                <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.saveOpenBankingKeys()">💾 Save API Keys</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <button type="button" class="btn green" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openBankLinkModal()">+ Connect Bank Account</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openManualAuthCodeModal()">📋 Enter Return Code</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openBankStatementUploadModal()">📥 Import Statement</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Sync Now</button>
+                </div>
+              </div>
+            `}
+
+            ${(cfg.open_banking && (cfg.open_banking.last_sync_status === 'error' || cfg.open_banking.last_sync_status === 'partial_error' || cfg.open_banking.last_sync_error)) ? `
+              <div id="openBankingErrorBanner" style="background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); border-radius:var(--radius-card); padding:10px 14px; margin:12px 0; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:18px;">⚠️</span>
+                  <div>
+                    <div style="font-weight:700; font-size:12.5px; color:var(--red, #ef4444);">
+                      ${cfg.open_banking.last_sync_status === 'partial_error' ? 'Open Banking Partial Sync Notice' : 'Open Banking Sync Error'}
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">
+                      ${cfg.open_banking.last_sync_error || 'A sync attempt failed. Check your bank connection or view the real-time debug log.'}
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openDebugLogModal()">📋 View Log</button>
+                  <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Retry Sync</button>
+                </div>
+              </div>
+            ` : ''}
+
+            <h4 style="font-size:12px; color:var(--heading); margin:12px 0 6px 0;">Connected Bank Accounts (${(cfg.open_banking.linked_accounts || []).length})</h4>
+            <div id="linkedAccountsList" style="display:flex; flex-direction:column; gap:8px;">
+              ${(cfg.open_banking.linked_accounts || []).length === 0 ? `
+                <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:6px 0;">No bank accounts connected yet. Click "+ Connect Bank Account" above to link your first account.</div>
+              ` : (cfg.open_banking.linked_accounts || []).map((acc) => `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:8px 12px; flex-wrap:wrap;">
+                  <div style="display:flex; align-items:center; gap:8px; min-width:180px;">
+                    <div style="width:24px; height:24px; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:rgba(255,255,255,0.08);">
+                      ${acc.institution_logo ? `
+                        <img src="${acc.institution_logo}" style="width:20px; height:20px; border-radius:3px; object-fit:contain;" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" loading="lazy">
+                        <span style="display:none; font-size:12px;">🏛️</span>
+                      ` : `<span style="font-size:12px;">🏛️</span>`}
+                    </div>
+                    <div>
+                      <div style="font-weight:600; font-size:12px; color:var(--heading);">
+                        ${(() => {
+                          const mappedClean = (acc.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim();
+                          const rawName = `${acc.institution_name || 'Bank'} - ${acc.account_name || 'Account'}`;
+                          if (mappedClean) {
+                            return `${mappedClean} <span style="font-weight:normal; font-size:10.5px; color:var(--text-muted);">(${rawName})</span>`;
+                          }
+                          return rawName;
+                        })()}
+                      </div>
+                      <div style="font-size:10px; color:var(--text-muted);">
+                        ${acc.iban_or_masked_num || ''} • 
+                        ${(() => {
+                          const mappedClean = (acc.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim();
+                          const cardObj = (cfg.credit_accounts || []).find(ca => {
+                            const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                            return caName.toLowerCase() === mappedClean.toLowerCase() || caName.toLowerCase() === (acc.mapped_habit_account_id || '').toLowerCase();
+                          });
+                          const isCard = Boolean(cardObj || acc.account_type === 'CARD' || acc.last_available !== undefined || (acc.account_name && acc.account_name.toLowerCase().includes('card')));
+                          if (isCard) {
+                            const debt = Number(acc.last_balance || 0);
+                            const cardLimit = Number(typeof cardObj === 'object' ? (cardObj.limit || acc.credit_limit || 0) : (acc.credit_limit || 0));
+                            const avail = acc.last_available !== undefined && Number(acc.last_available) > 0 ? Number(acc.last_available) : Math.max(0, cardLimit - debt);
+                            return `Debt: ${cfg.currency || '£'}${Math.abs(debt).toFixed(2)} (Available: ${cfg.currency || '£'}${avail.toFixed(2)})`;
+                          }
+                          return `Last Balance: ${cfg.currency || '£'}${Number(acc.last_balance || 0).toFixed(2)}`;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <select onchange="window.budgetApp.updateLinkedAccountMapping('${acc.account_id}', this.value)" style="font-size:11px; padding:3px 6px;" title="Mapped HABit Account">
+                      <option value="">-- Map to HABit Account --</option>
+                      ${(cfg.current_accounts || []).map(ca => {
+                        const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === caName || acc.mapped_habit_account_id === `current:${caName}`);
+                        return `<option value="${caName}" ${isSel ? 'selected' : ''}>Checking: ${caName}</option>`;
+                      }).join('')}
+                      ${(cfg.credit_accounts || []).map(ca => {
+                        const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === caName || acc.mapped_habit_account_id === `credit:${caName}`);
+                        return `<option value="${caName}" ${isSel ? 'selected' : ''}>Credit: ${caName}</option>`;
+                      }).join('')}
+                      ${(cfg.savings_accounts || []).map(sa => {
+                        const saName = typeof sa === 'string' ? sa : (sa.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === saName || acc.mapped_habit_account_id === `savings:${saName}`);
+                        return `<option value="${saName}" ${isSel ? 'selected' : ''}>Savings: ${saName}</option>`;
+                      }).join('')}
+                    </select>
+
+                    ${isMulti ? `
+                      <select onchange="window.budgetApp.updateLinkedAccountOwner('${acc.account_id}', this.value)" style="font-size:11px; padding:3px 6px;" title="Account Owner">
+                        <option value="Joint" ${acc.owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                        ${(cfg.people || []).map(p => `<option value="${p}" ${acc.owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                      </select>
+                    ` : ''}
+
+                    <button type="button" class="del-btn" style="width:24px; height:24px; border-radius:4px;" onclick="window.budgetApp.unlinkAccount('${acc.account_id}')" title="Unlink Bank Account">&times;</button>
+                  </div>
+                </div>
+              `).join('')}
+
+              <div style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer;">
+                    <input type="checkbox" id="cfg-openbanking-debug-logging" ${cfg.open_banking.debug_logging ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingDebugLogging(this.checked)">
+                    <span>🛠️ <strong>Enable Open Banking Debug Logging:</strong> Log detailed API requests, responses, and sync calculations to <code>open_banking_debug.txt</code></span>
+                  </label>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openDebugLogModal()">📄 View Debug Log</button>
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.clearDebugLog()">🗑️ Clear Log</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- SPEND CATEGORIES & CUSTOM RULES PANEL -->
+        <div class="panel" style="margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>🛒</span> Spend Categories & Community Merchant Database
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                HABit uses an open-source merchant dictionary to automatically categorize bank transactions.
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.exportMerchantCategoryRules()">
+                📋 Export Custom Rules
+              </button>
+              <button type="button" class="btn green" style="font-size:11px; padding:4px 12px;" onclick="window.budgetApp.syncCategoriesGitHub()">
+                🌐 Sync from GitHub
+              </button>
+            </div>
+          </div>
+
+          <!-- Custom Merchant Rules List -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+            <div style="font-size:12px; font-weight:600; color:var(--heading); margin-bottom:8px;">
+              Your Personal Merchant Rules (${Object.keys(cfg.merchant_category_rules || {}).length} saved)
+            </div>
+            ${Object.keys(cfg.merchant_category_rules || {}).length === 0 ? `
+              <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:6px 0;">
+                No custom merchant rules saved yet. When you recategorize an unrecognized transaction in Live Spend, you can save custom rules here.
+              </div>
+            ` : `
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                ${Object.entries(cfg.merchant_category_rules || {}).map(([pattern, catId]) => `
+                  <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center;">
+                    <div style="min-width:0; margin-right:8px;">
+                      <div style="font-size:12px; font-weight:600; color:var(--heading); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${pattern}</div>
+                      <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase;">Category: ${catId}</div>
+                    </div>
+                    <button type="button" class="del-btn" style="width:22px; height:22px; border-radius:4px; font-size:12px;" onclick="window.budgetApp.deleteMerchantCategoryRule(this.dataset.rule)" data-rule="${pattern}" title="Delete Rule">&times;</button>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
+
       <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:flex-end;">
         <button class="btn green" onclick="window.budgetApp.saveSettingsForm()">Save Settings</button>
       </div>

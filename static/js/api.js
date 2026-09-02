@@ -102,3 +102,198 @@ export async function setPinAuth(persona, newPin, oldPin = '', enabled = true) {
     return { ok: false, error: e.message };
   }
 }
+
+// ---------------------------------------------------------
+// OPEN BANKING API
+// ---------------------------------------------------------
+
+export async function getOpenBankingStatus() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/status', {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("getOpenBankingStatus error:", e);
+  }
+  return { enabled: false, provider: "gocardless", linked_accounts: [], transaction_count: 0 };
+}
+
+export async function saveOpenBankingConfig(cfg) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/config', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+    return r.ok;
+  } catch (e) {
+    console.error("saveOpenBankingConfig error:", e);
+    return false;
+  }
+}
+
+export async function getOpenBankingInstitutions(country = 'GB') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/institutions?country=' + encodeURIComponent(country), {
+      cache: 'no-store'
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("getOpenBankingInstitutions error:", e);
+  }
+  return { success: false, institutions: [] };
+}
+
+export async function createOpenBankingRequisition(institutionId, redirectUri, institutionName = '', institutionLogo = '', owner = 'Joint') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/requisition/create', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        institution_id: institutionId,
+        redirect_uri: redirectUri,
+        institution_name: institutionName,
+        institution_logo: institutionLogo,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("createOpenBankingRequisition error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+export async function callbackOpenBankingRequisition(requisitionId = null, code = null, state = null, redirectUri = null) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/requisition/callback', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requisition_id: requisitionId,
+        code: code,
+        state: state,
+        redirect_uri: redirectUri
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("callbackOpenBankingRequisition error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+export async function mapOpenBankingAccount(accountId, mappedHabitAccountId, owner) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/accounts/map', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_id: accountId,
+        mapped_habit_account_id: mappedHabitAccountId,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("mapOpenBankingAccount error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+export async function syncOpenBanking() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/sync', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("syncOpenBanking error:", e);
+  }
+  return { status: "error" };
+}
+
+export async function unlinkOpenBanking(accountId = null, requisitionId = null) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/unlink', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, requisition_id: requisitionId })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("unlinkOpenBanking error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+export async function uploadBankStatement(fileContent, filename = 'statement.csv', mappedAccount = '', owner = 'Joint') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/statement/upload', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_content: fileContent,
+        filename,
+        mapped_account: mappedAccount,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("uploadBankStatement error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+export async function fetchCategories() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories', {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("fetchCategories error:", e);
+  }
+  return null;
+}
+
+export async function syncCategoriesFromGitHub() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories/sync', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("syncCategoriesFromGitHub error:", e);
+  }
+  return { success: false };
+}
+
+export async function suggestCategoryMerchant(merchant, category, notes = '') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories/suggest', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ merchant, category, notes })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("suggestCategoryMerchant error:", e);
+  }
+  return { success: false };
+}

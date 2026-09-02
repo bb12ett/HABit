@@ -64,3 +64,15 @@ Bank balances change throughout the week due to everyday debit card spending. Wi
 Easily log transfers between accounts (e.g., moving £300 from *Current Account* to *Emergency Savings*):
 - Automatically records a debit from the source account and a credit to the destination account.
 - Preserves accurate historical cashflow records across all months.
+
+
+---
+
+## ⚡ Live Balance & Transaction Synchronization (Open Banking)
+
+In addition to manual balance check-ins, HABit supports **Automated Bank Feeds & Statement Ingestion**:
+- **55+ Supported Banking Institutions**: Seamlessly connect accounts from Monzo, Barclays, Starling, HSBC, Lloyds, NatWest, Santander, Chase, Amex, and more across UK, US, Ireland, and Europe.
+- **Offline Drag & Drop Import**: Ingest downloaded `.CSV`, `.OFX`, or `.QIF` bank exports directly into target checking or credit accounts with zero third-party API keys.
+- **Live Transactions Drawer**: View real posted debits and credits on each weekly budget card.
+
+For full setup instructions for all providers, see the [Open Banking & Bank Synchronization Guide](Open-Banking-and-Bank-Sync).

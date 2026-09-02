@@ -619,6 +619,10 @@
         </div>
 
         <div class="top-nav-right">
+          <!-- OPEN BANKING SYNC ERROR INDICATOR -->
+          <button id="openBankingSyncErrorBtn" class="btn" style="display:none; background:rgba(239,68,68,0.18); color:var(--red, #ef4444); border:1px solid rgba(239,68,68,0.45); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.handleOpenBankingSyncErrorClick()" title="Open Banking Sync Error. Click to view Settings & Logs.">
+            <span class="btn-icon">⚠️</span><span class="btn-text"> Sync Error</span>
+          </button>
           <!-- USER PROFILE DROPDOWN (Shown when multi-user enabled) -->
           <div class="dropdown" id="userProfileDropdown" style="display:none;">
             <button id="userProfileBtn" class="btn secondary" onclick="window.budgetApp.toggleUserDropdown(event)" title="Active User Profile"><span class="btn-icon">&#128100;</span><span class="btn-text"> <span id="currentUserDisplay">Joint</span> &#9662;</span></button>

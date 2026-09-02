@@ -10,6 +10,7 @@
 
 ### 💰 Core Features
 - [Accounts & Credit Cards](Accounts-and-Credit-Cards)
+- [Open Banking & Bank Sync](Open-Banking-and-Bank-Sync)
 - [Scheduled Bills & Direct Debits](Scheduled-Bills-and-Direct-Debits)
 - [Budgets & Occasions](Budgets-and-Occasions)
 - [Annual Trajectory & Analytics](Annual-Trajectory-and-Analytics)

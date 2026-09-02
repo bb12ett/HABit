@@ -27,13 +27,26 @@ import {
 import {
   fetchBudget,
   saveBudget,
-  resetDatabase
+  resetDatabase,
+  saveOpenBankingConfig,
+  getOpenBankingStatus,
+  getOpenBankingInstitutions,
+  createOpenBankingRequisition,
+  callbackOpenBankingRequisition,
+  mapOpenBankingAccount,
+  syncOpenBanking,
+  unlinkOpenBanking,
+  uploadBankStatement,
+  fetchCategories,
+  syncCategoriesFromGitHub,
+  suggestCategoryMerchant
 } from './api.js';
 
 import {
   calculateMonthSchedule,
   calculateAndSyncRollovers,
-  detectCurrentMonthAndWeek
+  detectCurrentMonthAndWeek,
+  setDynamicCategories
 } from './calculations.js';
 
 import {
@@ -72,7 +85,13 @@ import {
   openQuickWeeklyExpenseModal,
   openQuickBudgetTxModal,
   openPinUnlockModal,
-  openSetPinModal
+  openSetPinModal,
+  openBankLinkModal,
+  openTransactionLedgerModal,
+  openBankStatementUploadModal,
+  openDebugLogModal,
+  openRecategorizeModal,
+  openManualBillMatchModal
 } from './views/modals.js';
 
 import { renderOverviewView } from './views/overview.js';
@@ -81,6 +100,7 @@ import { renderBudgetsView } from './views/budgets.js';
 import { renderBillsView } from './views/bills.js';
 import { renderYearOverviewView } from './views/year_overview.js';
 import { renderSettingsView } from './views/settings.js';
+import { renderSpendAnalyticsView } from './views/spend_analytics.js';
 
 import {
   openCalculator,
@@ -137,6 +157,8 @@ export function updateTopBarTitle() {
     titleEl.innerText = `Budgets ${yr}`;
   } else if (appState.activeTab === 'Bills') {
     titleEl.innerText = `Bills ${yr}`;
+  } else if (appState.activeTab === 'Spend') {
+    titleEl.innerText = `Live Spend ${yr}`;
   } else if (appState.activeTab === 'Settings') {
     titleEl.innerText = 'Settings';
   } else if (appState.activeTab) {
@@ -213,6 +235,27 @@ export function renderUserProfileNav() {
       </div>
     `;
     optionsEl.innerHTML = optsHtml;
+  }
+}
+
+export function renderOpenBankingNavStatus() {
+  const btn = document.getElementById('openBankingSyncErrorBtn');
+  if (!btn) return;
+  const cfg = getSettings();
+  const obCfg = cfg.open_banking || {};
+  const status = obCfg.last_sync_status;
+  const hasError = obCfg.enabled && (status === 'error' || status === 'partial_error' || Boolean(obCfg.last_sync_error));
+
+  if (hasError) {
+    btn.style.display = 'inline-flex';
+    const errText = obCfg.last_sync_error || 'Open Banking Sync Error';
+    btn.title = `⚠️ Open Banking Sync Issue: ${errText}\nClick to open Settings & view debug logs.`;
+    const textSpan = btn.querySelector('.btn-text');
+    if (textSpan) {
+      textSpan.innerText = status === 'partial_error' ? ' Partial Sync' : ' Sync Error';
+    }
+  } else {
+    btn.style.display = 'none';
   }
 }
 
@@ -313,6 +356,7 @@ export function renderNav() {
 
   html += `<button class="tab-btn special ${appState.activeTab === 'Budgets' ? 'active' : ''}" onclick="window.budgetApp.setTab('Budgets')">🎯 Budgets & Occasions</button>`;
   html += `<button class="tab-btn special ${appState.activeTab === 'Bills' ? 'active' : ''}" onclick="window.budgetApp.setTab('Bills')">📅 Scheduled Bills</button>`;
+  html += `<button class="tab-btn special ${appState.activeTab === 'Spend' ? 'active' : ''}" onclick="window.budgetApp.setTab('Spend')">🛒 Live Spend</button>`;
   html += `<button class="tab-btn special ${appState.activeTab === 'Year' ? 'active' : ''}" onclick="window.budgetApp.setTab('Year')">📊 Annual Trajectory</button>`;
   
   const navTabsEl = document.getElementById('navTabs');
@@ -321,8 +365,12 @@ export function renderNav() {
 
 export function renderContent() {
   try {
+    if (typeof reconcileTransactionsWithScheduledBills === 'function' && appState.data) {
+      reconcileTransactionsWithScheduledBills(appState.data);
+    }
     updateTopBarTitle();
     renderUserProfileNav();
+    renderOpenBankingNavStatus();
     if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
       window.budgetApp.updateLockNavBtn();
     }
@@ -352,6 +400,27 @@ export function renderContent() {
         metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">📅 Scheduled & Recurring Bills (${appState.currentYear})</span>`;
       }
       renderBillsView(container);
+      return;
+    }
+    if (appState.activeTab === 'Spend') {
+      if (metaBar) {
+        metaBar.style.display = 'flex';
+        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">🛒 Live Spend & Category Analytics</span>`;
+      }
+      try {
+        if (typeof renderSpendAnalyticsView === 'function') {
+          renderSpendAnalyticsView(container);
+        } else if (typeof window !== 'undefined' && typeof window.renderSpendAnalyticsView === 'function') {
+          window.renderSpendAnalyticsView(container);
+        } else if (window.budgetApp && typeof window.budgetApp.renderSpendAnalyticsView === 'function') {
+          window.budgetApp.renderSpendAnalyticsView(container);
+        } else {
+          container.innerHTML = '<div style="padding:30px; text-align:center; color:var(--red);">⚠️ Live Spend module loading... Please hard refresh (Ctrl + F5).</div>';
+        }
+      } catch (err) {
+        console.error("Error rendering Live Spend:", err);
+        container.innerHTML = `<div style="padding:30px; text-align:center; color:var(--red);">⚠️ Error rendering Live Spend: ${err.message}</div>`;
+      }
       return;
     }
     if (appState.activeTab === 'Year') {
@@ -454,15 +523,19 @@ export async function init() {
     // Setup background auto-reload on focus if container was rebuilt
     if (!window.__hasVersionFocusListener) {
       window.__hasVersionFocusListener = true;
+      let lastVersionCheck = Date.now();
       window.addEventListener('focus', async () => {
         try {
+          const now = Date.now();
+          if (now - lastVersionCheck < 60000) return; // At most once a minute
+          lastVersionCheck = now;
           let p = window.location.pathname;
           if (p.endsWith('index.html')) p = p.slice(0, -10);
           if (!p.endsWith('/')) p += '/';
           const r = await fetch(p + 'api/version', { cache: 'no-store' });
           if (r.ok) {
             const vData = await r.json();
-            if (vData && vData.build_id && window.__BUILD_ID__ && vData.build_id !== window.__BUILD_ID__) {
+            if (vData && vData.build_id && window.__BUILD_ID__ && String(vData.build_id) !== String(window.__BUILD_ID__)) {
               console.log('[BudgetApp] New version detected on server (' + vData.build_id + '). Auto-reloading...');
               window.location.reload(true);
             }
@@ -474,11 +547,60 @@ export async function init() {
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
     }
+
+    // Check for Open Banking redirect callback (OAuth code, req_id, state)
+    try {
+      let searchStr = window.location.search;
+      try {
+        if ((!searchStr || searchStr.length <= 1) && window.top && window.top !== window && window.top.location && window.top.location.search) {
+          searchStr = window.top.location.search;
+        }
+      } catch (topErr) {}
+
+      if (searchStr && searchStr.length > 1) {
+        const urlParams = new URLSearchParams(searchStr);
+        const reqId = urlParams.get('req_id') || urlParams.get('ref');
+        const code = urlParams.get('code');
+        const state = urlParams.get('state') || urlParams.get('session_id');
+
+        if (code || reqId || state) {
+          console.log('[OpenBanking] Handling return callback:', { reqId, code, state });
+          const explicitRedirect = (appState.data?.settings?.open_banking?.redirect_uri || '').trim();
+          const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+          const cbRes = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
+          if (cbRes && cbRes.success) {
+            const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            try {
+              window.history.replaceState({path: cleanUrl}, '', cleanUrl);
+              if (window.top && window.top !== window) {
+                const topClean = window.top.location.protocol + "//" + window.top.location.host + window.top.location.pathname;
+                window.top.history.replaceState({path: topClean}, '', topClean);
+              }
+            } catch (histErr) {}
+            const freshData = await fetchBudget();
+            if (freshData) appState.data = freshData;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[OpenBanking] Callback handling error:', e);
+    }
+
     const cfg = getSettings();
     applyTheme(cfg.theme || 'grey_dark');
 
     bindGlobalEvents();
     initCalculator();
+
+    // Fetch and initialize dynamic categories from API/cache
+    try {
+      const catRes = await fetchCategories();
+      if (catRes && catRes.categories && typeof setDynamicCategories === 'function') {
+        setDynamicCategories(catRes.categories);
+      }
+    } catch (catErr) {
+      console.warn('[Categories] Init categories notice:', catErr);
+    }
 
     if (!cfg.onboarding_complete) {
       startOnboarding();
@@ -490,6 +612,10 @@ export async function init() {
       const detected = detectCurrentMonthAndWeek(appState.currentYear);
       if (detected && detected.month) {
         appState.activeTab = detected.month;
+      }
+
+      if (window.budgetApp && typeof window.budgetApp.applyOpenBankingToCheckins === 'function') {
+        window.budgetApp.applyOpenBankingToCheckins();
       }
 
       calculateAndSyncRollovers();
@@ -531,6 +657,7 @@ export async function init() {
 window.budgetApp = {
   init,
   renderContent,
+  renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
   updateTopBarTitle,
@@ -599,6 +726,772 @@ window.budgetApp = {
       }
       scrollToCurrentWeek(true);
     }
+  },
+
+  openBankLinkModal,
+  openTransactionLedgerModal,
+
+  toggleOpenBankingEnabled(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.enabled = !!enabled;
+    saveOpenBankingConfig({ enabled: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  updateOpenBankingProvider(provider) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.provider = provider;
+    saveOpenBankingConfig({ provider });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  async saveOpenBankingKeys() {
+    const provider = document.getElementById('cfg-openbanking-provider')?.value || 'enablebanking';
+    const env = document.getElementById('cfg-openbanking-env')?.value || 'live';
+    const secId = document.getElementById('cfg-openbanking-secret-id')?.value || '';
+    const secKey = document.getElementById('cfg-openbanking-secret-key')?.value || '';
+    const redirectUri = document.getElementById('cfg-openbanking-redirect-uri')?.value || '';
+    const intervalVal = parseInt(document.getElementById('cfg-openbanking-interval')?.value || '6', 10);
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.provider = provider;
+    cfg.open_banking.environment = env;
+    cfg.open_banking.secret_id = secId.trim();
+    cfg.open_banking.secret_key = secKey.trim();
+    cfg.open_banking.redirect_uri = redirectUri.trim();
+    cfg.open_banking.auto_sync_interval_hours = isNaN(intervalVal) ? 6 : intervalVal;
+
+    await saveOpenBankingConfig({
+      secret_id: secId.trim(),
+      secret_key: secKey.trim(),
+      provider: provider,
+      environment: env,
+      redirect_uri: redirectUri.trim(),
+      auto_sync_interval_hours: isNaN(intervalVal) ? 6 : intervalVal,
+      enabled: true
+    });
+    cfg.open_banking.enabled = true;
+    saveBudget(appState.data);
+    alert('✅ Provider API credentials and auto-sync settings saved successfully!');
+    renderContent();
+  },
+
+  openBankStatementUploadModal() {
+    openBankStatementUploadModal();
+  },
+
+  openManualAuthCodeModal() {
+    openManualAuthCodeModal();
+  },
+
+  async submitManualAuthCode(rawInput) {
+    if (!rawInput || !rawInput.trim()) {
+      alert('Please enter or paste the return URL or authorization code.');
+      return;
+    }
+    const txt = rawInput.trim();
+
+    // Check if the user accidentally pasted the initial auth link instead of the return URL
+    if (txt.includes('auth.truelayer.com') || (txt.includes('response_type=code') && !txt.includes('code='))) {
+      alert('⚠️ Notice: It looks like you pasted the initial bank authorization link instead of the return URL.\n\nPlease complete the bank login in your browser first. Once approved, your bank redirects to a URL containing "?code=...". Copy and paste that return URL here.');
+      return;
+    }
+
+    let code = null;
+    let state = null;
+    let reqId = null;
+    let extractedRedirectUri = null;
+
+    if (txt.includes('?') || txt.includes('&') || txt.includes('http')) {
+      try {
+        const urlObj = txt.startsWith('http') ? new URL(txt) : new URL('https://dummy.local/?' + txt.replace(/^\?/, ''));
+        code = urlObj.searchParams.get('code');
+        state = urlObj.searchParams.get('state') || urlObj.searchParams.get('session_id');
+        reqId = urlObj.searchParams.get('req_id') || urlObj.searchParams.get('ref');
+        if (txt.startsWith('http')) {
+          extractedRedirectUri = urlObj.origin + urlObj.pathname;
+        }
+      } catch (e) {
+        const codeMatch = txt.match(/[?&]code=([^&\s]+)/);
+        if (codeMatch) code = decodeURIComponent(codeMatch[1]);
+        const stateMatch = txt.match(/[?&]state=([^&\s]+)/);
+        if (stateMatch) state = decodeURIComponent(stateMatch[1]);
+      }
+    } else {
+      code = txt;
+    }
+
+    if (!code) {
+      alert('⚠️ No valid authorization code found in the pasted URL. Please make sure the return URL contains "?code=..."');
+      return;
+    }
+
+    const cfg = getSettings();
+    const explicitRedirect = cfg.open_banking?.redirect_uri?.trim();
+    const redirectUri = extractedRedirectUri || explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+
+    const res = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
+    if (res && res.success) {
+      const freshData = await fetchBudget();
+      if (freshData) appState.data = freshData;
+      calculateAndSyncRollovers();
+      closeModal();
+      renderContent();
+      const count = (res.linked_accounts || []).length;
+      alert(`🎉 Successfully connected and linked ${count} bank account${count === 1 ? '' : 's'}!`);
+    } else {
+      alert(`⚠️ Could not register bank account:\n${res?.error || 'Unknown error'}\n\nPlease verify that your Client ID and Client Secret in Settings match your TrueLayer Console.`);
+    }
+  },
+
+  async handleStatementFileSelected(event) {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById('statementUploadStatus');
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.color = 'var(--text-muted)';
+      statusEl.textContent = '⏳ Reading and processing statement file...';
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const content = e.target.result;
+      const targetAcc = document.getElementById('statementTargetAccount')?.value || 'Checking';
+      const owner = document.getElementById('statementOwner')?.value || 'Joint';
+
+      const res = await uploadBankStatement(content, file.name, targetAcc, owner);
+      if (res && res.success) {
+        if (statusEl) {
+          statusEl.style.color = 'var(--green)';
+          statusEl.textContent = `✅ Successfully imported ${res.imported_count} transactions (${res.auto_cleared_count} bills auto-cleared)!`;
+        }
+        await loadRemoteBudget();
+        renderContent();
+        setTimeout(() => {
+          window.budgetApp.closeModal();
+          alert(`✅ Successfully imported ${res.imported_count} transactions!\n⚡ ${res.auto_cleared_count} scheduled Direct Debits were automatically matched & marked Paid.`);
+        }, 800);
+      } else {
+        if (statusEl) {
+          statusEl.style.color = 'var(--red)';
+          statusEl.textContent = `❌ Import failed: ${res.error || 'Invalid file format'}`;
+        }
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  _institutionsCache: [],
+
+  async loadBankInstitutions(country = 'GB') {
+    const listEl = document.getElementById('bankInstitutionsList');
+    if (!listEl) return;
+    listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">Loading supported banks...</div>`;
+
+    const res = await getOpenBankingInstitutions(country);
+    if (res && res.success && res.institutions) {
+      window.budgetApp._institutionsCache = res.institutions;
+      window.budgetApp.renderInstitutionsGrid(res.institutions);
+    } else {
+      listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--red); font-size:12px;">Failed to load institutions: ${res.error || 'Check API keys in Settings'}</div>`;
+    }
+  },
+
+  renderInstitutionsGrid(insts) {
+    const listEl = document.getElementById('bankInstitutionsList');
+    if (!listEl) return;
+    if (!insts || insts.length === 0) {
+      listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">No institutions found matching search.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = insts.map(inst => {
+      const initial = (inst.name || 'B').replace(/[^a-zA-Z0-9]/g, '').charAt(0).toUpperCase() || 'B';
+      const brandColor = inst.color || '#0284c7';
+
+      const logoHtml = inst.logo ? `
+        <div style="position:relative; width:40px; height:40px; display:flex; align-items:center; justify-content:center; margin-bottom:6px;">
+          <img src="${inst.logo}" alt="" style="width:38px; height:38px; border-radius:8px; object-fit:contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" loading="lazy">
+          <div style="display:none; width:38px; height:38px; border-radius:8px; background:${brandColor}; color:#fff; align-items:center; justify-content:center; font-weight:800; font-size:16px; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+            ${initial}
+          </div>
+        </div>
+      ` : `
+        <div style="width:38px; height:38px; border-radius:8px; background:${brandColor}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; margin-bottom:6px; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+          ${initial}
+        </div>
+      `;
+
+      return `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.selectBankInstitution(this.dataset.instid, this.dataset.instname, this.dataset.instlogo)" data-instid="${inst.id}" data-instname="${inst.name || 'Bank'}" data-instlogo="${inst.logo || ''}" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px 6px; border-radius:10px; border:1px solid var(--border); text-align:center; min-height:92px; cursor:pointer; background:var(--panel-bg); transition:transform 0.1s, border-color 0.15s;" onmouseover="this.style.borderColor='var(--curr-border)'" onmouseout="this.style.borderColor='var(--border)'">
+          ${logoHtml}
+          <span style="font-size:11px; font-weight:600; line-height:1.2; color:var(--heading);">${inst.name || 'Bank'}</span>
+        </button>
+      `;
+    }).join('');
+  },
+
+  filterBankList(query) {
+    const q = (query || '').toLowerCase().trim();
+    const all = window.budgetApp._institutionsCache || [];
+    if (!q) {
+      window.budgetApp.renderInstitutionsGrid(all);
+    } else {
+      const filtered = all.filter(i => {
+        const name = (i.name || '').toLowerCase();
+        const id = (i.id || '').toLowerCase();
+        const bic = (i.bic || '').toLowerCase();
+        if (name.includes(q) || id.includes(q) || bic.includes(q)) return true;
+        // Nickname / alias matching
+        if (q === 'amex' && (name.includes('american express') || id.includes('amex'))) return true;
+        if (q.includes('barclay') && (name.includes('barclay') || id.includes('barclay'))) return true;
+        if (q.includes('capital') && (name.includes('capital') || id.includes('capital'))) return true;
+        if (q === 'mbna' && (name.includes('mbna') || id.includes('mbna'))) return true;
+        if (q === 'rbs' && (name.includes('royal bank of scotland') || id.includes('rbos'))) return true;
+        if (q === 'bos' && name.includes('bank of scotland')) return true;
+        if (q === 'boa' && name.includes('bank of america')) return true;
+        if (q === 'citi' && (name.includes('citibank') || name.includes('citi'))) return true;
+        if (q === 'coop' && name.includes('co-operative')) return true;
+        if (q === 'bnp' && name.includes('bnp')) return true;
+        if (q === 'td' && name.includes('td bank')) return true;
+        if (q === 'aib' && name.includes('allied irish')) return true;
+        if (q === 'boi' && name.includes('bank of ireland')) return true;
+        return false;
+      });
+      window.budgetApp.renderInstitutionsGrid(filtered);
+    }
+  },
+
+  changeBankCountry(country) {
+    window.budgetApp.loadBankInstitutions(country);
+  },
+
+  async selectBankInstitution(institutionId, institutionName, institutionLogo) {
+    const owner = document.getElementById('bankLinkOwner')?.value || 'Joint';
+    const cfg = getSettings();
+    const explicitRedirect = cfg.open_banking?.redirect_uri?.trim();
+    const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+
+    const res = await createOpenBankingRequisition(institutionId, redirectUri, institutionName, institutionLogo, owner);
+    if (res && res.success && res.link) {
+      // Break out of Home Assistant Ingress iframe so X-Frame-Options does not block the bank login page
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = res.link;
+          return;
+        }
+      } catch (e) {
+        console.warn('Cross-origin iframe navigation notice:', e);
+      }
+      try {
+        window.location.href = res.link;
+      } catch (e) {
+        window.open(res.link, '_blank');
+      }
+    } else {
+      alert('⚠️ Could not initiate bank authorization: ' + (res.error || 'Unknown error'));
+    }
+  },
+
+  toggleOpenBankingAutoCheckins(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.auto_update_checkins = !!enabled;
+    saveOpenBankingConfig({ auto_update_checkins: !!enabled });
+    if (enabled) {
+      this.applyOpenBankingToCheckins();
+    }
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  toggleOpenBankingLiveDailyVariance(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.live_daily_variance = !!enabled;
+    saveOpenBankingConfig({ live_daily_variance: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  toggleOpenBankingDebugLogging(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.debug_logging = !!enabled;
+    saveOpenBankingConfig({ debug_logging: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  setSpendAnalyticsTimeframe(timeframe) {
+    appState.spendFilterTimeframe = timeframe;
+    renderContent();
+  },
+
+  setSpendAnalyticsAccount(account) {
+    appState.spendFilterAccount = account;
+    renderContent();
+  },
+
+  setSpendCategoryFilter(catId) {
+    appState.spendFilterCategory = (appState.spendFilterCategory === catId) ? 'all' : catId;
+    renderContent();
+  },
+
+  setSpendSearchQuery(query) {
+    appState.spendSearchQuery = query;
+    renderContent();
+  },
+
+  openRecategorizeModal(txnId, merchantName, currentCatId) {
+    openRecategorizeModal(txnId, merchantName, currentCatId);
+  },
+
+  applyOpenBankingToCheckins() {
+    const cfg = getSettings();
+    const obCfg = cfg.open_banking || {};
+    if (!obCfg.enabled || obCfg.auto_update_checkins === false) return false;
+
+    const linked = obCfg.linked_accounts || [];
+    if (!linked.length) return false;
+
+    const currentInfo = detectCurrentMonthAndWeek(appState.currentYear);
+    if (!currentInfo || !currentInfo.month || !currentInfo.week) return false;
+
+    const curMonth = currentInfo.month;
+    const curWeek = currentInfo.week;
+    const actuals = getWeekActuals(curMonth, curWeek);
+    if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
+
+    let updated = false;
+    const currAccounts = cfg.current_accounts || [];
+    const creditAccounts = cfg.credit_accounts || [];
+    const savingsAccounts = cfg.savings_accounts || [];
+
+    for (const item of linked) {
+      const mappedRaw = item.mapped_habit_account_id || '';
+      const mapped = mappedRaw.replace(/^(credit|current|savings):/i, '').trim();
+      const liveBal = item.last_balance;
+      if (!mapped) continue;
+
+      // 1. Current Account
+      const isCurrent = currAccounts.some(a => {
+        const name = typeof a === 'string' ? a : (a.name || '');
+        return name.toLowerCase() === mapped.toLowerCase();
+      });
+      if (isCurrent) {
+        const cObj = currAccounts.find(a => (typeof a === 'string' ? a : (a.name || '')).toLowerCase() === mapped.toLowerCase());
+        const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
+        const fieldKey = `curr_${cName}`;
+        actuals[fieldKey] = Number(liveBal || 0);
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+
+      // 2. Savings Account
+      const isSavings = savingsAccounts.some(s => {
+        const name = typeof s === 'string' ? s : (s.name || '');
+        return name.toLowerCase() === mapped.toLowerCase();
+      });
+      if (isSavings) {
+        const sObj = savingsAccounts.find(s => (typeof s === 'string' ? s : (s.name || '')).toLowerCase() === mapped.toLowerCase());
+        const sName = typeof sObj === 'string' ? sObj : (sObj.name || mapped);
+        const fieldKey = `sav_${sName}`;
+        actuals[fieldKey] = Number(liveBal || 0);
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+
+      // 3. Credit Card
+      const cObj = creditAccounts.find(c => {
+        const name = typeof c === 'string' ? c : (c.name || '');
+        return name.toLowerCase() === mapped.toLowerCase() || name.toLowerCase() === mappedRaw.toLowerCase();
+      });
+      if (cObj) {
+        const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
+        let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
+        if (limit <= 0 && item.credit_limit) {
+          limit = Number(item.credit_limit);
+          if (typeof cObj === 'object') cObj.limit = limit;
+        }
+
+        let debt = Math.abs(Number(liveBal || 0));
+        if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
+          const allTxns = appState.data?.open_banking_transactions || [];
+          const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
+          if (cardTxns.length > 0) {
+            let spentSum = 0;
+            for (const t of cardTxns) {
+              const amt = Number(t.amount || 0);
+              if (amt < 0) spentSum += Math.abs(amt);
+              else if (amt > 0) spentSum -= amt;
+            }
+            if (spentSum > 0) {
+              debt = Math.round(spentSum * 100) / 100;
+              item.last_balance = debt;
+            }
+          }
+        }
+
+        let avail = 0;
+        if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
+          avail = Number(item.last_available);
+        } else if (limit > 0) {
+          avail = Math.max(0, limit - debt);
+        }
+
+        const fieldKey = `c_avail_${cName}`;
+        actuals[fieldKey] = avail;
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      calculateAndSyncRollovers();
+      return true;
+    }
+    return false;
+  },
+
+  async updateLinkedAccountMapping(accountId, mappedHabitAccountId) {
+    const cfg = getSettings();
+    if (!cfg.open_banking) cfg.open_banking = {};
+    if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+
+    const acc = cfg.open_banking.linked_accounts.find(a => String(a.account_id) === String(accountId) || a.account_name === accountId);
+    if (acc) {
+      acc.mapped_habit_account_id = mappedHabitAccountId || null;
+      const cleanName = (mappedHabitAccountId || '').replace(/^(credit|current|savings):/i, '').trim();
+
+      if (appState.data && appState.data.open_banking_transactions) {
+        for (const t of appState.data.open_banking_transactions) {
+          if (String(t.account_id) === String(acc.account_id) || t.account_id === acc.account_name) {
+            t.account_name = cleanName || acc.account_name;
+          }
+        }
+      }
+
+      renderContent();
+      try {
+        await mapOpenBankingAccount(acc.account_id || accountId, mappedHabitAccountId || null, acc.owner || 'Joint');
+      } catch (e) {
+        console.warn("mapOpenBankingAccount error:", e);
+      }
+      this.applyOpenBankingToCheckins();
+      await saveBudget(appState.data);
+      renderContent();
+    }
+  },
+
+  async updateLinkedAccountOwner(accountId, newOwner) {
+    const cfg = getSettings();
+    if (!cfg.open_banking) cfg.open_banking = {};
+    if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+
+    const acc = cfg.open_banking.linked_accounts.find(a => String(a.account_id) === String(accountId) || a.account_name === accountId);
+    if (acc) {
+      acc.owner = newOwner;
+      renderContent();
+      try {
+        await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, newOwner);
+      } catch (e) {
+        console.warn("mapOpenBankingAccount error:", e);
+      }
+      await saveBudget(appState.data);
+      renderContent();
+    }
+  },
+
+  async unlinkAccount(accountId) {
+    if (!confirm('Are you sure you want to disconnect this bank account feed?')) return;
+    await unlinkOpenBanking(accountId);
+    const cfg = getSettings();
+    if (cfg.open_banking && cfg.open_banking.linked_accounts) {
+      cfg.open_banking.linked_accounts = cfg.open_banking.linked_accounts.filter(a => {
+        if (!a.account_id && (!accountId || String(accountId) === 'None' || String(accountId) === 'null')) return false;
+        return String(a.account_id) !== String(accountId);
+      });
+    }
+    await saveBudget(appState.data);
+    renderContent();
+  },
+
+  handleOpenBankingSyncErrorClick() {
+    this.openDrawer('settings');
+    setTimeout(() => {
+      const el = document.getElementById('openBankingErrorBanner') || document.getElementById('linkedAccountsList') || document.getElementById('cfg-openbanking-provider');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+  },
+
+  async triggerOpenBankingSync() {
+    const res = await syncOpenBanking();
+    const freshData = await fetchBudget();
+    if (freshData) appState.data = freshData;
+    this.applyOpenBankingToCheckins();
+    calculateAndSyncRollovers();
+    renderContent();
+
+    if (res && res.status === 'success') {
+      alert(`✅ Synchronized ${res.synced_accounts || 0} accounts (${res.transactions_added || 0} new transactions).\n⚡ Live check-in balances have been updated for this week!`);
+    } else if (res && res.status === 'partial_error') {
+      alert(`⚠️ Partial Sync Notice:\nSynchronized ${res.synced_accounts || 0} of ${res.total_accounts || 0} accounts.\n${res.error || ''}`);
+    } else if (res && res.status === 'error') {
+      alert(`❌ Open Banking Sync Failed:\n${res.error || 'Unable to communicate with provider API.'}\n\nPlease check your bank authorization or view the debug log in Settings.`);
+    } else if (res && res.status === 'disabled') {
+      alert('Notice: Open Banking is currently disabled in Settings.');
+    } else {
+      alert('Notice: ' + (res?.status || 'Sync completed'));
+    }
+  },
+
+  findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    const mName = months.includes(monthName) ? monthName : (appState.activeTab || 'Jan');
+    const yData = getYearData();
+    const mData = getMonthData(mName);
+    const cfg = getSettings();
+    const amt = Number(billAmount) || 0;
+
+    const isMatch = (cand) => cand && (!billDesc || cand.desc === billDesc || cand.name === billDesc || (cand.rawDesc && cand.rawDesc === billDesc));
+
+    if (sourceType === 'direct_debit' && mData.direct_debits) {
+      if (sourceIdx !== undefined && isMatch(mData.direct_debits[sourceIdx])) return mData.direct_debits[sourceIdx];
+    } else if ((sourceType === 'payments_in' || sourceType === 'monthly_payment_in') && mData.payments_in) {
+      if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) return mData.payments_in[sourceIdx];
+    } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
+      if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
+    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'recurring_payment') {
+      const recurring = yData.recurring_payments || cfg.recurring_payments || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
+    } else if (sourceType === 'recurring_income') {
+      const recurring = yData.recurring_incomes || cfg.recurring_incomes || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
+    } else if (sourceType === 'budget_bill' || sourceType === 'budget') {
+      for (const b of (yData.yearly_budgets || [])) {
+        for (const t of (b.transactions || [])) {
+          const combined = `🎯 ${b.name}: ${t.desc || ''}`.trim();
+          if (t.desc === billDesc || combined === billDesc || (dateStr && t.date === dateStr) || Math.abs((Number(t.amount)||0) - amt) < 0.05) {
+            return t;
+          }
+        }
+        if (b.name && billDesc && billDesc.includes(b.name)) return b;
+      }
+    } else if (sourceType === 'birthday' || sourceType === 'birthdays') {
+      for (const b of (yData.birthdays || cfg.birthdays || [])) {
+        for (const t of (b.transactions || [])) {
+          if (t.desc === billDesc || (dateStr && t.date === dateStr)) {
+            return t;
+          }
+        }
+        if (b.name && billDesc && billDesc.includes(b.name)) return b;
+      }
+    }
+
+    if (billDesc) {
+      const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+
+      let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
+          || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
+      if (item) return item;
+
+      for (const b of (yData.yearly_budgets || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          const combinedLow = `${bNameLow} ${tDescLow}`;
+          if (combinedLow.includes(cleanTarget) || cleanTarget.includes(tDescLow) || cleanTarget.includes(bNameLow)) {
+            return t;
+          }
+        }
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          return b;
+        }
+      }
+
+      for (const b of (yData.birthdays || cfg.birthdays || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          if (tDescLow && cleanTarget.includes(tDescLow)) {
+            return t;
+          }
+        }
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          return b;
+        }
+      }
+    }
+
+    return null;
+  },
+
+  toggleScheduledBillCleared(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    const item = this.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr);
+
+    if (!item) {
+      alert('Could not find scheduled item.');
+      return;
+    }
+
+    const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
+    const isCleared = Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
+
+    if (isCleared) {
+      item.status = 'due';
+      item.auto_cleared = false;
+      item.manually_cleared = false;
+      item.matched_txn_id = null;
+      item.matched_date = null;
+      item.matched_payee = null;
+      if (occDateStr && item.cleared_dates) {
+        item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+      }
+      const allTxns = appState.data.open_banking_transactions || [];
+      allTxns.forEach(t => {
+        if (t.matched_bill_id === (item.desc || billDesc)) {
+          t.matched_bill_id = null;
+          t.auto_cleared = false;
+        }
+      });
+    } else {
+      item.status = 'paid';
+      item.auto_cleared = true;
+      item.manually_cleared = true;
+      item.matched_date = occDateStr;
+      if (occDateStr) {
+        item.cleared_dates = item.cleared_dates || [];
+        if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+      }
+    }
+
+    calculateAndSyncRollovers();
+    renderContent();
+    saveBudget(appState.data);
+  },
+
+  openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    return openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr);
+  },
+
+  linkBillToTransaction(sourceType, sourceIdx, monthName, billDesc, transactionId, dateStr) {
+    const item = this.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, null, dateStr);
+    const allTxns = appState.data.open_banking_transactions || [];
+    const txn = allTxns.find(t => String(t.transaction_id) === String(transactionId));
+
+    if (item && txn) {
+      item.status = 'paid';
+      item.auto_cleared = true;
+      item.manually_cleared = true;
+      item.matched_txn_id = txn.transaction_id;
+      item.matched_date = txn.booking_date;
+      item.matched_amount = Math.abs(txn.amount);
+      item.matched_payee = txn.payee_name || txn.merchant_name;
+      const targetDate = dateStr || txn.booking_date;
+      if (targetDate) {
+        item.cleared_dates = item.cleared_dates || [];
+        if (!item.cleared_dates.includes(targetDate)) item.cleared_dates.push(targetDate);
+      }
+      txn.matched_bill_id = item.desc || billDesc;
+      txn.auto_cleared = true;
+      txn.manually_linked = true;
+    }
+
+    calculateAndSyncRollovers();
+    closeModal();
+    renderContent();
+    saveBudget(appState.data);
+  },
+
+  filterBillMatchTxns(query) {
+    const q = (query || '').toLowerCase().trim();
+    const rows = document.querySelectorAll('#billMatchTxnList .bill-match-row');
+    rows.forEach(r => {
+      const searchData = (r.getAttribute('data-search') || '').toLowerCase();
+      r.style.display = (!q || searchData.includes(q)) ? 'flex' : 'none';
+    });
+  },
+
+  async clearDebugLog() {
+    if (!confirm('Clear the Open Banking debug log file?')) return;
+    try {
+      const r = await fetch(getBaseApiUrl() + 'api/openbanking/debug/clear', { method: 'POST' });
+      const res = await r.json();
+      if (res && res.success) {
+        alert('Debug log cleared.');
+      }
+    } catch (e) {
+      alert('Error clearing debug log: ' + e.message);
+    }
+  },
+
+  async openDebugLogModal() {
+    return openDebugLogModal();
+  },
+
+  async copyDebugLog() {
+    const c = document.getElementById('debugLogContainer');
+    if (c && c.innerText) {
+      try {
+        await navigator.clipboard.writeText(c.innerText);
+        alert('Copied debug log to clipboard!');
+      } catch (e) {
+        // Fallback selection
+        const range = document.createRange();
+        range.selectNodeContents(c);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        alert('Copied debug log to clipboard!');
+      }
+    }
+  },
+
+  async downloadDebugLog() {
+    try {
+      const url = getBaseApiUrl() + 'api/openbanking/debug/log';
+      const r = await fetch(url, { cache: 'no-store' });
+      const text = await r.text();
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'open_banking_debug.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      alert('Error downloading debug log: ' + e.message);
+    }
+  },
+
+  filterTxnLedger(query) {
+    const q = (query || '').toLowerCase().trim();
+    const rows = document.querySelectorAll('#txnLedgerList .txn-row');
+    rows.forEach(r => {
+      const text = r.textContent.toLowerCase();
+      r.style.display = (!q || text.includes(q)) ? 'flex' : 'none';
+    });
   },
 
   setSubTab(subTabName) {
@@ -3392,6 +4285,102 @@ window.budgetApp = {
     if (confirm("Are you sure you want to completely RESET all data to default? This cannot be undone!")) {
       await resetDatabase();
       window.location.reload();
+    }
+  },
+
+  async applyRecategorizationFromModal() {
+    const pending = this._pendingRecategorize || {};
+    const txnId = pending.txnId;
+    const originalMerchant = pending.merchantName || '';
+    const selEl = document.getElementById('modalRecategorizeSelect');
+    const inputEl = document.getElementById('modalRecatMerchantInput');
+    const saveRuleEl = document.getElementById('modalSaveMerchantRule');
+    const suggestEl = document.getElementById('modalSuggestToGitHub');
+
+    if (!selEl) return;
+    const targetCatId = selEl.value;
+    const pattern = (inputEl ? inputEl.value : originalMerchant).toLowerCase().trim();
+    const shouldSaveRule = saveRuleEl ? saveRuleEl.checked : true;
+    const shouldSuggest = suggestEl ? suggestEl.checked : false;
+
+    const allTxns = appState.data?.open_banking_transactions || [];
+
+    // 1. Direct match on the specific transaction
+    if (txnId) {
+      const match = allTxns.find(t => String(t.transaction_id) === String(txnId));
+      if (match) {
+        match.category = targetCatId;
+      }
+    }
+
+    // 2. Save rule and update all matching transactions (checking payee_name, raw_info, merchant_name, creditor_name, description)
+    if (shouldSaveRule && pattern) {
+      if (!appState.data.settings) appState.data.settings = {};
+      if (!appState.data.settings.merchant_category_rules) {
+        appState.data.settings.merchant_category_rules = {};
+      }
+      appState.data.settings.merchant_category_rules[pattern] = targetCatId;
+
+      // Retroactively update matching transactions across all possible descriptor fields
+      allTxns.forEach(t => {
+        const full = `${t.payee_name || ''} ${t.raw_info || ''} ${t.merchant_name || ''} ${t.creditor_name || ''} ${t.description || ''}`.toLowerCase();
+        if (full.includes(pattern)) {
+          t.category = targetCatId;
+        }
+      });
+    }
+
+    if (shouldSuggest && pattern) {
+      try {
+        if (typeof suggestCategoryMerchant === 'function') {
+          suggestCategoryMerchant(pattern, targetCatId).catch(() => {});
+        }
+      } catch (e) {}
+    }
+
+    closeModal();
+    this._pendingRecategorize = null;
+    await saveBudget(appState.data);
+    renderContent();
+  },
+
+  async syncCategoriesGitHub() {
+    try {
+      const res = await syncCategoriesFromGitHub();
+      if (res && res.success) {
+        if (res.categories && typeof setDynamicCategories === 'function') {
+          setDynamicCategories(res.categories);
+        }
+        alert(`✅ Successfully synced ${res.count || 'latest'} categories and merchants from GitHub!`);
+      } else {
+        alert("Notice: Could not reach GitHub to sync categories. Using current local cache.");
+      }
+    } catch (e) {
+      alert("Notice: GitHub sync failed: " + e.message);
+    }
+    renderContent();
+  },
+
+  async deleteMerchantCategoryRule(merchantKey) {
+    if (confirm(`Delete custom rule for "${merchantKey}"?`)) {
+      if (appState.data?.settings?.merchant_category_rules) {
+        delete appState.data.settings.merchant_category_rules[merchantKey];
+        renderContent();
+        if (getSettings().onboarding_complete) {
+          await saveBudget(appState.data);
+        }
+      }
+    }
+  },
+
+  async exportMerchantCategoryRules() {
+    const rules = appState.data?.settings?.merchant_category_rules || {};
+    const jsonStr = JSON.stringify(rules, null, 2);
+    try {
+      await navigator.clipboard.writeText(jsonStr);
+      alert("📋 Custom merchant category rules copied to clipboard in JSON format!");
+    } catch (e) {
+      prompt("Copy your custom rules JSON:", jsonStr);
     }
   }
 };

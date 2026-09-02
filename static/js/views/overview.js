@@ -13,7 +13,7 @@ function formatCheckInTimestamp(isoStr) {
 }
 
 import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner, isUserUnlocked, hasPersonPin, getActiveUser, isAccountVisibleToActiveUser } from '../state.js';
-import { calculateMonthSchedule, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek, getDeductionSalaryForMonth, getPaydaysForSchedule } from '../calculations.js';
+import { calculateMonthSchedule, calculateLiveDailyPacing, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek, getDeductionSalaryForMonth, getPaydaysForSchedule } from '../calculations.js';
 
 export function renderOverviewView(container) {
   const cfg = getSettings();
@@ -153,9 +153,10 @@ export function renderOverviewView(container) {
       else wExpenseSum += amt;
     });
 
-    const allYearlyBills = getYearData().yearly_recurring || [];
-    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-    const allScheduledBills = [...(mData.direct_debits || []), ...allYearlyBills, ...budgetBillsThisMonth];
+    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = (getYearData().yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
+    const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
     const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
@@ -167,8 +168,9 @@ export function renderOverviewView(container) {
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
     // Scheduled Payments In / Inflows
-    const allYearlyIncome = getYearData().yearly_income || [];
-    const allScheduledIncomes = [...(mData.payments_in || []), ...allYearlyIncome];
+    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = (getYearData().yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
     const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
@@ -698,29 +700,45 @@ export function renderOverviewView(container) {
                           ${hasScheduled ? `
                             <div class="col-scheduled-section">
                               <div style="font-size:10px; font-weight:bold; color:var(--curr-border); text-transform:uppercase; margin-bottom:3px;">📅 Scheduled Items:</div>
-                              ${colIncomes.map(i => {
+                              ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
+                                const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const isCleared = Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
+                                const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
+                                const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
+                                const cleanDesc = (i.rawDesc || i.desc || '').replace(/'/g, "\\'");
+                                const sType = i.source_type || 'monthly_payment_in';
+                                const sIdx = i.source_idx !== undefined ? i.source_idx : iIdx;
+                                const statusBadge = `<button type="button" class="badge" style="font-size:9px; background:${isCleared ? 'rgba(16,185,129,0.25)' : (isPastDate ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.08)')}; color:${isCleared ? 'var(--green)' : (isPastDate ? 'var(--amber)' : 'var(--text-muted)')}; border:1px solid ${isCleared ? 'rgba(16,185,129,0.4)' : (isPastDate ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.15)')}; padding:1px 5px; margin-left:3px; cursor:pointer;" onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${i.amount || 0}, '${occDateStr}')" title="${isCleared ? 'Cleared' + (i.matched_payee ? ' (' + i.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">${isCleared ? '✓ Cleared' : (isPastDate ? '⚠️ Due' : '⏳ Upcoming')}</button>${globalEditMode ? `<button type="button" class="btn secondary" style="height:17px; width:17px; font-size:8.5px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:2px;" onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${i.amount || 0}, '${occDateStr}')" title="Match with Bank Transaction">🔗</button>` : ''}`;
                                 if (i.isMovable) {
                                   if (!globalEditMode) {
-                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer; background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" onclick="window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')" title="Click to reschedule or bump forward"><span>📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} <span class="badge" style="font-size:9px; background:rgba(16,185,129,0.2); color:var(--green); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
+                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer; background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" onclick="window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')" title="Click to reschedule or bump forward"><span>📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge} <span class="badge" style="font-size:9px; background:rgba(16,185,129,0.2); color:var(--green); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
                                   } else {
-                                    return `<div class="col-scheduled-item recurring item-entry-sched" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${i.source_idx}, '${activeTab}', '${w}', 'income')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> 📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')">↔</button></div></div>`;
+                                    return `<div class="col-scheduled-item recurring item-entry-sched" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${i.source_idx}, '${activeTab}', '${w}', 'income')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> 📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')">↔</button></div></div>`;
                                   }
                                 } else {
-                                  return `<div class="col-scheduled-item" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);"><span>📥 ${i.desc} (${i.actualDateStr}) ${holidayBadge}</span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
+                                  return `<div class="col-scheduled-item" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);"><span>📥 ${i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge}</span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
                                 }
                               }).join('')}
-                              ${colDDs.map(d => {
-  if (d.isMovable) {
-    if (!globalEditMode) {
-      return `<div class="col-scheduled-item recurring" style="cursor:pointer;" onclick="window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')" title="Click to reschedule or bump forward"><span>${d.desc} (${d.actualDateStr}) <span class="badge" style="font-size:9px; background:rgba(56,189,248,0.2); color:var(--curr-border); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
-    } else {
-      return `<div class="col-scheduled-item recurring item-entry-sched" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${d.source_idx}, '${activeTab}', '${w}')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> ${d.desc} (${d.actualDateStr})</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')">↔</button></div></div>`;
-    }
-  } else {
-    return `<div class="col-scheduled-item"><span>${d.desc} (${d.actualDateStr})</span><span style="color:var(--red);">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
-  }
-}).join('')}
+                              ${colDDs.map((d, dIdx) => {
+                                const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const isCleared = Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
+                                const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
+                                const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
+                                const cleanDesc = (d.rawDesc || d.desc || '').replace(/'/g, "\\'");
+                                const sType = d.source_type || 'direct_debit';
+                                const sIdx = d.source_idx !== undefined ? d.source_idx : dIdx;
+                                const statusBadge = `<button type="button" class="badge" style="font-size:9px; background:${isCleared ? 'rgba(16,185,129,0.25)' : (isPastDate ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.08)')}; color:${isCleared ? 'var(--green)' : (isPastDate ? 'var(--amber)' : 'var(--text-muted)')}; border:1px solid ${isCleared ? 'rgba(16,185,129,0.4)' : (isPastDate ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.15)')}; padding:1px 5px; margin-left:3px; cursor:pointer;" onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${d.amount || 0}, '${occDateStr}')" title="${isCleared ? 'Cleared' + (d.matched_payee ? ' (' + d.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">${isCleared ? '✓ Cleared' : (isPastDate ? '⚠️ Due' : '⏳ Upcoming')}</button>${globalEditMode ? `<button type="button" class="btn secondary" style="height:17px; width:17px; font-size:8.5px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:2px;" onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${d.amount || 0}, '${occDateStr}')" title="Match with Bank Transaction">🔗</button>` : ''}`;
+                                if (d.isMovable) {
+                                  if (!globalEditMode) {
+                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer;" onclick="window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')" title="Click to reschedule or bump forward"><span>${d.desc} (${d.actualDateStr}) ${statusBadge} <span class="badge" style="font-size:9px; background:rgba(56,189,248,0.2); color:var(--curr-border); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
+                                  } else {
+                                    return `<div class="col-scheduled-item recurring item-entry-sched" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${d.source_idx}, '${activeTab}', '${w}')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> ${d.desc} (${d.actualDateStr}) ${statusBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')">↔</button></div></div>`;
+                                  }
+                                } else {
+                                  return `<div class="col-scheduled-item"><span>${d.desc} (${d.actualDateStr}) ${statusBadge}</span><span style="color:var(--red);">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
+                                }
+                              }).join('')}
                               ${colSavingsIn.map(d => `<div class="col-scheduled-item transfer"><span>➔ Transfer from ${d.desc}</span><span style="color:var(--purple); font-weight:bold;">+${curr}${Number(d.amount).toFixed(2)}</span></div>`).join('')}
                               ${colAutoPaysOut.map(a => `<div class="col-scheduled-item autopay-out"><span>💳 Auto-Pay to ${a.card}</span><span style="color:var(--red);">-${curr}${Number(a.amount).toFixed(2)}</span></div>`).join('')}
                               ${colAutoPaysIn.map(a => `<div class="col-scheduled-item autopay-in"><span>✓ Auto-Pay payment</span><span style="color:var(--green);">+${curr}${Number(a.amount).toFixed(2)}</span></div>`).join('')}
@@ -797,9 +815,11 @@ export function renderOverviewView(container) {
                               const val = actuals[fieldKey];
                               const hasVal = (val !== undefined && val !== "" && val !== null);
                               const ts = actuals._timestamps && actuals._timestamps[fieldKey];
+                              const source = actuals._sources && actuals._sources[fieldKey];
+                              const isAuto = source === 'open_banking';
                               const tsHtml = (hasVal && ts) ? `
                                 <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; gap:3px;">
-                                  <span>🕒</span><span>${formatCheckInTimestamp(ts)}</span>
+                                  ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : '<span>🕒</span>'}<span>${formatCheckInTimestamp(ts)}</span>
                                 </div>
                               ` : '';
 
@@ -849,18 +869,78 @@ export function renderOverviewView(container) {
                 </div>
               `}
 
-              <div class="week-summary-bar">
-                <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-                  <span>Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
-                  <span>Predicted Net: <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong></span>
-                  ${p.actualNet !== null ? `<span>Actual Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
-                </div>
-                ${p.variance !== null ? `
-                  <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}">
-                    ${p.variance >= 0 ? `✨ ${curr}${p.variance.toFixed(2)} Surplus (Under Budget)` : `⚠️ ${curr}${Math.abs(p.variance).toFixed(2)} Overspent`}
+              ${(() => {
+                const txns = (appState.data && appState.data.open_banking_transactions) || [];
+                if (!txns || txns.length === 0) return '';
+                const wStart = wObj.startDate.getTime();
+                const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59).getTime();
+                const weekTxns = txns.filter(t => {
+                  if (!t.booking_date) return false;
+                  const tTime = new Date(t.booking_date + (t.booking_date.includes('T') ? '' : 'T12:00:00')).getTime();
+                  return tTime >= wStart && tTime <= wEnd;
+                });
+                if (weekTxns.length === 0) return '';
+                const weekTotalSpent = weekTxns.reduce((acc, t) => acc + (t.amount < 0 ? Math.abs(t.amount) : 0), 0);
+                return `
+                  <div style="margin:8px 0 2px 0; background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                      <span>⚡ <strong>${weekTxns.length}</strong> Live Bank Transactions</span>
+                      <span style="color:var(--heading); font-weight:600;">(${curr}${weekTotalSpent.toFixed(2)} tracked)</span>
+                    </div>
+                    <button class="btn secondary" style="font-size:10.5px; padding:2px 8px;" onclick="window.budgetApp.openTransactionLedgerModal(${wIdx}, '${activeTab}')">View Transactions</button>
                   </div>
-                ` : '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Enter actual check-in above to calculate variance</span>'}
-              </div>
+                `;
+              })()}
+
+              ${(() => {
+                const isDailyPacingOn = Boolean(isCurrent && cfg.open_banking?.enabled && cfg.open_banking?.live_daily_variance !== false);
+                if (isDailyPacingOn) {
+                  const pacing = calculateLiveDailyPacing(wObj, p, actuals, cfg);
+                  return `
+                    <div class="week-summary-bar" style="background:rgba(2,132,199,0.08); border-top:1px solid rgba(2,132,199,0.25); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                      <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                        <span title="Planned total outgoings for the full week">Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
+                        <span title="Predicted Net Cash Position for today (Day ${pacing.elapsedDays} of ${pacing.totalDays}) factoring in cleared bills and daily discretionary spending pace">
+                          Predicted Net Today <span style="font-size:10px; color:var(--text-muted);">(Day ${pacing.elapsedDays}/${pacing.totalDays})</span>: 
+                          <strong style="color:${pacing.pacedTargetNetToday >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${pacing.pacedTargetNetToday.toFixed(2)}</strong>
+                        </span>
+                        <span title="Predicted final closing Net Cash Position (Current + Savings - Credit Debt) at the end of this week">
+                          Predicted Net (End of Week): <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong>
+                        </span>
+                        ${p.actualNet !== null ? `<span title="Current live actual Net Cash Position (Current + Savings - Credit Debt) from bank check-in">Live Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
+                      </div>
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        ${pacing.liveDailyVariance !== null ? `
+                          <div class="variance-badge ${pacing.liveDailyVariance >= 0 ? 'surplus' : 'overspent'}" style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; font-size:11.5px;" title="Live variance against today's day-by-day pace">
+                            <span>${pacing.liveDailyVariance >= 0 ? `✨ +${curr}${pacing.liveDailyVariance.toFixed(2)}` : `⚠️ -${curr}${Math.abs(pacing.liveDailyVariance).toFixed(2)}`} Today</span>
+                            <span style="font-size:9px; opacity:0.85; background:rgba(0,0,0,0.2); padding:1px 4px; border-radius:3px;">Day ${pacing.elapsedDays}/${pacing.totalDays}</span>
+                          </div>
+                        ` : ''}
+                        ${p.variance !== null ? `
+                          <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:11.5px; opacity:0.9;" title="Variance of current live net balance compared against final end-of-week predicted net target">
+                            <span>${p.variance >= 0 ? `+${curr}${p.variance.toFixed(2)}` : `-${curr}${Math.abs(p.variance).toFixed(2)}`} vs End-of-Week Net</span>
+                          </div>
+                        ` : (!pacing.liveDailyVariance ? '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Sync bank account to calculate variance</span>' : '')}
+                      </div>
+                    </div>
+                  `;
+                }
+
+                return `
+                  <div class="week-summary-bar">
+                    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                      <span>Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
+                      <span>Predicted Net: <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong></span>
+                      ${p.actualNet !== null ? `<span>Actual Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
+                    </div>
+                    ${p.variance !== null ? `
+                      <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}">
+                        ${p.variance >= 0 ? `✨ ${curr}${p.variance.toFixed(2)} Surplus (Under Budget)` : `⚠️ ${curr}${Math.abs(p.variance).toFixed(2)} Overspent`}
+                      </div>
+                    ` : '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Enter actual check-in above to calculate variance</span>'}
+                  </div>
+                `;
+              })()}
             </div>
           `;
         }).join('')}

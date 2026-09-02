@@ -13,6 +13,16 @@ export const DEFAULT_SETTINGS = {
   enable_yearly_budgets: true,
   enable_multi_user: false,
   enable_ha_sensors: true,
+  open_banking: {
+    enabled: false,
+    provider: "gocardless",
+    secret_id: "",
+    secret_key: "",
+    auto_sync_interval_hours: 6,
+    last_sync_timestamp: null,
+    last_sync_status: "idle",
+    linked_accounts: []
+  },
   security: {
     master_pin_enabled: false,
     master_salt: "",

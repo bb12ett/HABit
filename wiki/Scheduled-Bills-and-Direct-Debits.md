@@ -68,3 +68,13 @@ In **Multi-User Household Mode**, every scheduled bill can be designated as:
 - **`Person 2`**: Private individual bills (e.g. Person 2's Student Loan, Car Finance).
 
 When filtering views in the top navigation bar, HABit dynamically displays only the bills relevant to the active household perspective!
+
+
+---
+
+## ⚡ Automated Bill Reconciliation via Open Banking & Statement Imports
+
+HABit can automatically detect and clear your scheduled Direct Debits without any manual checking:
+- **Date Matching Window (±4 Days)**: Accounts for bank holidays and weekend clearing delays.
+- **`⚡ Auto-Cleared` Status Badge**: When a matching debit transaction is detected via Open Banking (Enable Banking, TrueLayer, GoCardless) or an uploaded statement (`.csv`/`.ofx`), HABit automatically marks the bill as **Paid**.
+- For full setup details, read the [Open Banking & Bank Synchronization Guide](Open-Banking-and-Bank-Sync).

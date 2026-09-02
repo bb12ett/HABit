@@ -16,6 +16,16 @@ const DEFAULT_SETTINGS = {
   enable_yearly_budgets: true,
   enable_multi_user: false,
   enable_ha_sensors: true,
+  open_banking: {
+    enabled: false,
+    provider: "gocardless",
+    secret_id: "",
+    secret_key: "",
+    auto_sync_interval_hours: 6,
+    last_sync_timestamp: null,
+    last_sync_status: "idle",
+    linked_accounts: []
+  },
   security: {
     master_pin_enabled: false,
     master_salt: "",
@@ -733,6 +743,201 @@ async function setPinAuth(persona, newPin, oldPin = '', enabled = true) {
   }
 }
 
+// ---------------------------------------------------------
+// OPEN BANKING API
+// ---------------------------------------------------------
+
+async function getOpenBankingStatus() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/status', {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("getOpenBankingStatus error:", e);
+  }
+  return { enabled: false, provider: "gocardless", linked_accounts: [], transaction_count: 0 };
+}
+
+async function saveOpenBankingConfig(cfg) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/config', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(cfg)
+    });
+    return r.ok;
+  } catch (e) {
+    console.error("saveOpenBankingConfig error:", e);
+    return false;
+  }
+}
+
+async function getOpenBankingInstitutions(country = 'GB') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/institutions?country=' + encodeURIComponent(country), {
+      cache: 'no-store'
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("getOpenBankingInstitutions error:", e);
+  }
+  return { success: false, institutions: [] };
+}
+
+async function createOpenBankingRequisition(institutionId, redirectUri, institutionName = '', institutionLogo = '', owner = 'Joint') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/requisition/create', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        institution_id: institutionId,
+        redirect_uri: redirectUri,
+        institution_name: institutionName,
+        institution_logo: institutionLogo,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("createOpenBankingRequisition error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function callbackOpenBankingRequisition(requisitionId = null, code = null, state = null, redirectUri = null) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/requisition/callback', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        requisition_id: requisitionId,
+        code: code,
+        state: state,
+        redirect_uri: redirectUri
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("callbackOpenBankingRequisition error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function mapOpenBankingAccount(accountId, mappedHabitAccountId, owner) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/accounts/map', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_id: accountId,
+        mapped_habit_account_id: mappedHabitAccountId,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("mapOpenBankingAccount error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function syncOpenBanking() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/sync', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("syncOpenBanking error:", e);
+  }
+  return { status: "error" };
+}
+
+async function unlinkOpenBanking(accountId = null, requisitionId = null) {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/unlink', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, requisition_id: requisitionId })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("unlinkOpenBanking error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function uploadBankStatement(fileContent, filename = 'statement.csv', mappedAccount = '', owner = 'Joint') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/openbanking/statement/upload', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_content: fileContent,
+        filename,
+        mapped_account: mappedAccount,
+        owner
+      })
+    });
+    return await r.json();
+  } catch (e) {
+    console.error("uploadBankStatement error:", e);
+    return { success: false, error: e.message };
+  }
+}
+
+async function fetchCategories() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories', {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("fetchCategories error:", e);
+  }
+  return null;
+}
+
+async function syncCategoriesFromGitHub() {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories/sync', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("syncCategoriesFromGitHub error:", e);
+  }
+  return { success: false };
+}
+
+async function suggestCategoryMerchant(merchant, category, notes = '') {
+  try {
+    const r = await fetch(getBaseApiUrl() + 'api/categories/suggest', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ merchant, category, notes })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error("suggestCategoryMerchant error:", e);
+  }
+  return { success: false };
+}
+
 // --- static/js/calculations.js ---
 
 
@@ -1053,6 +1258,7 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
         result.push({
           ...dd,
           is_income: false,
+          actualPaymentDate: targetDate,
           actualDateStr: `${targetDate.getDate()} ${months[targetDate.getMonth()]}`,
           isDueThisWeek: true
         });
@@ -1073,6 +1279,7 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
         result.push({
           ...dd,
           is_income: false,
+          actualPaymentDate: actualPaymentDate,
           actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
           isDueThisWeek: true
         });
@@ -1088,6 +1295,7 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
           result.push({
             ...dd,
             is_income: false,
+            actualPaymentDate: actualPaymentDate,
             actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
             isDueThisWeek: true
           });
@@ -1120,6 +1328,7 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
         result.push({
           ...pi,
           is_income: true,
+          actualPaymentDate: targetDate,
           actualDateStr: `${targetDate.getDate()} ${months[targetDate.getMonth()]}`,
           isDueThisWeek: true
         });
@@ -1140,6 +1349,7 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
         result.push({
           ...pi,
           is_income: true,
+          actualPaymentDate: actualPaymentDate,
           actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
           isDueThisWeek: true
         });
@@ -1155,6 +1365,7 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
           result.push({
             ...pi,
             is_income: true,
+            actualPaymentDate: actualPaymentDate,
             actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
             isDueThisWeek: true
           });
@@ -1164,6 +1375,92 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
   });
 
   return result;
+}
+
+function calculateLiveDailyPacing(wObj, p, actuals, cfg) {
+  const now = new Date();
+  const wStart = new Date(wObj.startDate.getFullYear(), wObj.startDate.getMonth(), wObj.startDate.getDate(), 0, 0, 0);
+  const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59);
+
+  const oneDayMs = 1000 * 60 * 60 * 24;
+  const totalDays = Math.max(1, Math.round((wEnd.getTime() - wStart.getTime()) / oneDayMs));
+  let elapsedDays = Math.floor((now.getTime() - wStart.getTime()) / oneDayMs) + 1;
+  elapsedDays = Math.max(1, Math.min(totalDays, elapsedDays));
+  const dayFraction = elapsedDays / totalDays;
+
+  const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+  const clearedDDs = [];
+  const upcomingDDs = [];
+  const pastDueDDs = [];
+
+  (p.wDDs || []).forEach(d => {
+    const isCleared = Boolean(d.auto_cleared || d.status === 'paid');
+    const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
+    const isPastDate = pDate ? (pDate.getTime() <= todayEnd.getTime()) : false;
+
+    if (isCleared) {
+      clearedDDs.push(d);
+    } else if (isPastDate) {
+      pastDueDDs.push(d);
+    } else {
+      upcomingDDs.push(d);
+    }
+  });
+
+  const clearedIncomes = [];
+  const upcomingIncomes = [];
+  const pastDueIncomes = [];
+
+  (p.wIncomes || []).forEach(i => {
+    const isCleared = Boolean(i.auto_cleared || i.status === 'paid');
+    const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
+    const isPastDate = pDate ? (pDate.getTime() <= todayEnd.getTime()) : false;
+
+    if (isCleared) {
+      clearedIncomes.push(i);
+    } else if (isPastDate) {
+      pastDueIncomes.push(i);
+    } else {
+      upcomingIncomes.push(i);
+    }
+  });
+
+  const clearedDDTotal = clearedDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const upcomingDDTotal = upcomingDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  const clearedIncomeTotal = clearedIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+  const upcomingIncomeTotal = upcomingIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+
+  const plannedWeeklyNetSpend = (p.wSpend || 0) - (p.wIncomeSum || 0);
+  const pacedDiscretionarySpendToDate = plannedWeeklyNetSpend * dayFraction;
+
+  // Paced target today adds back upcoming bills that haven't cleared yet and only expects spending for elapsed days
+  const pacedTargetNetToday = p.predictedNet + upcomingDDTotal - upcomingIncomeTotal + (plannedWeeklyNetSpend * (1 - dayFraction));
+
+  let liveDailyVariance = null;
+  if (p.actualNet !== null && p.actualNet !== undefined) {
+    liveDailyVariance = p.actualNet - pacedTargetNetToday;
+  }
+
+  return {
+    isPacingActive: true,
+    elapsedDays,
+    totalDays,
+    dayFraction,
+    clearedDDs,
+    upcomingDDs,
+    pastDueDDs,
+    clearedDDTotal,
+    upcomingDDTotal,
+    clearedIncomes,
+    upcomingIncomes,
+    pastDueIncomes,
+    clearedIncomeTotal,
+    upcomingIncomeTotal,
+    pacedDiscretionarySpendToDate,
+    pacedTargetNetToday,
+    liveDailyVariance
+  };
 }
 
 function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
@@ -1619,24 +1916,38 @@ function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) 
   const startMs = new Date(schedule.startDate.getFullYear(), schedule.startDate.getMonth(), schedule.startDate.getDate(), 0, 0, 0).getTime();
   const endMs = new Date(schedule.endDate.getFullYear(), schedule.endDate.getMonth(), schedule.endDate.getDate(), 23, 59, 59).getTime();
 
-  budgets.forEach(b => {
+  budgets.forEach((b, bIdx) => {
     const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const remaining = Math.max(0, (Number(b.total_budget) || 0) - spent);
     const strategy = b.deduction_strategy || 'none';
 
     // 1. Dated transactions strictly falling in this month's payday date range
-    (b.transactions || []).forEach(t => {
+    (b.transactions || []).forEach((t, tIdx) => {
       if (t.date) {
         const tDate = new Date(t.date.includes('T') ? t.date : t.date + 'T12:00:00');
         const tMs = tDate.getTime();
         if (tMs >= startMs && tMs <= endMs) {
+          const occDateStr = t.date || '';
           items.push({
-            desc: `🎯 ${b.name}: ${t.desc}`,
+            desc: `🎯 ${b.name}${t.desc ? ': ' + t.desc : ''}`,
+            rawDesc: `🎯 ${b.name}${t.desc ? ': ' + t.desc : ''}`,
             due_day: tDate.getDate(),
             exact_date: t.date,
+            actualPaymentDate: t.date,
             amount: Number(t.amount) || 0,
             account: t.account || b.account,
-            is_budget_item: true
+            is_budget_item: true,
+            status: t.status || (t.auto_cleared ? 'paid' : 'due'),
+            auto_cleared: Boolean(t.auto_cleared),
+            manually_cleared: Boolean(t.manually_cleared),
+            cleared_dates: t.cleared_dates || (t.auto_cleared && occDateStr ? [occDateStr] : []),
+            matched_txn_id: t.matched_txn_id,
+            matched_date: t.matched_date,
+            matched_payee: t.matched_payee,
+            source_type: 'budget_bill',
+            budget_idx: bIdx,
+            txn_idx: tIdx,
+            raw_target: t
           });
         }
       }
@@ -1648,13 +1959,26 @@ function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) 
       if (mIdx <= endMIdx) {
         const numMonths = Math.max(1, endMIdx + 1);
         const spreadAmt = remaining / numMonths;
+        const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
         items.push({
           desc: `🎯 ${b.name} (Monthly Spread)`,
+          rawDesc: `🎯 ${b.name} (Monthly Spread)`,
           due_day: schedule.startDate.getDate(),
-          exact_date: `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`,
+          exact_date: exactDate,
+          actualPaymentDate: exactDate,
           amount: spreadAmt,
           account: b.account,
-          is_budget_item: true
+          is_budget_item: true,
+          status: b.status || 'due',
+          auto_cleared: Boolean(b.auto_cleared),
+          manually_cleared: Boolean(b.manually_cleared),
+          cleared_dates: b.cleared_dates || [],
+          matched_txn_id: b.matched_txn_id,
+          matched_date: b.matched_date,
+          matched_payee: b.matched_payee,
+          source_type: 'budget_bill',
+          budget_idx: bIdx,
+          raw_target: b
         });
       }
     } else if (strategy === 'target_date' && remaining > 0 && b.end_date) {
@@ -1663,11 +1987,23 @@ function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) 
       if (endMsTime >= startMs && endMsTime <= endMs) {
         items.push({
           desc: `🎯 ${b.name} (Target Date Balance)`,
+          rawDesc: `🎯 ${b.name} (Target Date Balance)`,
           due_day: endDateObj.getDate(),
           exact_date: b.end_date,
+          actualPaymentDate: b.end_date,
           amount: remaining,
           account: b.account,
-          is_budget_item: true
+          is_budget_item: true,
+          status: b.status || 'due',
+          auto_cleared: Boolean(b.auto_cleared),
+          manually_cleared: Boolean(b.manually_cleared),
+          cleared_dates: b.cleared_dates || [],
+          matched_txn_id: b.matched_txn_id,
+          matched_date: b.matched_date,
+          matched_payee: b.matched_payee,
+          source_type: 'budget_bill',
+          budget_idx: bIdx,
+          raw_target: b
         });
       }
     }
@@ -1738,16 +2074,28 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
       }
       const tMs = tDate.getTime();
       if (tMs >= startMs && tMs <= endMs) {
+        const occDateStr = t.date || '';
         items.push({
           desc: `🎁 ${b.name}: ${t.desc || 'Gift'}`,
+          rawDesc: `🎁 ${b.name}: ${t.desc || 'Gift'}`,
           due_day: tDate.getDate(),
           exact_date: t.date,
+          actualPaymentDate: t.date,
           amount: Number(t.amount) || 0,
           account: t.account || b.account || cfg.current_accounts[0],
           isBirthdaySpend: true,
           is_budget_item: true,
           birthdayIdx: bIdx,
           transactionIdx: tIdx,
+          status: t.status || (t.auto_cleared ? 'paid' : 'due'),
+          auto_cleared: Boolean(t.auto_cleared),
+          manually_cleared: Boolean(t.manually_cleared),
+          cleared_dates: t.cleared_dates || (t.auto_cleared && occDateStr ? [occDateStr] : []),
+          matched_txn_id: t.matched_txn_id,
+          matched_date: t.matched_date,
+          matched_payee: t.matched_payee,
+          source_type: 'birthday',
+          raw_target: t,
           actualDateStr: `${tDate.getDate()} ${months[tDate.getMonth()]}`
         });
       }
@@ -1758,8 +2106,10 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
       if (remaining > 0) {
         items.push({
           desc: `🎂 ${b.name}`,
+          rawDesc: `🎂 ${b.name}`,
           due_day: bDate.getDate(),
           exact_date: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
+          actualPaymentDate: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
           amount: remaining,
           account: b.account || cfg.current_accounts[0],
           isBirthday: true,
@@ -1767,6 +2117,15 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
           budgetTotal: Number(b.budget_amount) || 0,
           spentTotal: spent,
           remaining: remaining,
+          status: b.status || 'due',
+          auto_cleared: Boolean(b.auto_cleared),
+          manually_cleared: Boolean(b.manually_cleared),
+          cleared_dates: b.cleared_dates || [],
+          matched_txn_id: b.matched_txn_id,
+          matched_date: b.matched_date,
+          matched_payee: b.matched_payee,
+          source_type: 'birthday',
+          raw_target: b,
           actualDateStr: `${bDate.getDate()} ${months[bMIdx]}`
         });
       }
@@ -1805,16 +2164,28 @@ function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = appState.
       }
       const tMs = tDate.getTime();
       if (tMs >= wStartTime && tMs <= wEndTime) {
+        const occDateStr = t.date || '';
         items.push({
           desc: `🎁 ${b.name}: ${t.desc || 'Gift'}`,
+          rawDesc: `🎁 ${b.name}: ${t.desc || 'Gift'}`,
           due_day: tDate.getDate(),
           exact_date: t.date,
+          actualPaymentDate: t.date,
           amount: Number(t.amount) || 0,
           account: t.account || b.account || cfg.current_accounts[0],
           isBirthdaySpend: true,
           is_budget_item: true,
           birthdayIdx: bIdx,
           transactionIdx: tIdx,
+          status: t.status || (t.auto_cleared ? 'paid' : 'due'),
+          auto_cleared: Boolean(t.auto_cleared),
+          manually_cleared: Boolean(t.manually_cleared),
+          cleared_dates: t.cleared_dates || (t.auto_cleared && occDateStr ? [occDateStr] : []),
+          matched_txn_id: t.matched_txn_id,
+          matched_date: t.matched_date,
+          matched_payee: t.matched_payee,
+          source_type: 'birthday',
+          raw_target: t,
           actualDateStr: `${tDate.getDate()} ${months[tDate.getMonth()]}`
         });
       }
@@ -1829,10 +2200,22 @@ function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = appState.
           isBirthday: true,
           is_budget_item: true,
           desc: `🎂 ${b.name}`,
+          rawDesc: `🎂 ${b.name}`,
           due_day: day,
+          exact_date: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+          actualPaymentDate: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
           account: b.account || cfg.current_accounts[0],
           amount: remaining,
           budgetTotal: Number(b.budget_amount) || 0,
+          status: b.status || 'due',
+          auto_cleared: Boolean(b.auto_cleared),
+          manually_cleared: Boolean(b.manually_cleared),
+          cleared_dates: b.cleared_dates || [],
+          matched_txn_id: b.matched_txn_id,
+          matched_date: b.matched_date,
+          matched_payee: b.matched_payee,
+          source_type: 'birthday',
+          raw_target: b,
           spentTotal: spent,
           remaining: remaining,
           actualDateStr: `${day} ${months[mIdx]}`
@@ -1907,6 +2290,9 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
       const diffWeeks = Math.round(diffMs / (1000 * 60 * 60 * 24 * 7));
       
       if (diffWeeks >= 0 && diffWeeks % stepWeeks === 0) {
+        const occDate = weekObj.startDate;
+        const occIso = occDate.toISOString().slice(0, 10);
+        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
         occurrences.push({
           ...r,
           isRecurring: true,
@@ -1919,8 +2305,12 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
           amount,
           account: r.account,
           holiday_rule: holidayRule,
-          actualDateStr: `${weekObj.startDate.getDate()} ${months[weekObj.startDate.getMonth()]}`,
-          occurrenceDate: weekObj.startDate
+          actualPaymentDate: occDate,
+          actualDateStr: `${occDate.getDate()} ${months[occDate.getMonth()]}`,
+          occurrenceDate: occDate,
+          status: isOccCleared ? 'paid' : 'due',
+          auto_cleared: isOccCleared,
+          manually_cleared: Boolean(r.manually_cleared)
         });
       }
     } else if (freq === 'monthly' || freq === 'quarterly' || freq === 'custom_months') {
@@ -1939,6 +2329,8 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
         if (payTime >= wStartTime && payTime <= wEndTime) {
           const diffMonths = (year - startDate.getFullYear()) * 12 + (m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
+            const occIso = actualPayDate.toISOString().slice(0, 10);
+            const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
             occurrences.push({
               ...r,
               isRecurring: true,
@@ -1951,8 +2343,12 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
               amount,
               account: r.account,
               holiday_rule: holidayRule,
+              actualPaymentDate: actualPayDate,
               actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
-              occurrenceDate: actualPayDate
+              occurrenceDate: actualPayDate,
+              status: isOccCleared ? 'paid' : 'due',
+              auto_cleared: isOccCleared,
+              manually_cleared: Boolean(r.manually_cleared)
             });
           }
         }
@@ -1965,6 +2361,8 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
       const payTime = actualPayDate.getTime();
 
       if (payTime >= wStartTime && payTime <= wEndTime) {
+        const occIso = actualPayDate.toISOString().slice(0, 10);
+        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
         occurrences.push({
           ...r,
           isRecurring: true,
@@ -1977,14 +2375,709 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
           amount,
           account: r.account,
           holiday_rule: holidayRule,
+          actualPaymentDate: actualPayDate,
           actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
-          occurrenceDate: actualPayDate
+          occurrenceDate: actualPayDate,
+          status: isOccCleared ? 'paid' : 'due',
+          auto_cleared: isOccCleared,
+          manually_cleared: Boolean(r.manually_cleared)
         });
       }
     }
   });
 
   return occurrences;
+}
+
+function reconcileTransactionsWithScheduledBills(data) {
+  if (!data || !data.open_banking_transactions || !Array.isArray(data.open_banking_transactions)) return 0;
+  const txns = data.open_banking_transactions;
+  if (txns.length === 0) return 0;
+
+  const cfg = data.settings || {};
+  const pdayDay = parseInt(cfg.payday_day || 26, 10);
+  const payFreq = cfg.pay_frequency || "monthly";
+  const stopWords = new Set(["direct", "debit", "dd", "payment", "pymt", "transfer", "standing", "order", "so", "faster", "fps", "card", "purchase", "pos", "the", "ltd", "limited", "uk", "plc", "co", "bill", "auth", "recurring"]);
+
+  function tokenize(str) {
+    if (!str) return new Set();
+    const clean = str.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    return new Set(clean.split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w)));
+  }
+
+  const RETAIL_STOP_MERCHANTS = new Set([
+    "schuh", "zara", "primark", "h&m", "hm", "next", "boots", "superdrug", "clarks", "jd sports", "sports direct",
+    "greggs", "costa", "starbucks", "mcdonald", "kfc", "subway", "burger king", "nandos", "pret", "caffe nero",
+    "tesco", "sainsbury", "asda", "morrison", "aldi", "lidl", "co-op", "coop", "waitrose", "iceland", "marks & spencer", "m&s",
+    "b&m", "home bargains", "wilko", "poundland", "savers", "tk maxx", "argos", "currys", "ikea", "b&q", "wickes", "screwfix", "toolstation",
+    "pub", "inn", "bar", "tavern", "arms", "restaurant", "bistro", "bakery", "cafe", "coffee", "cinema", "vue", "odeon", "cineworld",
+    "deliveroo", "just eat", "uber eats", "amazon", "ebay", "etsy", "shein", "temu"
+  ]);
+
+  const BILL_DOMAIN_ALIASES = {
+    "council": ["council", "district", "borough", "lincolnshire", "yorkshire", "lancashire", "cheshire", "derbyshire", "nottinghamshire", "staffordshire", "warwickshire", "leicestershire", "northamptonshire", "gloucestershire", "somerset", "devon", "cornwall", "dorset", "wiltshire", "hampshire", "surrey", "sussex", "kent", "essex", "hertfordshire", "bedfordshire", "buckinghamshire", "oxfordshire", "berkshire", "norfolk", "suffolk", "cambridgeshire", "city of", "metropolitan", "unitary", "local authority", "civic", "ctax", "c tax"],
+    "tax": ["council", "district", "borough", "lincolnshire", "yorkshire", "hmrc", "revenue", "customs", "dvla"],
+    "tv": ["tv licensing", "tv licence", "tvl", "bbc", "television licence", "tvlicense"],
+    "licence": ["tv licensing", "tv licence", "tvl", "bbc", "dvla"],
+    "energy": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita", "shell energy", "sse", "so energy"],
+    "gas": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita"],
+    "water": ["water", "severn trent", "thames water", "anglian water", "united utilities", "yorkshire water", "southern water", "wessex water", "south west water", "northumbrian water", "welsh water", "hafra drenau"],
+    "broadband": ["bt", "bt group", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "community fibre", "ee"],
+    "phone": ["ee", "o2", "three", "vodafone", "giffgaff", "tesco mobile", "sky mobile", "id mobile", "smarty", "voxi", "lebara", "lyca"],
+    "internet": ["bt", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "ee"],
+    "mortgage": ["nationwide", "santander", "halifax", "barclays", "hsbc", "lloyds", "natwest", "tsb", "yorkshire building", "coventry building", "skipton"],
+    "rent": ["property", "estate", "lettings", "landlord", "housing", "residential", "homes", "tenancy"],
+    "insurance": ["admiral", "aviva", "direct line", "hastings", "churchill", "lv=", "liverpool victoria", "axa", "more than", "sheilas wheels", "esure", "privilege", "aig", "vitality", "bupa", "axa ppp"],
+    "breakdown": ["rac", "the aa", "aa breakdown", "green flag", "autoaid"]
+  };
+
+  function isValidBillMatch(bName, bAmt, bDueDay, tPayee, tAmt, tDay, isSameMonth) {
+    if (Math.abs(tAmt - bAmt) > 0.05) return false;
+
+    const pClean = tPayee.toLowerCase();
+    const bClean = bName.toLowerCase();
+    
+    let isRetail = false;
+    RETAIL_STOP_MERCHANTS.forEach(m => {
+      if (pClean.includes(m)) isRetail = true;
+    });
+
+    const tTokens = tokenize(tPayee);
+    const bTokens = tokenize(bName);
+    let nameOverlap = false;
+    bTokens.forEach(tok => { if (tTokens.has(tok)) nameOverlap = true; });
+
+    const bAlnum = bClean.replace(/[^a-z0-9]/g, '');
+    const pAlnum = pClean.replace(/[^a-z0-9]/g, '');
+    const substringMatch = Boolean(bAlnum && (bAlnum.includes(pAlnum) || pAlnum.includes(bAlnum)));
+    let partialTokenMatch = false;
+    bTokens.forEach(tok => {
+      if (tok.length >= 3 && (pAlnum.includes(tok) || pClean.includes(tok))) {
+        partialTokenMatch = true;
+      }
+    });
+
+    if (nameOverlap || substringMatch || partialTokenMatch) return true;
+
+    let aliasMatch = false;
+    bTokens.forEach(tok => {
+      if (BILL_DOMAIN_ALIASES[tok]) {
+        const aliasList = BILL_DOMAIN_ALIASES[tok];
+        aliasList.forEach(alias => {
+          if (pClean.includes(alias)) aliasMatch = true;
+        });
+      }
+    });
+    if (aliasMatch) return true;
+
+    // Retail shopping without explicit name overlap must never match bills
+    if (isRetail) return false;
+
+    // Strict non-name fallback for non-round/distinct amounts aligned with expected due date
+    const isRoundSmall = (tAmt <= 50.0 && (tAmt % 5 === 0 || (tAmt % 1 === 0 && tAmt <= 25.0)));
+    if (!isRoundSmall && isSameMonth) {
+      const dayDiff = Math.abs(tDay - (bDueDay || 1));
+      if (dayDiff <= 4 || dayDiff >= 27) return true;
+    }
+
+    return false;
+  }
+
+  const matchedBillKeys = new Set();
+  let matchCount = 0;
+  const sortedTxns = [...txns].sort((a, b) => (a.booking_date || '').localeCompare(b.booking_date || ''));
+
+  sortedTxns.forEach(t => {
+    const rawAmt = Number(t.amount || 0);
+    const tAmt = Math.abs(rawAmt);
+    if (tAmt < 0.01) return;
+    const tIsIncome = (rawAmt > 0);
+
+    const tPayee = `${t.payee_name || ''} ${t.raw_info || ''} ${t.merchant_name || ''}`.trim();
+    const tDateStr = t.booking_date || '';
+
+    let targetMName = null;
+    let targetYearStr = String(new Date().getFullYear());
+    let tDay = 15;
+
+    if (tDateStr) {
+      try {
+        const dt = new Date(tDateStr.includes('T') ? tDateStr : tDateStr + 'T12:00:00');
+        targetYearStr = String(dt.getFullYear());
+        tDay = dt.getDate();
+        if (payFreq === "monthly" && pdayDay >= 20 && tDay >= (pdayDay - 4)) {
+          let budgetMIdx = dt.getMonth() + 1;
+          if (budgetMIdx > 11) {
+            budgetMIdx = 0;
+            targetYearStr = String(dt.getFullYear() + 1);
+          }
+          targetMName = months[budgetMIdx];
+        } else {
+          targetMName = months[dt.getMonth()];
+        }
+      } catch (e) {}
+    }
+
+    const yearData = (data.years && data.years[targetYearStr]) || (data.years && data.years[String(new Date().getFullYear())]) || {};
+    const monthsMap = yearData.months || {};
+
+    const searchMonths = [];
+    if (targetMName && monthsMap[targetMName]) {
+      searchMonths.push(targetMName);
+      const mIdx = months.indexOf(targetMName);
+      if (mIdx > 0 && monthsMap[months[mIdx - 1]]) searchMonths.push(months[mIdx - 1]);
+      if (mIdx < 11 && monthsMap[months[mIdx + 1]]) searchMonths.push(months[mIdx + 1]);
+    } else {
+      searchMonths.push(...Object.keys(monthsMap));
+    }
+
+    let matchedThisTxn = false;
+
+    for (const mName of searchMonths) {
+      if (matchedThisTxn) break;
+      const mData = monthsMap[mName] || {};
+
+      const budgetItems = [];
+      (yearData.yearly_budgets || []).forEach((bObj, bIdx) => {
+        (bObj.transactions || []).forEach((bTxn, tIdx) => {
+          budgetItems.push({
+            id: bTxn.id || `budget_${bIdx}_${tIdx}`,
+            desc: `🎯 ${bObj.name || ''}: ${bTxn.desc || ''}`.trim(),
+            name: bTxn.desc || bObj.name,
+            amount: bTxn.amount || 0,
+            due_day: bTxn.date ? parseInt(bTxn.date.slice(8, 10), 10) : 1,
+            raw_target: bTxn,
+            status: bTxn.status || 'due',
+            auto_cleared: Boolean(bTxn.auto_cleared),
+            manually_cleared: Boolean(bTxn.manually_cleared),
+            cleared_dates: bTxn.cleared_dates || []
+          });
+        });
+      });
+
+      const birthdayItems = [];
+      (yearData.birthdays || cfg.birthdays || []).forEach((bObj, bIdx) => {
+        (bObj.transactions || []).forEach((bTxn, tIdx) => {
+          birthdayItems.push({
+            id: bTxn.id || `bday_${bIdx}_${tIdx}`,
+            desc: `🎁 ${bObj.name || ''}: ${bTxn.desc || ''}`.trim(),
+            name: bTxn.desc || bObj.name,
+            amount: bTxn.amount || 0,
+            due_day: bTxn.date ? parseInt(bTxn.date.slice(8, 10), 10) : 1,
+            raw_target: bTxn,
+            status: bTxn.status || 'due',
+            auto_cleared: Boolean(bTxn.auto_cleared),
+            manually_cleared: Boolean(bTxn.manually_cleared),
+            cleared_dates: bTxn.cleared_dates || []
+          });
+        });
+      });
+
+      const billCollections = [
+        { type: 'direct_debit', isIncome: false, list: mData.direct_debits || [] },
+        { type: 'payments_in', isIncome: true, list: mData.payments_in || [] },
+        { type: 'scheduled_item', isIncome: false, list: mData.scheduled_items || [] },
+        { type: 'yearly_recurring', isIncome: false, list: (yearData.yearly_recurring || []).filter(b => !b.month || b.month === mName) },
+        { type: 'yearly_income', isIncome: true, list: (yearData.yearly_income || []).filter(b => !b.month || b.month === mName) },
+        { type: 'recurring_payment', isIncome: false, list: yearData.recurring_payments || cfg.recurring_payments || [] },
+        { type: 'recurring_income', isIncome: true, list: yearData.recurring_incomes || cfg.recurring_incomes || [] },
+        { type: 'budget_bill', isIncome: false, list: budgetItems },
+        { type: 'birthday', isIncome: false, list: birthdayItems }
+      ];
+
+      for (const coll of billCollections) {
+        if (matchedThisTxn) break;
+        if (tIsIncome !== coll.isIncome) continue;
+
+        for (let idx = 0; idx < coll.list.length; idx++) {
+          const b = coll.list[idx];
+          const bId = b.id || `${targetYearStr}_${mName}_${coll.type}_${idx}`;
+          if (matchedBillKeys.has(bId)) continue;
+          if (b.manually_cleared) {
+            matchedBillKeys.add(bId);
+            continue;
+          }
+
+          const bAmt = Math.abs(Number(b.amount || 0));
+          const bName = b.desc || b.name || '';
+          const bDueDay = parseInt(b.due_day || b.day_of_month || 1, 10);
+          const isSameMonth = (targetMName === mName);
+
+          if (isValidBillMatch(bName, bAmt, bDueDay, tPayee, tAmt, tDay, isSameMonth)) {
+            b.status = 'paid';
+            b.auto_cleared = true;
+            b.matched_txn_id = t.transaction_id;
+            b.matched_date = tDateStr;
+            b.matched_amount = tAmt;
+            b.matched_payee = t.payee_name || t.merchant_name;
+            if (tDateStr) {
+              const occIso = tDateStr.slice(0, 10);
+              b.cleared_dates = b.cleared_dates || [];
+              if (!b.cleared_dates.includes(occIso)) b.cleared_dates.push(occIso);
+            }
+
+            if (b.raw_target) {
+              b.raw_target.status = 'paid';
+              b.raw_target.auto_cleared = true;
+              b.raw_target.matched_txn_id = t.transaction_id;
+              b.raw_target.matched_date = tDateStr;
+              b.raw_target.matched_amount = tAmt;
+              b.raw_target.matched_payee = t.payee_name || t.merchant_name;
+              if (tDateStr) {
+                const occIso = tDateStr.slice(0, 10);
+                b.raw_target.cleared_dates = b.raw_target.cleared_dates || [];
+                if (!b.raw_target.cleared_dates.includes(occIso)) b.raw_target.cleared_dates.push(occIso);
+              }
+            }
+
+            t.matched_bill_id = bName;
+            t.auto_cleared = true;
+            matchedBillKeys.add(bId);
+            matchedThisTxn = true;
+            matchCount++;
+            break;
+          }
+        }
+      }
+    }
+  });
+
+  return matchCount;
+}
+
+if (typeof window !== 'undefined') {
+  window.reconcileTransactionsWithScheduledBills = reconcileTransactionsWithScheduledBills;
+}
+
+let SPEND_CATEGORIES = [
+  {
+    id: 'groceries',
+    label: 'Supermarket & Groceries',
+    icon: '🛒',
+    color: '#10b981',
+    keywords: [
+      'tesco', 'sainsbury', 'asda', 'morrison', 'aldi', 'lidl', 'waitrose', 'marks & spencer', 'marks and spencer', 'marks spencer', 'marks&spencer', 'm&s food', 'm&s simply food', 'm&s', 'm & s',
+      'co-op', 'coop', 'iceland foods', 'iceland', 'ocado', 'booths', 'whole foods', 'farmfoods', 'spar', 'nisa', 'londis', 'premier stores',
+      'premier', 'costcutter', 'budgens', 'one stop', 'best-one', 'happy shopper', 'day-today', 'keystore', 'family shopper', 'roys',
+      'hellofresh', 'gousto', 'abel & cole', 'riverford', 'mindful chef', 'musclefood', 'pasta evangelists', 'allplants', 'costco', 'makro',
+      'booker', 'wing yip', 'h mart', 'oriental supermarket', 'asian supermarket', 'halal butcher', 'butcher', 'fishmonger', 'greengrocer',
+      'farm shop', 'delicatessen', 'bakery', 'milk & more', 'modern milkman', 'heron foods', 'star bargains', 'approved food', 'majestic wine',
+      'bargain booze', 'oddbins', 'laithwaites', 'virgin wines', 'the wine society', 'beer hawk', 'bottle club', 'distillers', 'off licence',
+      'supermarket', 'grocery', 'grocer', 'provision'
+    ]
+  },
+  {
+    id: 'transport',
+    label: 'Fuel, Travel & Vehicles',
+    icon: '⛽',
+    color: '#0284c7',
+    keywords: [
+      'tesco pay at pump', 'tesco pay at pum', 'tesco petrol', 'tesco fuel', 'tesco pfs', 'tesco forecourt', 'tesco service station',
+      'sainsburys pay at pump', 'sainsbury\'s pay at pump', 'sainsburys petrol', 'sainsbury\'s petrol', 'sainsburys fuel', 'sainsbury\'s fuel', 'sainsburys pfs', 'sainsbury\'s pfs',
+      'asda pay at pump', 'asda pay at pum', 'asda petrol', 'asda fuel', 'asda pfs', 'asda forecourt',
+      'morrisons pay at pump', 'morrisons petrol', 'morrisons fuel', 'morrisons pfs',
+      'pay at pump', 'pay at pum', 'pfs forecourt', 'pfs fuel', 'pfs', 'supermarket petrol', 'supermarket fuel',
+      'shell', 'bp oil', 'bp pulse', 'bp connect', 'esso', 'texaco', 'applegreen', 'jet petrol', 'jet service', 'murco', 'gulf oil', 'total petrol',
+      'pace fuel', 'harvest energy', 'moto hospitality', 'welcome break', 'roadchef', 'extra services', 'rontec', 'mfg', 'motor fuel', 'euro garages',
+      'eg group', 'certas energy', 'petrol', 'fuel', 'diesel', 'oil', 'filling station', 'service station', 'forecourt', 'tesla supercharger', 'tesla',
+      'gridserve', 'pod point', 'ionity', 'instavolt', 'osprey', 'shell recharge', 'geniepoint', 'fastned', 'esb energy', 'source london', 'evgo',
+      'tfl', 'transport for london', 'tfl travel', 'tfl auto topup', 'oyster', 'trainline', 'national rail', 'lner', 'avanti west coast', 'avanti',
+      'gwr', 'great western', 'crosscountry', 'thameslink', 'scotrail', 'transport for wales', 'tfw', 'southern railway', 'south western railway',
+      'swr', 'chiltern railways', 'northern rail', 'merseyrail', 'transpennine express', 'c2c rail', 'greater anglia', 'east midlands railway',
+      'emr', 'southeastern railway', 'grand central', 'hull trains', 'lumo', 'eurostar', 'railway', 'train', 'underground', 'metro', 'tram',
+      'stagecoach', 'arriva', 'first bus', 'first group', 'national express', 'megabus', 'flixbus', 'go-ahead', 'transdev', 'lothian buses',
+      'uber', 'uber trip', 'uber bv', 'bolt.eu', 'bolt', 'free now', 'gett', 'cabify', 'addison lee', 'taxi', 'minicab', 'radio cars', 'cab',
+      'ringgo', 'paybyphone', 'justpark', 'ncp', 'q-park', 'apcoa', 'parkopedia', 'parkme', 'saba parking', 'euro car parks', 'horizon parking',
+      'dart charge', 'merseyflow', 'm6 toll', 'clean air zone', 'caz', 'ulez', 'congestion charge', 'tyne tunnel', 'parking', 'toll',
+      'dvla', 'mot', 'halfords autocentre', 'kwik fit', 'kwik-fit', 'national tyres', 'ats euromaster', 'f1 autocentres', 'formula one', 'protyre',
+      'mr clutch', 'in n out autocentre', 'rac', 'aa breakdown', 'green flag', 'auto glass', 'autoglass', 'national windscreens', 'car wash',
+      'imo car wash', 'waves car wash', 'euro car parts', 'gsf car parts', 'demon tweeks', 'tyres', 'garage', 'auto repair', 'mechanic',
+      'zipcar', 'enterprise rent', 'enterprise rent-a-car', 'hertz', 'europcar', 'avis', 'sixt', 'budget rent', 'alamo', 'green motion', 'turo'
+    ]
+  },
+  {
+    id: 'dining',
+    label: 'Dining, Cafes, Bars & Takeaways',
+    icon: '☕',
+    color: '#f59e0b',
+    keywords: [
+      'costa coffee', 'costa', 'starbucks', 'caffe nero', 'caffe', 'pret a manger', 'pret', 'leon', 'gail\'s bakery', 'gails', 'joe & the juice',
+      'boston tea party', 'coffee#1', 'black sheep coffee', '200 degrees', 'watchhouse', 'grind', 'ole & steen', 'greggs', 'cooplands', 'wenzel\'s',
+      'paul bakery', 'patisserie valerie', 'millie\'s cookies', 'krispy kreme', 'dunkin', 'tim hortons', 'coffee', 'cafe', 'tea room', 'bakery',
+      'mcdonald\'s', 'mcdonalds', 'mcdonald', 'kfc', 'burger king', 'subway', 'nando\'s', 'nandos', 'five guys', 'taco bell', 'wendy\'s', 'popeyes',
+      'wingstop', 'shake shack', 'jollibee', 'chopstix', 'wimpy', 'roosters piri piri', 'pepe\'s piri piri', 'german doner kebab', 'gdk', 'tortilla',
+      'domino\'s pizza', 'dominos', 'papa john\'s', 'papa johns', 'pizza hut', 'pizza express', 'franco manca', 'pizza pilgrims', 'homeslice',
+      'honest burgers', 'patty & bun', 'meatliquor', 'byron burger', 'gbk', 'gourmet burger', 'zizzi', 'ask italian', 'prezzo', 'bella italia',
+      'carluccio\'s', 'piccolino', 'san carlo', 'wildwood', 'strada', 'cafe rouge', 'cote brasserie', 'cote', 'bill\'s', 'bills restaurant',
+      'the ivy', 'wagamama', 'yo! sushi', 'yo sushi', 'itsu', 'wasabi', 'kokoro', 'pho', 'rosa\'s thai', 'banana tree', 'dishoom', 'mowgli',
+      'wahaca', 'las iguanas', 'turtle bay', 'chiquito', 'barburrito', 'deliveroo', 'just eat', 'justeat', 'uber eats', 'ubereats', 'foodhub',
+      'wetherspoon', 'j d wetherspoon', 'greene king', 'marston\'s', 'marstons', 'mitchells & butlers', 'stonegate', 'fullers', 'young\'s',
+      'shepherd neame', 'samuel smith', 'brewdog', 'all bar one', 'slug & lettuce', 'beefeater', 'harvester', 'toby carvery', 'chef & brewer',
+      'hungry horse', 'sizzling pubs', 'miller & carter', 'ember inns', 'vintage inns', 'revolution bars', 'revolucion de cuba', 'o\'neill\'s',
+      'walkabout', 'pub', 'bar', 'tavern', 'inn', 'brewery', 'taproom', 'cocktail', 'lounge', 'bistro', 'restaurant', 'diner', 'grill',
+      'eatery', 'takeaway', 'kebab', 'chippy', 'fish and chips', 'chinese takeaway', 'indian takeaway', 'pizzeria', 'curry house',
+      'catering', 'caterer', 'caterers', 'cater', 'buffet', 'food truck', 'street food', 'canteen', 'sandwich shop', 'sandwich bar', 'steakhouse', 'carvery'
+    ]
+  },
+  {
+    id: 'shopping',
+    label: 'Shopping, Retail, Tech & Home',
+    icon: '🛍️',
+    color: '#ec4899',
+    keywords: [
+      'amazon', 'amzn', 'amazon eu', 'amazon marketplace', 'ebay', 'argos', 'very.co.uk', 'very', 'littlewoods', 'etsy', 'temu',
+      'aliexpress', 'wish.com', 'vinted', 'depop', 'tiktok shop', 'john lewis', 'marks & spencer', 'm&s', 'debenhams', 'house of fraser',
+      'selfridges', 'harrods', 'harvey nichols', 'fenwick', 'liberty', 'oliver bonas', 'flying tiger', 'miniso',
+      'b&q', 'screwfix', 'toolstation', 'wickes', 'homebase', 'travis perkins', 'selco', 'jewson', 'magnet', 'city plumbing', 'dobbies garden centre',
+      'dobbies', 'notcutts', 'british garden centres', 'rhs', 'gardening', 'plants', 'hardware', 'diy',
+      'ikea', 'dunelm', 'the range', 'b&m', 'bm retail', 'home bargains', 'wilko', 'poundland', 'savers', 'dfs', 'sofology', 'scs', 'oak furnitureland',
+      'furniture village', 'wayfair', 'habitat', 'made.com', 'loaf', 'dreams', 'bensons for beds', 'tapi carpets', 'carpetright', 'procook',
+      'lakeland', 'robert dyas', 'furniture', 'homeware',
+      'primark', 'next retail', 'next', 'zara', 'h&m', 'tk maxx', 'tkmaxx', 'homesense', 'asos', 'boohoo', 'prettylittlething', 'shein', 'mango',
+      'river island', 'new look', 'urban outfitters', 'uniqlo', 'matalan', 'fatface', 'white stuff', 'seasalt', 'joules', 'superdry', 'levi\'s',
+      'hollister', 'abercrombie', 'allsaints', 'reiss', 'ted baker', 'cos', '& other stories', 'monki', 'weekday', 'clothing', 'fashion', 'apparel',
+      'jd sports', 'sports direct', 'decathlon', 'mountain warehouse', 'go outdoors', 'blacks', 'millets', 'cotswold outdoor', 'foot locker',
+      'schuh', 'clarks', 'deichmann', 'office shoes', 'kurt geiger', 'skechers', 'shoes', 'footwear', 'trainer',
+      'currys', 'pc world', 'ao.com', 'appliances direct', 'richer sounds', 'apple store', 'apple.com', 'apple', 'samsung', 'dyson', 'shark ninja',
+      'cex', 'game stores', 'sonos', 'bose', 'maplin', 'scan.co.uk', 'overclockers', 'box.co.uk', 'ebuyer', 'electronics',
+      'pandora', 'ernest jones', 'h.samuel', 'beaverbrooks', 'goldsmiths', 'watches of switzerland', 'f.hinds', 'warren james', 'swarovski',
+      'astrid & miyu', 'monica vinader', 'jewellery', 'watch',
+      'waterstones', 'whsmith', 'w h smith', 'blackwell\'s', 'foyles', 'the works', 'card factory', 'clintons', 'paperchase', 'ryman', 'cass art',
+      'hobbycraft', 'stationery', 'books',
+      'pets at home', 'zooplus', 'pets corner', 'jollyes', 'vet', 'vets4pets', 'medivet', 'pdsa', 'rspca', 'animed direct', 'monster pet',
+      'hotel chocolat', 'lindt', 'thorntons', 'interflora', 'bloom & wild', 'moonpig', 'funky pigeon', 'lush', 'the body shop', 'space nk',
+      'sephora', 'boots', 'superdrug', 'cult beauty', 'lookfantastic', 'charlotte tilbury', 'mac cosmetics', 'jo malone', 'molton brown',
+      'penhaligon\'s', 'cosmetics', 'perfume', 'beauty', 'gift'
+    ]
+  },
+  {
+    id: 'entertainment',
+    label: 'Entertainment, Gaming, Leisure & Media',
+    icon: '🎮',
+    color: '#8b5cf6',
+    keywords: [
+      'amazon prime', 'apple.com/bill', 'itunes.com/bill', 'google play', 'google *play',
+      'netflix', 'spotify', 'disney+', 'disney plus', 'disney', 'prime video', 'apple tv', 'youtube premium', 'youtube', 'now tv', 'paramount+',
+      'discovery+', 'britbox', 'crunchyroll', 'mubi', 'dazn', 'streaming', 'stream', 'deezer', 'tidal', 'amazon music', 'apple music', 'audible',
+      'pocket casts', 'soundcloud', 'bandcamp', 'patreon', 'playstation', 'psn', 'sony interactive', 'xbox', 'microsoft*xbox', 'nintendo eShop',
+      'nintendo', 'steam', 'valve', 'epic games', 'blizzard', 'battle.net', 'riot games', 'ea games', 'electronic arts', 'ubisoft', 'rockstar games',
+      'roblox', 'twitch', 'discord', 'gog.com', 'gaming', 'video game', 'arcade',
+      'odeon cinemas', 'odeon', 'vue cinemas', 'vue', 'cineworld', 'showcase cinemas', 'everyman cinema', 'everyman', 'picturehouse', 'curzon',
+      'cinema', 'theatre', 'atg tickets', 'london theatre', 'national theatre', 'royal opera house', 'ticketmaster', 'see tickets', 'eventbrite',
+      'axs', 'skiddle', 'dice.fm', 'resident advisor', 'gigantic', 'concert', 'festival', 'gig',
+      'alton towers', 'thorpe park', 'chessington', 'legoland', 'madame tussauds', 'london eye', 'sea life', 'warwick castle', 'merlin entertainments',
+      'national trust', 'english heritage', 'historic royal palaces', 'kew gardens', 'eden project', 'london zoo', 'chester zoo', 'marwell zoo',
+      'longleat', 'zoo', 'safari park', 'aquarium', 'museum', 'exhibition', 'gallery', 'hollywood bowl', 'tenpin', 'lane7', 'flight club',
+      'boom battle bar', 'swingers', 'junkyard golf', 'topgolf', 'escape room', 'go ape', 'bowling', 'mini golf',
+      'the guardian', 'the times', 'telegraph', 'financial times', 'economist', 'new york times', 'washington post', 'medium', 'substack', 'newspaper'
+    ]
+  },
+  {
+    id: 'bills',
+    label: 'Bills, Utilities, Telecoms & Housing',
+    icon: '🏡',
+    color: '#6366f1',
+    keywords: [
+      'british gas', 'octopus energy', 'octopus', 'ovo energy', 'ovo', 'e.on next', 'eon next', 'e.on', 'eon', 'edf energy', 'edf', 'scottish power',
+      'shell energy', 'utilita', 'so energy', 'good energy', 'outfox the market', 'bulb energy', 'co-op energy', 'energy', 'gas bill', 'electric bill',
+      'thames water', 'severn trent water', 'severn trent', 'anglian water', 'united utilities', 'yorkshire water', 'southern water', 'south west water',
+      'northumbrian water', 'welsh water', 'dwr cymru', 'wessex water', 'affinity water', 'bristol water', 'south east water', 'ses water', 'water bill',
+      'bt group', 'bt bill', 'bt broadband', 'ee limited', 'ee', 'o2 uk', 'o2', 'telefonica', 'vodafone', 'three uk', 'three', '3 uk', 'virgin media',
+      'sky digital', 'sky uk', 'sky', 'talktalk', 'plusnet', 'now broadband', 'hyperoptic', 'community fibre', 'gigaclear', 'zen internet', 'kcom',
+      'giffgaff', 'smarty', 'voxi', 'lebara', 'lycamobile', 'id mobile', 'tesco mobile', 'asda mobile', 'sainsburys energy', 'sainsbury\'s energy',
+      'tesco insurance', 'sainsburys insurance', 'sainsbury\'s insurance', 'broadband', 'telecom', 'mobile phone',
+      'council tax', 'city council', 'borough council', 'district council', 'county council', 'hmrc', 'self assessment', 'tv licensing', 'tv licence',
+      'aviva', 'direct line', 'admiral insurance', 'admiral', 'hastings direct', 'hastings', 'churchill insurance', 'churchill', 'privilege insurance',
+      'more than', 'legal & general', 'lv=', 'liverpool victoria', 'axa insurance', 'axa', 'allianz', 'zurich insurance', 'royal london', 'sunlife',
+      'vitality life', 'vitality health', 'bupa insurance', 'petplan', 'bought by many', 'manypets', 'policy expert', 'insurance', 'premium',
+      'nationwide mortgage', 'santander mortgage', 'halifax mortgage', 'barclays mortgage', 'hsbc mortgage', 'natwest mortgage', 'lloyds mortgage',
+      'yorkshire building society', 'coventry building society', 'skipton building society', 'leeds building society', 'virgin money mortgage',
+      'rent payment', 'mortgage payment', 'estate agent', 'letting agent', 'ground rent', 'service charge', 'landlord', 'mortgage', 'rent'
+    ]
+  },
+  {
+    id: 'health',
+    label: 'Health, Fitness, Medical & Beauty',
+    icon: '🏥',
+    color: '#14b8a6',
+    keywords: [
+      'puregym', 'the gym group', 'the gym', 'david lloyd', 'nuffield health', 'nuffield', 'virgin active', 'anytime fitness', 'fitness first',
+      'gymbox', 'better gym', 'bannatyne', 'everlast gyms', 'jd gyms', 'snap fitness', 'f45', 'crossfit', 'classpass', 'leisure centre', 'swimming pool',
+      'gym', 'fitness', 'workout', 'pilates', 'yoga',
+      'boots pharmacy', 'lloydspharmacy', 'well pharmacy', 'rowlands pharmacy', 'superdrug pharmacy', 'pharmacy2u', 'chemist4u', 'nhs prescription',
+      'pharmacy', 'chemist', 'prescription', 'spex4less', 'specsavers', 'vision express', 'boots opticians', 'scrivens', 'optical express',
+      'optician', 'eyecare', 'glasses', 'contact lenses',
+      'nhs dental', 'bupa dental', 'mydentist', 'dental surgery', 'dental practice', 'dentist', 'dental', 'orthodontist',
+      'doctor', 'gp surgery', 'hospital', 'private clinic', 'physiotherapy', 'physio', 'chiropractor', 'osteopath', 'podiatry', 'acupuncture',
+      'psychotherapy', 'counselling', 'betterhelp', 'mind', 'health clinic', 'blood test', 'mri scan', 'medical', 'clinic',
+      'barber', 'hairdressing', 'hair salon', 'toni & guy', 'rush hair', 'supercuts', 'beauty salon', 'nail bar', 'nail salon', 'waxing',
+      'tanning', 'sunbed', 'spa day', 'massage', 'aesthetic clinic', 'tattoo studio', 'tattoo', 'piercing', 'hair', 'salon'
+    ]
+  },
+  {
+    id: 'travel',
+    label: 'Travel, Airlines, Hotels & Holidays',
+    icon: '✈️',
+    color: '#06b6d4',
+    keywords: [
+      'ryanair', 'easyjet', 'british airways', 'ba.com', 'jet2', 'tui', 'virgin atlantic', 'wizz air', 'emirates', 'qatar airways', 'klm',
+      'air france', 'lufthansa', 'aer lingus', 'vueling', 'norwegian air', 'turkish airlines', 'singapore airlines', 'etihad', 'iberia', 'sas',
+      'airline', 'flight', 'airport', 'airways', 'duty free',
+      'booking.com', 'airbnb', 'hotels.com', 'expedia', 'tripadvisor', 'agoda', 'trivago', 'kayak', 'skyscanner', 'lastminute.com', 'on the beach',
+      'loveholidays', 'trailfinders', 'hays travel', 'kuoni', 'travel agent', 'holiday',
+      'premier inn', 'travelodge', 'holiday inn', 'crowne plaza', 'marriott', 'hilton', 'doubletree', 'ibis', 'novotel', 'mercure', 'accor hotels',
+      'best western', 'radisson', 'jurys inn', 'leonardo hotels', 'malmaison', 'hotel du vin', 'britannia hotels', 'center parcs', 'butlin\'s',
+      'haven holidays', 'parkdean resorts', 'forest holidays', 'youth hostel', 'yha', 'hostelworld', 'hotel', 'motel', 'resort', 'hostel',
+      'p&o ferries', 'dfds seaways', 'dfds', 'stena line', 'brittany ferries', 'irish ferries', 'red funnel', 'wightlink', 'caledonian macbrayne',
+      'calmac', 'condor ferries', 'royal caribbean', 'p&o cruises', 'princess cruises', 'msc cruises', 'norwegian cruise', 'ferry', 'cruise'
+    ]
+  },
+  {
+    id: 'education',
+    label: 'Education, Courses & Childcare',
+    icon: '📚',
+    color: '#3b82f6',
+    keywords: [
+      'nursery', 'childcare', 'daycare', 'babysitter', 'nanny', 'pre-school', 'kindergarten', 'playgroup', 'tuition', 'school fees', 'school',
+      'college', 'university', 'ucas', 'student finance', 'student loans', 'school uniform', 'parentpay', 'parentmail', 'arbor', 'scopay',
+      'schoolmoney', 'udemy', 'coursera', 'skillshare', 'linkedin learning', 'masterclass', 'duolingo', 'codecademy', 'tutor', 'kumon',
+      'music lessons', 'driving lessons', 'bsm', 'red driving school', 'passmefast', 'theory test', 'driving test', 'course', 'training'
+    ]
+  },
+  {
+    id: 'transfers',
+    label: 'Transfers, Savings, Investments & Wallets',
+    icon: '🔄',
+    color: '#64748b',
+    keywords: [
+      'tesco bank', 'tesco credit card', 'tesco creditcard', 'tesco cc', 'tesco personal finance', 'tesco loans',
+      'sainsburys bank', 'sainsbury\'s bank', 'sainsbury bank', 'sainsburys credit card', 'sainsbury\'s credit card', 'sainsburys cc',
+      'asda money', 'asda credit card', 'asda creditcard',
+      'm&s bank', 'marks and spencer bank', 'marks & spencer bank', 'm&s credit card',
+      'john lewis finance', 'partnership card',
+      'faster payment', 'bank transfer', 'direct debit', 'standing order', 'transfer to', 'transfer from', 'card payment', 'credit card payment',
+      'bill payment', 'autopay', 'internal transfer', 'cash withdrawal', 'atm', 'cash deposit', 'cheque', 'payment received',
+      'paypal', 'revolut', 'monzo', 'starling', 'wise', 'transferwise', 'curve', 'monese', 'cash app', 'venmo', 'skrill', 'neteller',
+      'chip savings', 'chip', 'moneybox', 'plum', 'vanguard', 'hargreaves lansdown', 'aj bell', 'interactive investor', 'freetrade', 'trading 212',
+      'etoro', 'nutmeg', 'wealthify', 'moneyfarm', 'ns&i', 'premium bonds', 'pension', 'scottish widows', 'aviva pension', 'nest pensions',
+      'standard life', 'coinbase', 'binance', 'kraken', 'crypto.com', 'gemini', 'bitstamp', 'coinjar', 'crypto', 'savings', 'investment'
+    ]
+  },
+  {
+    id: 'general',
+    label: 'General & Miscellaneous',
+    icon: '📦',
+    color: '#94a3b8',
+    keywords: []
+  }
+];
+
+function getCategoryById(catId) {
+  return SPEND_CATEGORIES.find(c => c.id === catId) || SPEND_CATEGORIES[SPEND_CATEGORIES.length - 1];
+}
+
+function setDynamicCategories(cats) {
+  if (Array.isArray(cats) && cats.length > 0) {
+    SPEND_CATEGORIES = cats;
+    _CACHED_CATEGORY_INDEX = null;
+  }
+}
+
+// Pre-index keywords sorted descending by length for optimal precision
+let _CACHED_CATEGORY_INDEX = null;
+function getCategorySearchIndex() {
+  if (_CACHED_CATEGORY_INDEX) return _CACHED_CATEGORY_INDEX;
+
+  const allKeywords = [];
+
+  SPEND_CATEGORIES.forEach(cat => {
+    if (cat.id === 'general') return;
+    (cat.keywords || []).forEach(kw => {
+      if (kw) {
+        allKeywords.push({
+          keyword: kw.toLowerCase().trim(),
+          category: cat,
+          length: kw.trim().length
+        });
+      }
+    });
+  });
+
+  allKeywords.sort((a, b) => b.length - a.length);
+
+  _CACHED_CATEGORY_INDEX = allKeywords;
+  return _CACHED_CATEGORY_INDEX;
+}
+
+function categorizeTransaction(t, customRules = {}) {
+  if (t.category && SPEND_CATEGORIES.some(c => c.id === t.category)) {
+    return getCategoryById(t.category);
+  }
+
+  const payee = (t.payee_name || '').toLowerCase();
+  const rawInfo = (t.raw_info || '').toLowerCase();
+  const creditor = (t.creditor_name || '').toLowerCase();
+  const merchant = (t.merchant_name || '').toLowerCase();
+  const fullText = `${payee} ${rawInfo} ${creditor} ${merchant}`;
+
+  // 1. User custom merchant rules (highest priority after manual assignment)
+  for (const [pattern, catId] of Object.entries(customRules || {})) {
+    if (pattern && fullText.includes(pattern.toLowerCase())) {
+      return getCategoryById(catId);
+    }
+  }
+
+  // 2. Open Banking provider classification / meta tags (e.g. TrueLayer / Plaid category arrays)
+  const classifications = Array.isArray(t.classification) ? t.classification : (Array.isArray(t.transaction_classification) ? t.transaction_classification : []);
+  const classText = classifications.join(' ').toLowerCase();
+  if (classText.includes('grocer') || classText.includes('supermarket')) return getCategoryById('groceries');
+  if (classText.includes('fuel') || classText.includes('gas station') || classText.includes('transport') || classText.includes('automotive') || classText.includes('transit') || classText.includes('taxi')) return getCategoryById('transport');
+  if (classText.includes('restaurant') || classText.includes('dining') || classText.includes('cafe') || classText.includes('food and drink') || classText.includes('fast food') || classText.includes('bar') || classText.includes('pub') || classText.includes('cater')) return getCategoryById('dining');
+  if (classText.includes('shopping') || classText.includes('retail') || classText.includes('clothing') || classText.includes('electronics') || classText.includes('department store')) return getCategoryById('shopping');
+  if (classText.includes('entertainment') || classText.includes('media') || classText.includes('gaming') || classText.includes('streaming') || classText.includes('movies') || classText.includes('music')) return getCategoryById('entertainment');
+  if (classText.includes('utilities') || classText.includes('bills') || classText.includes('insurance') || classText.includes('telecom') || classText.includes('tax') || classText.includes('rent') || classText.includes('mortgage')) return getCategoryById('bills');
+  if (classText.includes('health') || classText.includes('medical') || classText.includes('fitness') || classText.includes('pharmacy') || classText.includes('dental') || classText.includes('gym')) return getCategoryById('health');
+  if (classText.includes('travel') || classText.includes('airline') || classText.includes('flight') || classText.includes('hotel') || classText.includes('lodging') || classText.includes('vacation')) return getCategoryById('travel');
+  if (classText.includes('education') || classText.includes('school') || classText.includes('tuition') || classText.includes('childcare')) return getCategoryById('education');
+  if (classText.includes('transfer') || classText.includes('deposit') || classText.includes('withdrawal') || classText.includes('atm') || classText.includes('investment') || classText.includes('savings')) return getCategoryById('transfers');
+
+  // 3. Auto-cleared direct debits / recurring bills
+  if (t.auto_cleared || t.matched_bill_id) {
+    return getCategoryById('bills');
+  }
+
+  // 4. Normalized string matching: strip punctuation, extra spaces, transaction codes
+  const cleanNorm = ' ' + fullText
+    .replace(/[*\-_#/:.,;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() + ' ';
+  const fullPadded = ' ' + fullText + ' ';
+
+  const allKeywords = getCategorySearchIndex();
+
+  // 5. Keyword search matching: match longest specific merchant phrases first
+  for (const item of allKeywords) {
+    if (item.length <= 4) {
+      if (cleanNorm.includes(` ${item.keyword} `) || fullPadded.includes(` ${item.keyword} `)) {
+        return item.category;
+      }
+    } else {
+      if (cleanNorm.includes(item.keyword) || fullText.includes(item.keyword)) {
+        return item.category;
+      }
+    }
+  }
+
+  return getCategoryById('general');
+}
+
+function calculateCategoryBreakdown(transactions, timeframe = 'this_month', accountFilter = 'all', activeUser = 'all', customRules = {}) {
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+
+  let startDate = null;
+  let endDate = new Date(curYear, curMonth, now.getDate(), 23, 59, 59);
+
+  if (timeframe === 'active_week') {
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    startDate = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0);
+  } else if (timeframe === 'this_month') {
+    startDate = new Date(curYear, curMonth, 1, 0, 0, 0);
+  } else if (timeframe === 'last_month') {
+    startDate = new Date(curYear, curMonth - 1, 1, 0, 0, 0);
+    endDate = new Date(curYear, curMonth, 0, 23, 59, 59);
+  } else if (timeframe === 'last_30_days') {
+    startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+  } else if (timeframe === 'year_to_date') {
+    startDate = new Date(curYear, 0, 1, 0, 0, 0);
+  } else {
+    startDate = new Date(curYear, curMonth, 1, 0, 0, 0);
+  }
+
+  const filtered = (transactions || []).filter(t => {
+    const amt = Number(t.amount || 0);
+    if (amt >= 0) return false;
+
+    if (t.booking_date) {
+      const tDate = new Date(t.booking_date);
+      if (startDate && tDate < startDate) return false;
+      if (endDate && tDate > endDate) return false;
+    }
+
+    if (accountFilter && accountFilter !== 'all') {
+      const tAcc = String(t.account_name || '').toLowerCase();
+      const fAcc = String(accountFilter).toLowerCase();
+      if (!tAcc.includes(fAcc) && fAcc !== tAcc) return false;
+    }
+
+    if (activeUser && activeUser !== 'all' && activeUser !== 'Joint') {
+      if (t.owner && t.owner !== 'Joint' && t.owner !== activeUser) return false;
+    }
+
+    return true;
+  });
+
+  const totalsByCategory = {};
+  SPEND_CATEGORIES.forEach(c => {
+    totalsByCategory[c.id] = {
+      category: c,
+      totalAmount: 0,
+      count: 0,
+      transactions: []
+    };
+  });
+
+  const merchantTotals = {};
+  let grandTotal = 0;
+
+  filtered.forEach(t => {
+    const cat = categorizeTransaction(t, customRules);
+    const absAmt = Math.abs(Number(t.amount || 0));
+
+    totalsByCategory[cat.id].totalAmount += absAmt;
+    totalsByCategory[cat.id].count += 1;
+    totalsByCategory[cat.id].transactions.push({ ...t, assignedCategory: cat });
+
+    const mName = t.payee_name || 'Unknown Merchant';
+    merchantTotals[mName] = (merchantTotals[mName] || 0) + absAmt;
+
+    if (cat.id !== 'transfers') {
+      grandTotal += absAmt;
+    }
+  });
+
+  const categoryList = Object.values(totalsByCategory)
+    .filter(c => c.totalAmount > 0)
+    .map(c => ({
+      ...c,
+      percentage: grandTotal > 0 ? (c.totalAmount / grandTotal) * 100 : 0
+    }))
+    .sort((a, b) => b.totalAmount - a.totalAmount);
+
+  const topMerchants = Object.entries(merchantTotals)
+    .map(([name, amount]) => ({ name, amount }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 8);
+
+  return {
+    filteredTransactions: filtered.map(t => ({ ...t, assignedCategory: categorizeTransaction(t, customRules) })),
+    categoryList,
+    topMerchants,
+    grandTotal,
+    transactionCount: filtered.length,
+    startDate,
+    endDate
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.calculateLiveDailyPacing = calculateLiveDailyPacing;
+  window.SPEND_CATEGORIES = SPEND_CATEGORIES;
+  window.getCategoryById = getCategoryById;
+  window.categorizeTransaction = categorizeTransaction;
+  window.calculateCategoryBreakdown = calculateCategoryBreakdown;
 }
 
 // --- static/js/charts.js ---
@@ -2115,6 +3208,98 @@ function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
       }
     }
   });
+}
+
+let categoryChartInstance = null;
+
+function destroyCategoryChart() {
+  if (categoryChartInstance) {
+    try {
+      categoryChartInstance.destroy();
+    } catch (e) {
+      console.warn("Category chart destroy error:", e);
+    }
+    categoryChartInstance = null;
+  }
+}
+
+function renderCategoryDonutChart(canvasEl, categoryList, curr) {
+  if (!canvasEl) return;
+  destroyCategoryChart();
+
+  if (typeof Chart === 'undefined') {
+    canvasEl.parentElement.innerHTML = '<div style="padding:20px; color:var(--amber); text-align:center;">⚠️ Chart engine blocked by browser tracking prevention.</div>';
+    return;
+  }
+
+  const validCategories = (categoryList || []).filter(c => c.totalAmount > 0 && c.category.id !== 'transfers');
+
+  if (!validCategories.length) {
+    const parent = canvasEl.parentElement;
+    parent.innerHTML = `
+      <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; color:var(--text-muted); font-size:12.5px; text-align:center; padding:30px;">
+        <span style="font-size:32px; margin-bottom:8px;">📊</span>
+        <span>No categorized spend found for this period.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const ctx = canvasEl.getContext('2d');
+  const labels = validCategories.map(c => `${c.category.icon} ${c.category.label}`);
+  const data = validCategories.map(c => Number(c.totalAmount.toFixed(2)));
+  const backgroundColors = validCategories.map(c => c.category.color);
+
+  categoryChartInstance = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: data,
+        backgroundColor: backgroundColors,
+        borderWidth: 2,
+        borderColor: '#0f172a',
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: {
+            color: '#cbd5e1',
+            boxWidth: 12,
+            font: { size: 11, family: 'Inter, -apple-system, sans-serif' },
+            padding: 10
+          }
+        },
+        tooltip: {
+          backgroundColor: '#1e293b',
+          titleColor: '#f8fafc',
+          bodyColor: '#cbd5e1',
+          borderColor: '#475569',
+          borderWidth: 1,
+          padding: 10,
+          callbacks: {
+            label: function(context) {
+              const val = Number(context.raw || 0);
+              const total = context.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+              return ` ${curr}${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${pct}%)`;
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.renderCategoryDonutChart = renderCategoryDonutChart;
+  window.destroyCategoryChart = destroyCategoryChart;
 }
 
 // --- static/js/views/modals.js ---
@@ -3603,6 +4788,523 @@ function openSetPinModal(person) {
   });
 }
 
+// ---------------------------------------------------------
+// OPEN BANKING MODALS
+// ---------------------------------------------------------
+
+async function openBankLinkModal() {
+  const cfg = getSettings();
+  const isMulti = isMultiUserEnabled();
+  const activeUser = appState.activeUser || 'Joint';
+
+  showModal({
+    title: '⚡ Connect Bank Account (Open Banking)',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Select your banking institution below to initiate a secure, read-only Open Banking connection. You will be redirected to your bank's official app or web portal to authorize access.
+        </p>
+
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="bankSearchInput" placeholder="🔍 Search banks (e.g. Monzo, Barclays, Chase, HSBC, Lloyds...)" style="flex:1; font-size:12px;" oninput="window.budgetApp.filterBankList(this.value)">
+          <select id="bankCountrySelect" onchange="window.budgetApp.changeBankCountry(this.value)" style="width:90px; font-size:12px;">
+            <option value="GB" selected>🇬🇧 UK</option>
+            <option value="US">🇺🇸 US</option>
+            <option value="IE">🇮🇪 Ireland</option>
+            <option value="FR">🇫🇷 France</option>
+            <option value="DE">🇩🇪 Germany</option>
+            <option value="ES">🇪🇸 Spain</option>
+          </select>
+        </div>
+
+        ${isMulti ? `
+          <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); border:1px solid var(--border); padding:8px 10px; border-radius:6px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Account Owner:</label>
+            <select id="bankLinkOwner" style="flex:1; font-size:12px;">
+              <option value="Joint">👥 Joint / Shared Account</option>
+              ${(cfg.people || []).map(p => `<option value="${p}" ${activeUser === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+            </select>
+          </div>
+        ` : ''}
+
+        <div id="bankInstitutionsList" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; max-height:260px; overflow-y:auto; padding:4px 2px;">
+          <div style="grid-column:1/-1; text-align:center; padding:20px; color:var(--text-muted); font-size:12px;">Loading supported banks...</div>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span style="font-size:11px; color:var(--text-muted);">📱 On mobile or redirected to browser?</span>
+          <button type="button" class="btn secondary" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.openManualAuthCodeModal()">📋 Paste Return URL / Code</button>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+    `
+  });
+
+  window.budgetApp.loadBankInstitutions('GB');
+}
+
+function openManualAuthCodeModal() {
+  showModal({
+    title: '📋 Complete Mobile Bank Authorization',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          When authorizing on a mobile phone or external browser, your bank redirects to your browser (e.g. <code>https://home.bb12ett.uk/?code=...</code>).
+        </p>
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Copy the full URL from your browser's address bar (or just the <code>code</code> parameter) and paste it below:
+        </p>
+        <div>
+          <label style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Return URL or Authorization Code:</label>
+          <textarea id="manualAuthUrlInput" rows="3" placeholder="https://home.bb12ett.uk/?code=...&state=..." style="width:100%; font-family:monospace; font-size:11.5px; padding:8px;"></textarea>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.submitManualAuthCode(document.getElementById('manualAuthUrlInput').value)">⚡ Complete Connection</button>
+    `
+  });
+}
+
+function openTransactionLedgerModal(weekIndex = null, targetMonth = null) {
+  const data = appState.data || {};
+  const allTxns = data.open_banking_transactions || [];
+  const curr = getSettings().currency || '£';
+  const currentYear = appState.currentYear || new Date().getFullYear();
+  const mName = targetMonth || appState.activeTab || 'Jan';
+  const mIdx = months.indexOf(mName) !== -1 ? months.indexOf(mName) : 0;
+  const schedule = calculateMonthSchedule(currentYear, mIdx);
+
+  const selectedIdx = (weekIndex !== null && weekIndex !== undefined && weekIndex !== 'all') ? parseInt(weekIndex, 10) : 'all';
+
+  let filteredTxns = allTxns;
+  let weekLabel = "All Transactions";
+
+  if (selectedIdx !== 'all' && schedule.weeks && schedule.weeks[selectedIdx]) {
+    const wObj = schedule.weeks[selectedIdx];
+    weekLabel = `${mName} - ${wObj.name || `Week ${selectedIdx + 1}`} (${wObj.label || ''})`;
+    const wStart = new Date(wObj.startDate.getFullYear(), wObj.startDate.getMonth(), wObj.startDate.getDate(), 0, 0, 0).getTime();
+    const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59).getTime();
+
+    filteredTxns = allTxns.filter(t => {
+      if (!t.booking_date) return false;
+      const cleanDate = t.booking_date.split('T')[0];
+      const parts = cleanDate.split('-');
+      if (parts.length === 3) {
+        const tTime = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0).getTime();
+        return tTime >= wStart && tTime <= wEnd;
+      }
+      return false;
+    });
+  } else if (selectedIdx === 'all' && targetMonth) {
+    weekLabel = `${mName} (All Weeks)`;
+    if (schedule.weeks && schedule.weeks.length > 0) {
+      const firstW = schedule.weeks[0];
+      const lastW = schedule.weeks[schedule.weeks.length - 1];
+      const mStart = new Date(firstW.startDate.getFullYear(), firstW.startDate.getMonth(), firstW.startDate.getDate(), 0, 0, 0).getTime();
+      const mEnd = new Date(lastW.endDate.getFullYear(), lastW.endDate.getMonth(), lastW.endDate.getDate(), 23, 59, 59).getTime();
+
+      filteredTxns = allTxns.filter(t => {
+        if (!t.booking_date) return false;
+        const cleanDate = t.booking_date.split('T')[0];
+        const parts = cleanDate.split('-');
+        if (parts.length === 3) {
+          const tTime = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0).getTime();
+          return tTime >= mStart && tTime <= mEnd;
+        }
+        return false;
+      });
+    }
+  }
+
+  const totalInflow = filteredTxns.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const totalOutflow = filteredTxns.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  showModal({
+    title: `⚡ Live Bank Transactions: ${weekLabel}`,
+    body: `
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:rgba(0,0,0,0.2); padding:8px 10px; border-radius:6px;">
+          <div>
+            <label style="font-size:10px; text-transform:uppercase; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:2px;">Month:</label>
+            <select id="txnLedgerMonthSelect" onchange="window.budgetApp.openTransactionLedgerModal(document.getElementById('txnLedgerWeekSelect')?.value || 'all', this.value)" style="width:100%; font-size:12px; font-weight:600;">
+              ${months.map(m => `<option value="${m}" ${m === mName ? 'selected' : ''}>${m}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px; text-transform:uppercase; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:2px;">Week Period:</label>
+            <select id="txnLedgerWeekSelect" onchange="window.budgetApp.openTransactionLedgerModal(this.value, document.getElementById('txnLedgerMonthSelect')?.value || '${mName}')" style="width:100%; font-size:12px; font-weight:600;">
+              <option value="all" ${selectedIdx === 'all' ? 'selected' : ''}>📅 Whole Month (${mName})</option>
+              ${schedule.weeks.map((w, idx) => `
+                <option value="${idx}" ${selectedIdx === idx ? 'selected' : ''}>${w.name || `Week ${idx + 1}`} (${w.label || ''})</option>
+              `).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:11.5px;">
+          <div>Outflows: <strong style="color:var(--red);">${curr}${totalOutflow.toFixed(2)}</strong></div>
+          <div>Inflows: <strong style="color:var(--green);">${curr}${totalInflow.toFixed(2)}</strong></div>
+          <div style="color:var(--text-muted);">Showing <strong>${filteredTxns.length}</strong> transactions</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <input type="text" placeholder="🔍 Filter transactions by payee, description, or amount..." id="txnSearchInput" style="flex:1; min-width:180px; font-size:12px;" oninput="window.budgetApp.filterTxnLedger(this.value)">
+        </div>
+
+        <div id="txnLedgerList" style="display:flex; flex-direction:column; gap:6px; max-height:340px; overflow-y:auto; padding-right:2px;">
+          ${filteredTxns.length === 0 ? `
+            <div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">
+              No transactions found for ${weekLabel}.
+            </div>
+          ` : filteredTxns.slice().reverse().map(t => {
+            const cfg = getSettings();
+            const linkedAccounts = cfg.open_banking?.linked_accounts || [];
+            const linkedAcc = linkedAccounts.find(la => String(la.account_id) === String(t.account_id));
+            let dispAccountName = t.account_name || 'Checking';
+            if (linkedAcc && linkedAcc.mapped_habit_account_id) {
+              dispAccountName = linkedAcc.mapped_habit_account_id.replace(/^(credit|current|savings):/i, '').trim();
+            }
+            const matchBadge = t.matched_bill_id 
+              ? `<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Matched: ${t.matched_bill_id}</span>`
+              : (t.auto_cleared ? '<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Auto-Cleared Bill</span>' : '');
+
+            return `
+            <div class="txn-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; font-size:11.5px;">
+              <div style="min-width:0; flex:1; margin-right:12px;">
+                <div style="font-weight:600; color:var(--heading); word-break:break-word;">${t.payee_name || 'Transaction'}</div>
+                <div style="font-size:10px; color:var(--text-muted); display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:2px;">
+                  <span>${t.booking_date} • ${dispAccountName}</span>
+                  ${matchBadge}
+                </div>
+              </div>
+              <div style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap;">
+                ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
+              </div>
+            </div>
+          `;
+          }).join('')}
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>
+      <button class="btn green" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Sync Now</button>
+    `
+  });
+}
+
+function openBankStatementUploadModal() {
+  const cfg = getSettings();
+  const isMulti = isMultiUserEnabled();
+  const activeUser = appState.activeUser || 'Joint';
+
+  showModal({
+    title: '📁 Import Bank Statement (Offline CSV / OFX / QIF)',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Upload your bank statement export (.csv, .ofx, .qif) from Monzo, Barclays, Starling, HSBC, Lloyds, NatWest, Chase, Amex, or any other bank. Transactions are processed 100% locally and will auto-match scheduled bills!
+        </p>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:180px;">
+            <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Target Account:</label>
+            <select id="statementTargetAccount" style="width:100%; font-size:12px;">
+              ${(cfg.current_accounts || []).map(ca => `<option value="${ca}">Checking: ${ca}</option>`).join('')}
+              ${(cfg.credit_accounts || []).map(ca => `<option value="${ca.name}">Credit: ${ca.name}</option>`).join('')}
+            </select>
+          </div>
+
+          ${isMulti ? `
+            <div style="flex:1; min-width:140px;">
+              <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Owner:</label>
+              <select id="statementOwner" style="width:100%; font-size:12px;">
+                <option value="Joint">👥 Joint / Shared</option>
+                ${(cfg.people || []).map(p => `<option value="${p}" ${activeUser === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+              </select>
+            </div>
+          ` : ''}
+        </div>
+
+        <div id="dropZone" style="border:2px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; background:rgba(0,0,0,0.1); cursor:pointer; transition:border-color 0.2s;" onclick="document.getElementById('statementFileInput').click()">
+          <div style="font-size:32px; margin-bottom:6px;">📄</div>
+          <div style="font-weight:600; font-size:13px; color:var(--heading); margin-bottom:4px;">Click or Drag & Drop Bank Statement</div>
+          <div style="font-size:11px; color:var(--text-muted);">Supports .CSV, .OFX, .QFX, and .QIF files</div>
+          <input type="file" id="statementFileInput" accept=".csv,.ofx,.qfx,.qif,.tsv" style="display:none;" onchange="window.budgetApp.handleStatementFileSelected(event)">
+        </div>
+
+        <div id="statementUploadStatus" style="font-size:11.5px; text-align:center; display:none;"></div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+    `
+  });
+}
+
+async function openDebugLogModal() {
+  showModal({
+    title: '📄 Open Banking Debug Log',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:11px; color:var(--text-muted);">Real-time log output from <code>open_banking_debug.txt</code></div>
+          <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.openDebugLogModal()">🔄 Refresh</button>
+        </div>
+        <div id="debugLogContainer" style="background:#0c0d14; color:#00ff88; font-family:Consolas, Monaco, monospace; font-size:11px; padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border); line-height:1.4;">
+          Loading log...
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.copyDebugLog()">📋 Copy Log</button>
+      <button class="btn secondary" onclick="window.budgetApp.downloadDebugLog()">⬇️ Download .txt</button>
+      <button class="btn secondary" onclick="window.budgetApp.clearDebugLog(); window.budgetApp.openDebugLogModal();">🗑️ Clear</button>
+      <button class="btn green" onclick="window.budgetApp.closeModal()">Done</button>
+    `
+  });
+
+  try {
+    const basePath = (window.location.pathname.endsWith('index.html') ? window.location.pathname.slice(0, -10) : window.location.pathname).replace(/\/+$/, '');
+    const url = (basePath ? basePath : '') + '/api/openbanking/debug/log';
+    const r = await fetch(url, { cache: 'no-store' });
+    const text = await r.text();
+    const c = document.getElementById('debugLogContainer');
+    if (c) {
+      c.innerText = text;
+      c.scrollTop = c.scrollHeight;
+    }
+  } catch (e) {
+    const c = document.getElementById('debugLogContainer');
+    if (c) c.innerText = 'Error loading log: ' + e.message;
+  }
+}
+
+function openRecategorizeModal(txnId, merchantName, currentCatId) {
+  const allTxns = (window.appState && window.appState.data && window.appState.data.open_banking_transactions) || [];
+  const foundTxn = allTxns.find(t => String(t.transaction_id) === String(txnId));
+  const effectiveMerchant = merchantName || foundTxn?.merchant_name || foundTxn?.payee_name || foundTxn?.raw_info || foundTxn?.description || 'Transaction';
+
+  const categories = window.SPEND_CATEGORIES || [];
+  if (window.budgetApp) {
+    window.budgetApp._pendingRecategorize = { txnId, merchantName: effectiveMerchant };
+  }
+
+  // Clean suggested merchant name
+  const cleanMerchant = (effectiveMerchant || '')
+    .replace(/[*\-_#/:.,;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  showModal({
+    title: '🏷️ Categorize Transaction',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+          Assign a spend category for <strong id="modalRecatMerchantName" style="color:var(--heading);">${effectiveMerchant}</strong>:
+        </p>
+
+        <div>
+          <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Merchant / Keyword Rule:</label>
+          <input type="text" id="modalRecatMerchantInput" value="${cleanMerchant}" style="width:100%; font-size:12px; padding:6px 8px; border-radius:6px;" placeholder="Merchant name or pattern">
+        </div>
+
+        <div>
+          <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Spend Category:</label>
+          <select id="modalRecategorizeSelect" style="width:100%; font-size:12.5px; font-weight:600; padding:6px 8px; border-radius:6px;">
+            ${categories.map(c => `<option value="${c.id}" ${c.id === currentCatId ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--heading); cursor:pointer;">
+            <input type="checkbox" id="modalSaveMerchantRule" checked style="margin-top:2px;">
+            <div>
+              <span style="font-weight:600;">Save to Personal Rules</span>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Always categorize all past & future transactions matching this merchant keyword locally.</div>
+            </div>
+          </label>
+
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; border-top:1px dashed var(--border); padding-top:8px;">
+            <input type="checkbox" id="modalSuggestToGitHub" checked style="margin-top:2px;">
+            <div>
+              <span style="font-weight:600;">🌐 Suggest to GitHub Community Database (1-Click / Anonymous)</span>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Share this merchant anonymously so all HABit users benefit in the next category sync. No GitHub account needed!</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.applyRecategorizationFromModal()">Save & Apply</button>
+    `
+  });
+
+  setTimeout(() => {
+    const el = document.getElementById('modalRecatMerchantName');
+    if (el) el.innerText = merchantName || 'this transaction';
+  }, 10);
+}
+
+function openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+  const mName = months.includes(monthName) ? monthName : (appState.activeTab || 'Jan');
+  const yData = getYearData();
+  const mData = getMonthData(mName);
+  const cfg = getSettings();
+  const curr = cfg.currency_symbol || '£';
+  const desc = billDesc || 'Scheduled Bill';
+  const amt = billAmount !== undefined ? Number(billAmount) : 0;
+
+  // Locate the bill item using budgetApp.findScheduledItem if available, or full fallback
+  let item = (window.budgetApp && typeof window.budgetApp.findScheduledItem === 'function')
+    ? window.budgetApp.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr)
+    : null;
+
+  if (!item) {
+    const isMatch = (cand) => cand && (!billDesc || cand.desc === billDesc || cand.name === billDesc || (cand.rawDesc && cand.rawDesc === billDesc));
+
+    if (sourceType === 'direct_debit' && mData.direct_debits) {
+      if (sourceIdx !== undefined && isMatch(mData.direct_debits[sourceIdx])) item = mData.direct_debits[sourceIdx];
+    } else if ((sourceType === 'payments_in' || sourceType === 'monthly_payment_in') && mData.payments_in) {
+      if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) item = mData.payments_in[sourceIdx];
+    } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
+      if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) item = mData.scheduled_items[sourceIdx];
+    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) item = yData.yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) item = yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'recurring_payment') {
+      const recurring = yData.recurring_payments || cfg.recurring_payments || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) item = recurring[sourceIdx];
+    } else if (sourceType === 'recurring_income') {
+      const recurring = yData.recurring_incomes || cfg.recurring_incomes || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) item = recurring[sourceIdx];
+    }
+  }
+
+  if (!item && billDesc) {
+    const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+
+    item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
+        || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
+
+    if (!item) {
+      for (const b of (yData.yearly_budgets || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          const combinedLow = `${bNameLow} ${tDescLow}`;
+          if (combinedLow.includes(cleanTarget) || cleanTarget.includes(tDescLow) || cleanTarget.includes(bNameLow)) {
+            item = t;
+            break;
+          }
+        }
+        if (item) break;
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          item = b;
+          break;
+        }
+      }
+    }
+  }
+
+  const finalAmt = (amt > 0 ? amt : Number(item?.amount || 0));
+  const isCleared = Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
+
+  const allTxns = appState.data.open_banking_transactions || [];
+  const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const sortedTxns = [...allTxns].sort((a, b) => {
+    const aAmtDiff = Math.abs(Math.abs(Number(a.amount) || 0) - amt);
+    const bAmtDiff = Math.abs(Math.abs(Number(b.amount) || 0) - amt);
+    if (aAmtDiff < 0.05 && bAmtDiff >= 0.05) return -1;
+    if (bAmtDiff < 0.05 && aAmtDiff >= 0.05) return 1;
+    return new Date(b.booking_date || 0) - new Date(a.booking_date || 0);
+  });
+
+  const bodyHtml = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:var(--radius-card); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <div style="font-weight:700; font-size:13px; color:var(--heading);">
+            ${desc} <span style="color:var(--curr-border); margin-left:4px;">${curr}${amt.toFixed(2)}</span>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+            Status: <strong style="color:${isCleared ? 'var(--green)' : 'var(--amber)'};">${isCleared ? '✓ Cleared / Paid' : '⚠️ Due'}</strong>
+            ${item?.matched_payee ? ` • Matched with <em>${item.matched_payee}</em> (${item.matched_date || ''})` : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          ${isCleared ? `
+            <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">❌ Set as Due / Un-match</button>
+          ` : `
+            <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">⚡ Mark Cleared (Manual)</button>
+          `}
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Select Bank Transaction to Link / Match:</label>
+          <input type="text" placeholder="🔍 Filter transactions..." style="font-size:11px; padding:3px 8px; width:160px;" oninput="window.budgetApp.filterBillMatchTxns(this.value)">
+        </div>
+        <div id="billMatchTxnList" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--border); border-radius:6px; padding:6px; background:#0c0d14;">
+          ${sortedTxns.length === 0 ? `
+            <div style="font-size:11px; color:var(--text-muted); text-align:center; padding:16px;">No Open Banking transactions available. Run a Sync in Settings first.</div>
+          ` : sortedTxns.map(t => {
+            const tAmt = Math.abs(Number(t.amount) || 0);
+            const isAmtMatch = Math.abs(tAmt - amt) <= 0.05;
+            const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
+            const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
+            const isRecMatch = isAmtMatch || isNameMatch;
+            const isCurrentMatch = item?.matched_txn_id === t.transaction_id;
+
+            return `
+              <div class="bill-match-row" data-search="${tPayee.toLowerCase()} ${t.account_name || ''} ${tAmt}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; background:${isCurrentMatch ? 'rgba(16,185,129,0.18)' : (isRecMatch ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)')}; border:1px solid ${isCurrentMatch ? 'var(--green)' : (isRecMatch ? 'rgba(56,189,248,0.3)' : 'transparent')};">
+                <div style="min-width:0; flex:1;">
+                  <div style="font-size:11.5px; font-weight:600; color:var(--heading); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${tPayee}
+                    ${isRecMatch ? `<span class="badge" style="font-size:9px; background:rgba(56,189,248,0.25); color:var(--curr-border); padding:1px 4px; margin-left:4px;">✨ Suggested Match</span>` : ''}
+                    ${isCurrentMatch ? `<span class="badge" style="font-size:9px; background:rgba(16,185,129,0.25); color:var(--green); padding:1px 4px; margin-left:4px;">✓ Current Match</span>` : ''}
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted);">
+                    ${t.booking_date || ''} • ${t.account_name || 'Account'} ${t.matched_bill_id && !isCurrentMatch ? `• (Matched: ${t.matched_bill_id})` : ''}
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                  <span style="font-weight:700; font-size:12px; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'};">
+                    ${t.amount < 0 ? '-' : '+'}${curr}${tAmt.toFixed(2)}
+                  </span>
+                  <button type="button" class="btn ${isCurrentMatch ? 'secondary' : 'green'}" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.linkBillToTransaction('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', '${t.transaction_id}', '${dateStr || ''}')">
+                    ${isCurrentMatch ? 'Re-link' : '🔗 Match & Clear'}
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: `🔗 Match Scheduled Bill: ${desc}`,
+    body: bodyHtml,
+    actions: `<button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`
+  });
+}
+
 
 // --- static/js/views/wizard.js ---
 
@@ -4231,9 +5933,10 @@ function renderOverviewView(container) {
       else wExpenseSum += amt;
     });
 
-    const allYearlyBills = getYearData().yearly_recurring || [];
-    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-    const allScheduledBills = [...(mData.direct_debits || []), ...allYearlyBills, ...budgetBillsThisMonth];
+    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = (getYearData().yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
+    const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
     const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
@@ -4245,8 +5948,9 @@ function renderOverviewView(container) {
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
     // Scheduled Payments In / Inflows
-    const allYearlyIncome = getYearData().yearly_income || [];
-    const allScheduledIncomes = [...(mData.payments_in || []), ...allYearlyIncome];
+    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = (getYearData().yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
     const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
@@ -4776,29 +6480,45 @@ function renderOverviewView(container) {
                           ${hasScheduled ? `
                             <div class="col-scheduled-section">
                               <div style="font-size:10px; font-weight:bold; color:var(--curr-border); text-transform:uppercase; margin-bottom:3px;">📅 Scheduled Items:</div>
-                              ${colIncomes.map(i => {
+                              ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
+                                const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const isCleared = Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
+                                const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
+                                const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
+                                const cleanDesc = (i.rawDesc || i.desc || '').replace(/'/g, "\\'");
+                                const sType = i.source_type || 'monthly_payment_in';
+                                const sIdx = i.source_idx !== undefined ? i.source_idx : iIdx;
+                                const statusBadge = `<button type="button" class="badge" style="font-size:9px; background:${isCleared ? 'rgba(16,185,129,0.25)' : (isPastDate ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.08)')}; color:${isCleared ? 'var(--green)' : (isPastDate ? 'var(--amber)' : 'var(--text-muted)')}; border:1px solid ${isCleared ? 'rgba(16,185,129,0.4)' : (isPastDate ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.15)')}; padding:1px 5px; margin-left:3px; cursor:pointer;" onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${i.amount || 0}, '${occDateStr}')" title="${isCleared ? 'Cleared' + (i.matched_payee ? ' (' + i.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">${isCleared ? '✓ Cleared' : (isPastDate ? '⚠️ Due' : '⏳ Upcoming')}</button>${globalEditMode ? `<button type="button" class="btn secondary" style="height:17px; width:17px; font-size:8.5px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:2px;" onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${i.amount || 0}, '${occDateStr}')" title="Match with Bank Transaction">🔗</button>` : ''}`;
                                 if (i.isMovable) {
                                   if (!globalEditMode) {
-                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer; background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" onclick="window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')" title="Click to reschedule or bump forward"><span>📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} <span class="badge" style="font-size:9px; background:rgba(16,185,129,0.2); color:var(--green); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
+                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer; background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" onclick="window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')" title="Click to reschedule or bump forward"><span>📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge} <span class="badge" style="font-size:9px; background:rgba(16,185,129,0.2); color:var(--green); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
                                   } else {
-                                    return `<div class="col-scheduled-item recurring item-entry-sched" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${i.source_idx}, '${activeTab}', '${w}', 'income')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> 📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')">↔</button></div></div>`;
+                                    return `<div class="col-scheduled-item recurring item-entry-sched" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${i.source_idx}, '${activeTab}', '${w}', 'income')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> 📥 ${i.rawDesc || i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${i.source_idx}, '${activeTab}', '${w}', 'income')">↔</button></div></div>`;
                                   }
                                 } else {
-                                  return `<div class="col-scheduled-item" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);"><span>📥 ${i.desc} (${i.actualDateStr}) ${holidayBadge}</span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
+                                  return `<div class="col-scheduled-item" style="background:rgba(16,185,129,0.08); border-left:3px solid var(--green);"><span>📥 ${i.desc} (${i.actualDateStr}) ${holidayBadge} ${statusBadge}</span><span style="color:var(--green); font-weight:600;">+${curr}${Number(i.amount).toFixed(2)}</span></div>`;
                                 }
                               }).join('')}
-                              ${colDDs.map(d => {
-  if (d.isMovable) {
-    if (!globalEditMode) {
-      return `<div class="col-scheduled-item recurring" style="cursor:pointer;" onclick="window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')" title="Click to reschedule or bump forward"><span>${d.desc} (${d.actualDateStr}) <span class="badge" style="font-size:9px; background:rgba(56,189,248,0.2); color:var(--curr-border); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
-    } else {
-      return `<div class="col-scheduled-item recurring item-entry-sched" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${d.source_idx}, '${activeTab}', '${w}')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> ${d.desc} (${d.actualDateStr})</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')">↔</button></div></div>`;
-    }
-  } else {
-    return `<div class="col-scheduled-item"><span>${d.desc} (${d.actualDateStr})</span><span style="color:var(--red);">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
-  }
-}).join('')}
+                              ${colDDs.map((d, dIdx) => {
+                                const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const isCleared = Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
+                                const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;
+                                const isPastDate = pDate ? (pDate.getTime() <= new Date().setHours(23,59,59,999)) : false;
+                                const cleanDesc = (d.rawDesc || d.desc || '').replace(/'/g, "\\'");
+                                const sType = d.source_type || 'direct_debit';
+                                const sIdx = d.source_idx !== undefined ? d.source_idx : dIdx;
+                                const statusBadge = `<button type="button" class="badge" style="font-size:9px; background:${isCleared ? 'rgba(16,185,129,0.25)' : (isPastDate ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.08)')}; color:${isCleared ? 'var(--green)' : (isPastDate ? 'var(--amber)' : 'var(--text-muted)')}; border:1px solid ${isCleared ? 'rgba(16,185,129,0.4)' : (isPastDate ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.15)')}; padding:1px 5px; margin-left:3px; cursor:pointer;" onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${d.amount || 0}, '${occDateStr}')" title="${isCleared ? 'Cleared' + (d.matched_payee ? ' (' + d.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">${isCleared ? '✓ Cleared' : (isPastDate ? '⚠️ Due' : '⏳ Upcoming')}</button>${globalEditMode ? `<button type="button" class="btn secondary" style="height:17px; width:17px; font-size:8.5px; padding:0; display:inline-flex; align-items:center; justify-content:center; margin-left:2px;" onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${activeTab}', '${cleanDesc}', ${d.amount || 0}, '${occDateStr}')" title="Match with Bank Transaction">🔗</button>` : ''}`;
+                                if (d.isMovable) {
+                                  if (!globalEditMode) {
+                                    return `<div class="col-scheduled-item recurring" style="cursor:pointer;" onclick="window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')" title="Click to reschedule or bump forward"><span>${d.desc} (${d.actualDateStr}) ${statusBadge} <span class="badge" style="font-size:9px; background:rgba(56,189,248,0.2); color:var(--curr-border); padding:1px 4px; margin-left:4px;">↔ Move</span></span><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
+                                  } else {
+                                    return `<div class="col-scheduled-item recurring item-entry-sched" draggable="true" ondragstart="window.budgetApp.handleDragStartScheduled(event, ${d.source_idx}, '${activeTab}', '${w}')" ondragend="window.budgetApp.handleDragEnd(event)"><span><span class="drag-handle" title="Drag to move/bump to another week or account">⠿</span> ${d.desc} (${d.actualDateStr}) ${statusBadge}</span><div style="display:flex; align-items:center; gap:4px;"><span style="color:var(--red); font-weight:600;">-${curr}${Number(d.amount).toFixed(2)}</span><button class="move-btn" style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center;" title="Reschedule / Bump Forward" onclick="event.stopPropagation(); window.budgetApp.openRescheduleRecurringModal(${d.source_idx}, '${activeTab}', '${w}')">↔</button></div></div>`;
+                                  }
+                                } else {
+                                  return `<div class="col-scheduled-item"><span>${d.desc} (${d.actualDateStr}) ${statusBadge}</span><span style="color:var(--red);">-${curr}${Number(d.amount).toFixed(2)}</span></div>`;
+                                }
+                              }).join('')}
                               ${colSavingsIn.map(d => `<div class="col-scheduled-item transfer"><span>➔ Transfer from ${d.desc}</span><span style="color:var(--purple); font-weight:bold;">+${curr}${Number(d.amount).toFixed(2)}</span></div>`).join('')}
                               ${colAutoPaysOut.map(a => `<div class="col-scheduled-item autopay-out"><span>💳 Auto-Pay to ${a.card}</span><span style="color:var(--red);">-${curr}${Number(a.amount).toFixed(2)}</span></div>`).join('')}
                               ${colAutoPaysIn.map(a => `<div class="col-scheduled-item autopay-in"><span>✓ Auto-Pay payment</span><span style="color:var(--green);">+${curr}${Number(a.amount).toFixed(2)}</span></div>`).join('')}
@@ -4875,9 +6595,11 @@ function renderOverviewView(container) {
                               const val = actuals[fieldKey];
                               const hasVal = (val !== undefined && val !== "" && val !== null);
                               const ts = actuals._timestamps && actuals._timestamps[fieldKey];
+                              const source = actuals._sources && actuals._sources[fieldKey];
+                              const isAuto = source === 'open_banking';
                               const tsHtml = (hasVal && ts) ? `
                                 <div style="font-size:9px; color:var(--text-muted); margin-top:2px; display:flex; align-items:center; gap:3px;">
-                                  <span>🕒</span><span>${formatCheckInTimestamp(ts)}</span>
+                                  ${isAuto ? '<span style="color:#10b981; font-weight:700;">⚡ Live Sync</span> • ' : '<span>🕒</span>'}<span>${formatCheckInTimestamp(ts)}</span>
                                 </div>
                               ` : '';
 
@@ -4927,18 +6649,78 @@ function renderOverviewView(container) {
                 </div>
               `}
 
-              <div class="week-summary-bar">
-                <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-                  <span>Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
-                  <span>Predicted Net: <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong></span>
-                  ${p.actualNet !== null ? `<span>Actual Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
-                </div>
-                ${p.variance !== null ? `
-                  <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}">
-                    ${p.variance >= 0 ? `✨ ${curr}${p.variance.toFixed(2)} Surplus (Under Budget)` : `⚠️ ${curr}${Math.abs(p.variance).toFixed(2)} Overspent`}
+              ${(() => {
+                const txns = (appState.data && appState.data.open_banking_transactions) || [];
+                if (!txns || txns.length === 0) return '';
+                const wStart = wObj.startDate.getTime();
+                const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59).getTime();
+                const weekTxns = txns.filter(t => {
+                  if (!t.booking_date) return false;
+                  const tTime = new Date(t.booking_date + (t.booking_date.includes('T') ? '' : 'T12:00:00')).getTime();
+                  return tTime >= wStart && tTime <= wEnd;
+                });
+                if (weekTxns.length === 0) return '';
+                const weekTotalSpent = weekTxns.reduce((acc, t) => acc + (t.amount < 0 ? Math.abs(t.amount) : 0), 0);
+                return `
+                  <div style="margin:8px 0 2px 0; background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
+                    <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px;">
+                      <span>⚡ <strong>${weekTxns.length}</strong> Live Bank Transactions</span>
+                      <span style="color:var(--heading); font-weight:600;">(${curr}${weekTotalSpent.toFixed(2)} tracked)</span>
+                    </div>
+                    <button class="btn secondary" style="font-size:10.5px; padding:2px 8px;" onclick="window.budgetApp.openTransactionLedgerModal(${wIdx}, '${activeTab}')">View Transactions</button>
                   </div>
-                ` : '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Enter actual check-in above to calculate variance</span>'}
-              </div>
+                `;
+              })()}
+
+              ${(() => {
+                const isDailyPacingOn = Boolean(isCurrent && cfg.open_banking?.enabled && cfg.open_banking?.live_daily_variance !== false);
+                if (isDailyPacingOn) {
+                  const pacing = calculateLiveDailyPacing(wObj, p, actuals, cfg);
+                  return `
+                    <div class="week-summary-bar" style="background:rgba(2,132,199,0.08); border-top:1px solid rgba(2,132,199,0.25); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                      <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+                        <span title="Planned total outgoings for the full week">Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
+                        <span title="Predicted Net Cash Position for today (Day ${pacing.elapsedDays} of ${pacing.totalDays}) factoring in cleared bills and daily discretionary spending pace">
+                          Predicted Net Today <span style="font-size:10px; color:var(--text-muted);">(Day ${pacing.elapsedDays}/${pacing.totalDays})</span>: 
+                          <strong style="color:${pacing.pacedTargetNetToday >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${pacing.pacedTargetNetToday.toFixed(2)}</strong>
+                        </span>
+                        <span title="Predicted final closing Net Cash Position (Current + Savings - Credit Debt) at the end of this week">
+                          Predicted Net (End of Week): <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong>
+                        </span>
+                        ${p.actualNet !== null ? `<span title="Current live actual Net Cash Position (Current + Savings - Credit Debt) from bank check-in">Live Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
+                      </div>
+                      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        ${pacing.liveDailyVariance !== null ? `
+                          <div class="variance-badge ${pacing.liveDailyVariance >= 0 ? 'surplus' : 'overspent'}" style="display:inline-flex; align-items:center; gap:5px; padding:3px 8px; font-size:11.5px;" title="Live variance against today's day-by-day pace">
+                            <span>${pacing.liveDailyVariance >= 0 ? `✨ +${curr}${pacing.liveDailyVariance.toFixed(2)}` : `⚠️ -${curr}${Math.abs(pacing.liveDailyVariance).toFixed(2)}`} Today</span>
+                            <span style="font-size:9px; opacity:0.85; background:rgba(0,0,0,0.2); padding:1px 4px; border-radius:3px;">Day ${pacing.elapsedDays}/${pacing.totalDays}</span>
+                          </div>
+                        ` : ''}
+                        ${p.variance !== null ? `
+                          <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}" style="display:inline-flex; align-items:center; gap:4px; padding:3px 8px; font-size:11.5px; opacity:0.9;" title="Variance of current live net balance compared against final end-of-week predicted net target">
+                            <span>${p.variance >= 0 ? `+${curr}${p.variance.toFixed(2)}` : `-${curr}${Math.abs(p.variance).toFixed(2)}`} vs End-of-Week Net</span>
+                          </div>
+                        ` : (!pacing.liveDailyVariance ? '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Sync bank account to calculate variance</span>' : '')}
+                      </div>
+                    </div>
+                  `;
+                }
+
+                return `
+                  <div class="week-summary-bar">
+                    <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+                      <span>Week Outgoings: <strong style="color:var(--curr-border);">${curr}${(p.wDDTotal + p.autopaysDue.reduce((s, a) => s + a.amount, 0) + (p.wSpend - p.wIncomeSum)).toFixed(2)}</strong></span>
+                      <span>Predicted Net: <strong style="color:${p.predictedNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.predictedNet.toFixed(2)}</strong></span>
+                      ${p.actualNet !== null ? `<span>Actual Net: <strong style="color:${p.actualNet >= 0 ? 'var(--green)' : 'var(--red)'};">${curr}${p.actualNet.toFixed(2)}</strong></span>` : ''}
+                    </div>
+                    ${p.variance !== null ? `
+                      <div class="variance-badge ${p.variance >= 0 ? 'surplus' : 'overspent'}">
+                        ${p.variance >= 0 ? `✨ ${curr}${p.variance.toFixed(2)} Surplus (Under Budget)` : `⚠️ ${curr}${Math.abs(p.variance).toFixed(2)} Overspent`}
+                      </div>
+                    ` : '<span style="font-size:11px; color:var(--text-muted); font-style:italic;">Enter actual check-in above to calculate variance</span>'}
+                  </div>
+                `;
+              })()}
             </div>
           `;
         }).join('')}
@@ -6016,8 +7798,14 @@ function renderBillsView(container) {
                     `}
                   </td>
                   <td>
-                    <div style="display:flex; align-items:center; gap:2px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                       ${flowBadge} ${cadenceBadge}
+                      <button type="button" class="badge" style="background:${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.15)'}; color:${(b.auto_cleared || b.status === 'paid') ? 'var(--green)' : 'var(--amber)'}; font-size:9.5px; padding:2px 6px; font-weight:600; border:1px solid ${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}; cursor:pointer;" onclick="window.budgetApp.toggleScheduledBillCleared('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="${(b.auto_cleared || b.status === 'paid') ? 'Cleared' + (b.matched_payee ? ' (' + b.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">
+                        ${(b.auto_cleared || b.status === 'paid') ? '⚡ Cleared' : '⚠️ Due'}
+                      </button>
+                      ${globalEditMode ? `
+                        <button type="button" class="btn secondary" style="font-size:9px; padding:1px 5px;" onclick="window.budgetApp.openManualBillMatchModal('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="Match with Bank Transaction">🔗 Match</button>
+                      ` : ''}
                     </div>
                   </td>
                   <td>
@@ -6428,6 +8216,273 @@ function renderYearOverviewView(container) {
   }, 40);
 }
 
+// --- static/js/views/spend_analytics.js ---
+
+
+
+
+function renderSpendAnalyticsView(container) {
+  const cfg = getSettings();
+  const curr = cfg.currency;
+  const isMulti = isMultiUserEnabled();
+  const allTxns = appState.data?.open_banking_transactions || [];
+  const customRules = cfg.merchant_category_rules || {};
+
+  const timeframe = appState.spendFilterTimeframe || 'this_month';
+  const accountFilter = appState.spendFilterAccount || 'all';
+  const categoryFilter = appState.spendFilterCategory || 'all';
+  const searchQuery = (appState.spendSearchQuery || '').toLowerCase().trim();
+  const activeUser = isMulti ? (appState.activeUser || 'Joint') : 'all';
+
+  const breakdown = calculateCategoryBreakdown(allTxns, timeframe, accountFilter, activeUser, customRules);
+  const { categoryList, topMerchants, grandTotal, transactionCount, startDate, endDate } = breakdown;
+
+  let displayTxns = breakdown.filteredTransactions;
+  if (categoryFilter !== 'all') {
+    displayTxns = displayTxns.filter(t => t.assignedCategory?.id === categoryFilter);
+  }
+  if (searchQuery) {
+    displayTxns = displayTxns.filter(t => {
+      const p = (t.payee_name || '').toLowerCase();
+      const r = (t.raw_info || '').toLowerCase();
+      const a = (t.account_name || '').toLowerCase();
+      const amt = String(Math.abs(Number(t.amount || 0)));
+      return p.includes(searchQuery) || r.includes(searchQuery) || a.includes(searchQuery) || amt.includes(searchQuery);
+    });
+  }
+
+  const now = new Date();
+  const sDate = startDate || new Date(now.getFullYear(), now.getMonth(), 1);
+  const eDate = endDate || now;
+  const dayCount = Math.max(1, Math.round((Math.min(now.getTime(), eDate.getTime()) - sDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  const avgDailySpend = grandTotal / dayCount;
+
+  const topCat = categoryList.length > 0 ? categoryList[0] : null;
+
+  const linkedAccounts = cfg.open_banking?.linked_accounts || [];
+  const distinctAccounts = Array.from(new Set([
+    ...(cfg.current_accounts || []),
+    ...(cfg.credit_accounts || []).map(ca => typeof ca === 'string' ? ca : ca.name),
+    ...allTxns.map(t => t.account_name).filter(Boolean)
+  ]));
+
+  container.innerHTML = `
+    <!-- HEADER PANEL -->
+    <div class="panel" style="margin-bottom:16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h2 style="margin:0; font-size:20px; display:flex; align-items:center; gap:8px;">
+            <span>🛒</span> Live Spend & Category Analytics
+          </h2>
+          <p style="color:var(--text-muted); font-size:12px; margin:4px 0 0 0;">
+            Real-time categorization and breakdown of your bank card purchases, fuel, groceries, and living expenses.
+          </p>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <!-- Timeframe selector -->
+          <div style="display:flex; align-items:center; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:2px;">
+            <button class="btn ${timeframe === 'active_week' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('active_week')">This Week</button>
+            <button class="btn ${timeframe === 'this_month' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('this_month')">This Month</button>
+            <button class="btn ${timeframe === 'last_month' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('last_month')">Last Month</button>
+            <button class="btn ${timeframe === 'last_30_days' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('last_30_days')">Last 30 Days</button>
+            <button class="btn ${timeframe === 'year_to_date' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('year_to_date')">Full Year</button>
+          </div>
+
+          <!-- Account selector -->
+          <select onchange="window.budgetApp.setSpendAnalyticsAccount(this.value)" style="font-size:11.5px; padding:5px 8px; border-radius:6px; font-weight:600;">
+            <option value="all" ${accountFilter === 'all' ? 'selected' : ''}>💳 All Accounts Combined</option>
+            ${distinctAccounts.map(acc => `<option value="${acc}" ${accountFilter === acc ? 'selected' : ''}>${acc}</option>`).join('')}
+          </select>
+
+          <button class="btn secondary" style="font-size:11.5px; padding:5px 10px;" onclick="window.budgetApp.syncCategoriesGitHub()" title="Pull latest merchant categories database from GitHub">
+            🌐 Update Dictionary
+          </button>
+
+          <button class="btn green" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.triggerOpenBankingSync()" title="Fetch latest live transactions">
+            🔄 Sync Bank
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI METRICS SUMMARY -->
+    <div class="kpi-grid" style="margin-bottom:16px;">
+      <div class="kpi-card">
+        <div class="kpi-label">Total Outgoings (${timeframe === 'active_week' ? 'Week' : timeframe === 'last_30_days' ? '30 Days' : 'Month'})</div>
+        <div class="kpi-value" style="color:var(--curr-border);">${curr}${grandTotal.toFixed(2)}</div>
+        <div class="kpi-sub">${transactionCount} transactions analyzed</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Daily Average Burn Rate</div>
+        <div class="kpi-value" style="color:var(--heading);">${curr}${avgDailySpend.toFixed(2)} <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">/ day</span></div>
+        <div class="kpi-sub">Calculated over ${dayCount} active days</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Top Spending Category</div>
+        <div class="kpi-value" style="color:${topCat ? topCat.category.color : 'var(--heading)'}; font-size:18px;">
+          ${topCat ? `${topCat.category.icon} ${topCat.category.label}` : 'None'}
+        </div>
+        <div class="kpi-sub">${topCat ? `${curr}${topCat.totalAmount.toFixed(2)} (${topCat.percentage.toFixed(1)}% of total)` : 'No transactions recorded'}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active Bank Accounts</div>
+        <div class="kpi-value" style="color:var(--green);">${linkedAccounts.length > 0 ? linkedAccounts.length : distinctAccounts.length} Linked</div>
+        <div class="kpi-sub">${cfg.open_banking?.enabled ? '🟢 Auto-Syncing live feeds' : 'Offline / Manual mode'}</div>
+      </div>
+    </div>
+
+    <!-- MAIN VISUAL DASHBOARD (DONUT CHART & CATEGORY BARS) -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap:16px; margin-bottom:16px;">
+      <!-- DONUT CHART PANEL -->
+      <div class="panel" style="display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:15px; color:var(--heading);">📊 Spend by Category</h3>
+          <span style="font-size:11px; color:var(--text-muted);">${categoryList.length} Active Categories</span>
+        </div>
+        <div style="position:relative; flex:1; min-height:280px; max-height:340px; display:flex; align-items:center; justify-content:center;">
+          <canvas id="spendCategoryDonutCanvas"></canvas>
+        </div>
+      </div>
+
+      <!-- RANKED CATEGORY PROGRESS BARS -->
+      <div class="panel" style="display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <h3 style="margin:0; font-size:15px; color:var(--heading);">🏆 Category Ranking</h3>
+          <span style="font-size:11px; color:var(--text-muted);">Ranked by Total Spend</span>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:10px; overflow-y:auto; max-height:340px; padding-right:4px;">
+          ${categoryList.length > 0 ? categoryList.map(c => `
+            <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; cursor:pointer;" onclick="window.budgetApp.setSpendCategoryFilter('${c.category.id}')" title="Click to filter transactions for ${c.category.label}">
+              <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; margin-bottom:5px;">
+                <span style="font-weight:600; color:var(--heading); display:flex; align-items:center; gap:6px;">
+                  <span>${c.category.icon}</span>
+                  <span>${c.category.label}</span>
+                  <span style="font-size:10px; color:var(--text-muted); font-weight:normal;">(${c.count} txns)</span>
+                </span>
+                <span style="font-weight:700; color:var(--heading);">
+                  ${curr}${c.totalAmount.toFixed(2)}
+                  <span style="font-size:10.5px; color:var(--text-muted); font-weight:normal; margin-left:2px;">(${c.percentage.toFixed(1)}%)</span>
+                </span>
+              </div>
+              <div style="width:100%; height:6px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden;">
+                <div style="width:${Math.min(100, Math.max(2, c.percentage))}%; height:100%; background:${c.category.color}; border-radius:3px;"></div>
+              </div>
+            </div>
+          `).join('') : `
+            <div style="color:var(--text-muted); font-size:12px; text-align:center; padding:30px 0;">No spending categories recorded for this period.</div>
+          `}
+        </div>
+      </div>
+    </div>
+
+    <!-- TOP MERCHANTS ROW -->
+    ${topMerchants.length > 0 ? `
+      <div class="panel" style="margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+          <h3 style="margin:0; font-size:14px; color:var(--heading);">🏪 Top Merchants in Period</h3>
+          <span style="font-size:11px; color:var(--text-muted);">Highest spending destinations</span>
+        </div>
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap:8px;">
+          ${topMerchants.map((m, idx) => `
+            <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; cursor:pointer;" onclick="window.budgetApp.setSpendSearchQuery(this.dataset.merchant)" data-merchant="${m.name}" title="Filter transactions for ${m.name}">
+              <div style="min-width:0; margin-right:8px;">
+                <div style="font-size:10px; color:var(--text-muted); font-weight:700;">#${idx + 1}</div>
+                <div style="font-size:12px; font-weight:600; color:var(--heading); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${m.name}</div>
+              </div>
+              <div style="font-weight:700; color:var(--curr-border); font-size:12px; white-space:nowrap;">
+                ${curr}${m.amount.toFixed(2)}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : ''}
+
+    <!-- CATEGORIZED TRANSACTIONS TABLE PANEL -->
+    <div class="panel">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+        <div>
+          <h3 style="margin:0; font-size:15px; color:var(--heading);">🧾 Categorized Transactions</h3>
+          <span style="font-size:11px; color:var(--text-muted);">Showing ${displayTxns.length} transactions</span>
+        </div>
+
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <!-- Category Filter -->
+          <select onchange="window.budgetApp.setSpendCategoryFilter(this.value)" style="font-size:11.5px; padding:4px 8px; border-radius:6px;">
+            <option value="all" ${categoryFilter === 'all' ? 'selected' : ''}>All Categories</option>
+            ${SPEND_CATEGORIES.map(cat => `<option value="${cat.id}" ${categoryFilter === cat.id ? 'selected' : ''}>${cat.icon} ${cat.label}</option>`).join('')}
+          </select>
+
+          <!-- Search Input -->
+          <div style="position:relative;">
+            <input type="text" placeholder="🔍 Search merchant..." value="${appState.spendSearchQuery || ''}" oninput="window.budgetApp.setSpendSearchQuery(this.value)" style="font-size:11.5px; padding:4px 8px; width:160px; border-radius:6px;">
+            ${appState.spendSearchQuery ? `<button style="position:absolute; right:4px; top:4px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:11px;" onclick="window.budgetApp.setSpendSearchQuery('')">&times;</button>` : ''}
+          </div>
+        </div>
+      </div>
+
+      <div style="overflow-x:auto;">
+        <table class="data-table" style="width:100%; font-size:12px;">
+          <thead>
+            <tr>
+              <th style="width:90px;">Date</th>
+              <th>Payee / Merchant</th>
+              <th>Account</th>
+              ${isMulti ? '<th style="width:80px;">Owner</th>' : ''}
+              <th style="width:170px;">Category</th>
+              <th class="text-right" style="width:100px;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${displayTxns.length > 0 ? displayTxns.map(t => {
+              const cat = t.assignedCategory || SPEND_CATEGORIES[SPEND_CATEGORIES.length - 1];
+              return `
+                <tr>
+                  <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px;">${t.booking_date}</td>
+                  <td>
+                    <strong style="color:var(--heading); font-size:12.5px;">${t.payee_name || 'Transaction'}</strong>
+                    ${t.raw_info && t.raw_info !== t.payee_name ? `<div style="font-size:10px; color:var(--text-muted); opacity:0.8;">${t.raw_info}</div>` : ''}
+                  </td>
+                  <td style="color:var(--text-muted); font-size:11.5px;">${t.account_name || 'Account'}</td>
+                  ${isMulti ? `<td style="font-size:11px; color:var(--text-muted);">${t.owner || 'Joint'}</td>` : ''}
+                  <td>
+                    <button class="badge" style="background:rgba(255,255,255,0.06); border:1px solid ${cat.color}60; color:${cat.color}; font-size:11px; padding:2px 8px; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; font-weight:600;" onclick="window.budgetApp.openRecategorizeModal(this.dataset.txnid, this.dataset.payee, this.dataset.catid)" data-txnid="${t.transaction_id}" data-payee="${t.payee_name || ''}" data-catid="${cat.id}" title="Click to change category or create custom rule">
+                      <span>${cat.icon}</span>
+                      <span>${cat.label}</span>
+                      <span style="font-size:9px; opacity:0.7;">▾</span>
+                    </button>
+                  </td>
+                  <td class="text-right" style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap;">
+                    ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
+                  </td>
+                </tr>
+              `;
+            }).join('') : `
+              <tr>
+                <td colspan="${isMulti ? 6 : 5}" style="text-align:center; padding:30px; color:var(--text-muted);">
+                  No transactions found matching the selected filters.
+                </td>
+              </tr>
+            `}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  setTimeout(() => {
+    const canvas = document.getElementById('spendCategoryDonutCanvas');
+    if (canvas) {
+      renderCategoryDonutChart(canvas, categoryList, curr);
+    }
+  }, 50);
+}
+
+if (typeof window !== 'undefined') {
+  window.renderSpendAnalyticsView = renderSpendAnalyticsView;
+}
+
 // --- static/js/views/settings.js ---
 
 
@@ -6815,6 +8870,289 @@ function renderSettingsView(container) {
       ${(!isMulti || activeUser === 'Joint') ? `
         <button class="btn secondary" style="margin-top:8px;" onclick="window.budgetApp.addPerson()">+ Add Household Member</button>
       ` : ''}
+
+      <h3 style="margin-top:24px;">⚡ Open Banking & Automated Sync</h3>
+      <div style="margin:10px 0 16px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+          <div style="flex:1; min-width:200px;">
+            <div style="font-weight:700; font-size:13px; color:var(--heading); display:flex; align-items:center; gap:6px;">
+              <span>⚡ Live Bank Connection & Feed</span>
+              ${cfg.open_banking && cfg.open_banking.enabled ? '<span class="badge" style="background:#10b981; color:#fff; font-size:10px;">Active</span>' : '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); font-size:10px;">Disabled</span>'}
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:4px; line-height:1.4;">
+              Automatically synchronize bank balances, auto-clear scheduled Direct Debits, and track daily spending.
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <label style="font-size:12px; cursor:pointer; font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+              <input type="checkbox" id="cfg-openbanking-enabled" ${cfg.open_banking && cfg.open_banking.enabled ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingEnabled(this.checked)"> Enable Open Banking
+            </label>
+          </div>
+        </div>
+
+        ${cfg.open_banking && cfg.open_banking.enabled ? `
+          <div style="border-top:1px dashed var(--border); padding-top:12px; margin-top:8px;">
+            <div style="margin-bottom:12px;">
+              <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:700; display:block; margin-bottom:4px;">Integration Provider:</label>
+              <select id="cfg-openbanking-provider" onchange="window.budgetApp.updateOpenBankingProvider(this.value)" style="width:100%; font-weight:600; font-size:12.5px;">
+                <option value="truelayer" ${(!cfg.open_banking.provider || cfg.open_banking.provider === 'truelayer') ? 'selected' : ''}>🟢 TrueLayer (UK - Supported & Verified)</option>
+                <option value="enablebanking" ${cfg.open_banking.provider === 'enablebanking' ? 'selected' : ''}>🧪 Enable Banking (UK & Europe - Experimental)</option>
+                <option value="gocardless" ${cfg.open_banking.provider === 'gocardless' ? 'selected' : ''}>🧪 GoCardless (UK & Europe - Experimental)</option>
+                <option value="simplefin" ${cfg.open_banking.provider === 'simplefin' ? 'selected' : ''}>🧪 SimpleFIN Bridge (US & Canada - Experimental)</option>
+                <option value="file_import" ${cfg.open_banking.provider === 'file_import' ? 'selected' : ''}>📁 Direct Statement Import (Offline CSV / OFX / QIF)</option>
+              </select>
+            </div>
+
+            ${(cfg.open_banking.provider === 'file_import') ? `
+              <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px; margin-bottom:12px;">
+                <div style="font-weight:600; font-size:12px; color:var(--heading); margin-bottom:4px;">📁 Offline Bank Statement Importer</div>
+                <div style="font-size:11px; color:var(--text-muted); line-height:1.4; margin-bottom:10px;">
+                  Import your downloaded bank statements (.CSV, .OFX, .QIF) from any bank without registering any API credentials.
+                </div>
+                <button type="button" class="btn green" style="font-size:11.5px; padding:6px 14px;" onclick="window.budgetApp.openBankStatementUploadModal()">📥 Upload Bank Statement</button>
+              </div>
+            ` : `
+              <div style="font-size:11px; color:var(--text-muted); margin-bottom:10px;">
+                ${(!cfg.open_banking.provider || cfg.open_banking.provider === 'truelayer') ? `
+                  Get free developer credentials from <a href="https://truelayer.com/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">truelayer.com ↗</a> (Fully supported & verified for UK banks and credit cards).
+                ` : cfg.open_banking.provider === 'enablebanking' ? `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> Get free developer credentials from <a href="https://enablebanking.com/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">enablebanking.com ↗</a> (Community tested).
+                ` : cfg.open_banking.provider === 'simplefin' ? `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> Claim a token from <a href="https://bridge.simplefin.org/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">bridge.simplefin.org ↗</a> (\$1.50/month for US/Canada).
+                ` : `
+                  <span class="badge" style="background:rgba(245,158,11,0.2); color:var(--amber); font-size:9.5px; margin-right:4px;">🧪 Experimental</span> For existing developer accounts on <a href="https://bankaccountdata.gocardless.com/overview/" target="_blank" rel="noopener" style="color:var(--curr-border); text-decoration:underline; font-weight:600;">bankaccountdata.gocardless.com ↗</a>.
+                `}
+              </div>
+
+              <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:10px; margin-bottom:12px;">
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    ${cfg.open_banking.provider === 'simplefin' ? 'Access URL or Setup Token:' : cfg.open_banking.provider === 'enablebanking' ? 'Application ID:' : cfg.open_banking.provider === 'truelayer' ? 'Client ID:' : 'Secret ID (Client ID):'}
+                  </label>
+                  <input type="password" id="cfg-openbanking-secret-id" value="${cfg.open_banking.secret_id || ''}" placeholder="${cfg.open_banking.provider === 'simplefin' ? 'https://bridge.simplefin.org/...' : 'e.g. 7a8b9c...'}" style="width:100%;">
+                </div>
+                ${cfg.open_banking.provider !== 'simplefin' ? `
+                  <div>
+                    <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                      ${cfg.open_banking.provider === 'enablebanking' ? 'Application Key / Secret:' : cfg.open_banking.provider === 'truelayer' ? 'Client Secret:' : 'Secret Key:'}
+                    </label>
+                    <input type="password" id="cfg-openbanking-secret-key" value="${cfg.open_banking.secret_key || ''}" placeholder="••••••••••••••••" style="width:100%;">
+                  </div>
+                ` : ''}
+                ${(cfg.open_banking.provider === 'truelayer' || cfg.open_banking.provider === 'enablebanking') ? `
+                  <div>
+                    <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                      Environment:
+                    </label>
+                    <select id="cfg-openbanking-env" style="width:100%; font-size:12px;">
+                      <option value="live" ${cfg.open_banking.environment !== 'sandbox' ? 'selected' : ''}>🟢 Live (Real Bank Accounts)</option>
+                      <option value="sandbox" ${cfg.open_banking.environment === 'sandbox' ? 'selected' : ''}>🟡 Sandbox (Test Mock Banks)</option>
+                    </select>
+                  </div>
+                ` : ''}
+                <div>
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    Auto-Sync Frequency:
+                  </label>
+                  <select id="cfg-openbanking-interval" style="width:100%; font-size:12px;">
+                    <option value="2" ${Number(cfg.open_banking.auto_sync_interval_hours) === 2 ? 'selected' : ''}>Every 2 Hours</option>
+                    <option value="4" ${Number(cfg.open_banking.auto_sync_interval_hours) === 4 ? 'selected' : ''}>Every 4 Hours</option>
+                    <option value="6" ${(!cfg.open_banking.auto_sync_interval_hours || Number(cfg.open_banking.auto_sync_interval_hours) === 6) ? 'selected' : ''}>Every 6 Hours (Recommended)</option>
+                    <option value="12" ${Number(cfg.open_banking.auto_sync_interval_hours) === 12 ? 'selected' : ''}>Every 12 Hours</option>
+                    <option value="24" ${Number(cfg.open_banking.auto_sync_interval_hours) === 24 ? 'selected' : ''}>Once a Day (24 Hours)</option>
+                    <option value="0" ${Number(cfg.open_banking.auto_sync_interval_hours) === 0 ? 'selected' : ''}>Manual Only (Disabled)</option>
+                  </select>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    Registered Redirect URI (Must match developer console exactly):
+                  </label>
+                  <input type="text" id="cfg-openbanking-redirect-uri" value="${cfg.open_banking.redirect_uri || ''}" placeholder="e.g. https://home.bb12ett.uk/ or leave blank for auto-detect" style="width:100%;">
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; margin-top:4px;">
+                    <input type="checkbox" id="cfg-openbanking-auto-checkins" ${cfg.open_banking.auto_update_checkins !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingAutoCheckins(this.checked)">
+                    <span>⚡ <strong>Auto-Update Weekly Check-Ins:</strong> Automatically populate current week's actual balances from live bank accounts</span>
+                  </label>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; margin-top:4px;">
+                    <input type="checkbox" id="cfg-openbanking-live-daily-variance" ${cfg.open_banking.live_daily_variance !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingLiveDailyVariance(this.checked)">
+                    <span>📊 <strong>Live Intra-Week Daily Variance:</strong> Calculate budget pace to the day and factor in cleared vs upcoming scheduled bills for a true live-to-the-day variance</span>
+                  </label>
+                </div>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:14px;">
+                <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.saveOpenBankingKeys()">💾 Save API Keys</button>
+                <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                  <button type="button" class="btn green" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openBankLinkModal()">+ Connect Bank Account</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openManualAuthCodeModal()">📋 Enter Return Code</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openBankStatementUploadModal()">📥 Import Statement</button>
+                  <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Sync Now</button>
+                </div>
+              </div>
+            `}
+
+            ${(cfg.open_banking && (cfg.open_banking.last_sync_status === 'error' || cfg.open_banking.last_sync_status === 'partial_error' || cfg.open_banking.last_sync_error)) ? `
+              <div id="openBankingErrorBanner" style="background:rgba(239, 68, 68, 0.15); border:1px solid rgba(239, 68, 68, 0.4); border-radius:var(--radius-card); padding:10px 14px; margin:12px 0; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <span style="font-size:18px;">⚠️</span>
+                  <div>
+                    <div style="font-weight:700; font-size:12.5px; color:var(--red, #ef4444);">
+                      ${cfg.open_banking.last_sync_status === 'partial_error' ? 'Open Banking Partial Sync Notice' : 'Open Banking Sync Error'}
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); line-height:1.4;">
+                      ${cfg.open_banking.last_sync_error || 'A sync attempt failed. Check your bank connection or view the real-time debug log.'}
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openDebugLogModal()">📋 View Log</button>
+                  <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Retry Sync</button>
+                </div>
+              </div>
+            ` : ''}
+
+            <h4 style="font-size:12px; color:var(--heading); margin:12px 0 6px 0;">Connected Bank Accounts (${(cfg.open_banking.linked_accounts || []).length})</h4>
+            <div id="linkedAccountsList" style="display:flex; flex-direction:column; gap:8px;">
+              ${(cfg.open_banking.linked_accounts || []).length === 0 ? `
+                <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:6px 0;">No bank accounts connected yet. Click "+ Connect Bank Account" above to link your first account.</div>
+              ` : (cfg.open_banking.linked_accounts || []).map((acc) => `
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:8px 12px; flex-wrap:wrap;">
+                  <div style="display:flex; align-items:center; gap:8px; min-width:180px;">
+                    <div style="width:24px; height:24px; border-radius:4px; display:flex; align-items:center; justify-content:center; flex-shrink:0; background:rgba(255,255,255,0.08);">
+                      ${acc.institution_logo ? `
+                        <img src="${acc.institution_logo}" style="width:20px; height:20px; border-radius:3px; object-fit:contain;" alt="" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" loading="lazy">
+                        <span style="display:none; font-size:12px;">🏛️</span>
+                      ` : `<span style="font-size:12px;">🏛️</span>`}
+                    </div>
+                    <div>
+                      <div style="font-weight:600; font-size:12px; color:var(--heading);">
+                        ${(() => {
+                          const mappedClean = (acc.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim();
+                          const rawName = `${acc.institution_name || 'Bank'} - ${acc.account_name || 'Account'}`;
+                          if (mappedClean) {
+                            return `${mappedClean} <span style="font-weight:normal; font-size:10.5px; color:var(--text-muted);">(${rawName})</span>`;
+                          }
+                          return rawName;
+                        })()}
+                      </div>
+                      <div style="font-size:10px; color:var(--text-muted);">
+                        ${acc.iban_or_masked_num || ''} • 
+                        ${(() => {
+                          const mappedClean = (acc.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim();
+                          const cardObj = (cfg.credit_accounts || []).find(ca => {
+                            const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                            return caName.toLowerCase() === mappedClean.toLowerCase() || caName.toLowerCase() === (acc.mapped_habit_account_id || '').toLowerCase();
+                          });
+                          const isCard = Boolean(cardObj || acc.account_type === 'CARD' || acc.last_available !== undefined || (acc.account_name && acc.account_name.toLowerCase().includes('card')));
+                          if (isCard) {
+                            const debt = Number(acc.last_balance || 0);
+                            const cardLimit = Number(typeof cardObj === 'object' ? (cardObj.limit || acc.credit_limit || 0) : (acc.credit_limit || 0));
+                            const avail = acc.last_available !== undefined && Number(acc.last_available) > 0 ? Number(acc.last_available) : Math.max(0, cardLimit - debt);
+                            return `Debt: ${cfg.currency || '£'}${Math.abs(debt).toFixed(2)} (Available: ${cfg.currency || '£'}${avail.toFixed(2)})`;
+                          }
+                          return `Last Balance: ${cfg.currency || '£'}${Number(acc.last_balance || 0).toFixed(2)}`;
+                        })()}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <select onchange="window.budgetApp.updateLinkedAccountMapping('${acc.account_id}', this.value)" style="font-size:11px; padding:3px 6px;" title="Mapped HABit Account">
+                      <option value="">-- Map to HABit Account --</option>
+                      ${(cfg.current_accounts || []).map(ca => {
+                        const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === caName || acc.mapped_habit_account_id === `current:${caName}`);
+                        return `<option value="${caName}" ${isSel ? 'selected' : ''}>Checking: ${caName}</option>`;
+                      }).join('')}
+                      ${(cfg.credit_accounts || []).map(ca => {
+                        const caName = typeof ca === 'string' ? ca : (ca.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === caName || acc.mapped_habit_account_id === `credit:${caName}`);
+                        return `<option value="${caName}" ${isSel ? 'selected' : ''}>Credit: ${caName}</option>`;
+                      }).join('')}
+                      ${(cfg.savings_accounts || []).map(sa => {
+                        const saName = typeof sa === 'string' ? sa : (sa.name || '');
+                        const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === saName || acc.mapped_habit_account_id === `savings:${saName}`);
+                        return `<option value="${saName}" ${isSel ? 'selected' : ''}>Savings: ${saName}</option>`;
+                      }).join('')}
+                    </select>
+
+                    ${isMulti ? `
+                      <select onchange="window.budgetApp.updateLinkedAccountOwner('${acc.account_id}', this.value)" style="font-size:11px; padding:3px 6px;" title="Account Owner">
+                        <option value="Joint" ${acc.owner === 'Joint' ? 'selected' : ''}>👥 Joint</option>
+                        ${(cfg.people || []).map(p => `<option value="${p}" ${acc.owner === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+                      </select>
+                    ` : ''}
+
+                    <button type="button" class="del-btn" style="width:24px; height:24px; border-radius:4px;" onclick="window.budgetApp.unlinkAccount('${acc.account_id}')" title="Unlink Bank Account">&times;</button>
+                  </div>
+                </div>
+              `).join('')}
+
+              <div style="margin-top:14px; padding-top:12px; border-top:1px dashed var(--border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+                <div>
+                  <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer;">
+                    <input type="checkbox" id="cfg-openbanking-debug-logging" ${cfg.open_banking.debug_logging ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingDebugLogging(this.checked)">
+                    <span>🛠️ <strong>Enable Open Banking Debug Logging:</strong> Log detailed API requests, responses, and sync calculations to <code>open_banking_debug.txt</code></span>
+                  </label>
+                </div>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openDebugLogModal()">📄 View Debug Log</button>
+                  <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.clearDebugLog()">🗑️ Clear Log</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        <!-- SPEND CATEGORIES & CUSTOM RULES PANEL -->
+        <div class="panel" style="margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>🛒</span> Spend Categories & Community Merchant Database
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                HABit uses an open-source merchant dictionary to automatically categorize bank transactions.
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.exportMerchantCategoryRules()">
+                📋 Export Custom Rules
+              </button>
+              <button type="button" class="btn green" style="font-size:11px; padding:4px 12px;" onclick="window.budgetApp.syncCategoriesGitHub()">
+                🌐 Sync from GitHub
+              </button>
+            </div>
+          </div>
+
+          <!-- Custom Merchant Rules List -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+            <div style="font-size:12px; font-weight:600; color:var(--heading); margin-bottom:8px;">
+              Your Personal Merchant Rules (${Object.keys(cfg.merchant_category_rules || {}).length} saved)
+            </div>
+            ${Object.keys(cfg.merchant_category_rules || {}).length === 0 ? `
+              <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:6px 0;">
+                No custom merchant rules saved yet. When you recategorize an unrecognized transaction in Live Spend, you can save custom rules here.
+              </div>
+            ` : `
+              <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:6px; max-height:220px; overflow-y:auto; padding-right:4px;">
+                ${Object.entries(cfg.merchant_category_rules || {}).map(([pattern, catId]) => `
+                  <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center;">
+                    <div style="min-width:0; margin-right:8px;">
+                      <div style="font-size:12px; font-weight:600; color:var(--heading); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${pattern}</div>
+                      <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase;">Category: ${catId}</div>
+                    </div>
+                    <button type="button" class="del-btn" style="width:22px; height:22px; border-radius:4px; font-size:12px;" onclick="window.budgetApp.deleteMerchantCategoryRule(this.dataset.rule)" data-rule="${pattern}" title="Delete Rule">&times;</button>
+                  </div>
+                `).join('')}
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
 
       <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:flex-end;">
         <button class="btn green" onclick="window.budgetApp.saveSettingsForm()">Save Settings</button>
@@ -7657,6 +9995,7 @@ function initCalculator() {
 
 
 
+
 ﻿
 
 
@@ -7686,6 +10025,8 @@ function updateTopBarTitle() {
     titleEl.innerText = `Budgets ${yr}`;
   } else if (appState.activeTab === 'Bills') {
     titleEl.innerText = `Bills ${yr}`;
+  } else if (appState.activeTab === 'Spend') {
+    titleEl.innerText = `Live Spend ${yr}`;
   } else if (appState.activeTab === 'Settings') {
     titleEl.innerText = 'Settings';
   } else if (appState.activeTab) {
@@ -7762,6 +10103,27 @@ function renderUserProfileNav() {
       </div>
     `;
     optionsEl.innerHTML = optsHtml;
+  }
+}
+
+function renderOpenBankingNavStatus() {
+  const btn = document.getElementById('openBankingSyncErrorBtn');
+  if (!btn) return;
+  const cfg = getSettings();
+  const obCfg = cfg.open_banking || {};
+  const status = obCfg.last_sync_status;
+  const hasError = obCfg.enabled && (status === 'error' || status === 'partial_error' || Boolean(obCfg.last_sync_error));
+
+  if (hasError) {
+    btn.style.display = 'inline-flex';
+    const errText = obCfg.last_sync_error || 'Open Banking Sync Error';
+    btn.title = `⚠️ Open Banking Sync Issue: ${errText}\nClick to open Settings & view debug logs.`;
+    const textSpan = btn.querySelector('.btn-text');
+    if (textSpan) {
+      textSpan.innerText = status === 'partial_error' ? ' Partial Sync' : ' Sync Error';
+    }
+  } else {
+    btn.style.display = 'none';
   }
 }
 
@@ -7862,6 +10224,7 @@ function renderNav() {
 
   html += `<button class="tab-btn special ${appState.activeTab === 'Budgets' ? 'active' : ''}" onclick="window.budgetApp.setTab('Budgets')">🎯 Budgets & Occasions</button>`;
   html += `<button class="tab-btn special ${appState.activeTab === 'Bills' ? 'active' : ''}" onclick="window.budgetApp.setTab('Bills')">📅 Scheduled Bills</button>`;
+  html += `<button class="tab-btn special ${appState.activeTab === 'Spend' ? 'active' : ''}" onclick="window.budgetApp.setTab('Spend')">🛒 Live Spend</button>`;
   html += `<button class="tab-btn special ${appState.activeTab === 'Year' ? 'active' : ''}" onclick="window.budgetApp.setTab('Year')">📊 Annual Trajectory</button>`;
   
   const navTabsEl = document.getElementById('navTabs');
@@ -7870,8 +10233,12 @@ function renderNav() {
 
 function renderContent() {
   try {
+    if (typeof reconcileTransactionsWithScheduledBills === 'function' && appState.data) {
+      reconcileTransactionsWithScheduledBills(appState.data);
+    }
     updateTopBarTitle();
     renderUserProfileNav();
+    renderOpenBankingNavStatus();
     if (window.budgetApp && typeof window.budgetApp.updateLockNavBtn === 'function') {
       window.budgetApp.updateLockNavBtn();
     }
@@ -7901,6 +10268,27 @@ function renderContent() {
         metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">📅 Scheduled & Recurring Bills (${appState.currentYear})</span>`;
       }
       renderBillsView(container);
+      return;
+    }
+    if (appState.activeTab === 'Spend') {
+      if (metaBar) {
+        metaBar.style.display = 'flex';
+        metaBar.innerHTML = `<span style="font-size:12px; font-weight:600; color:var(--text-muted);">🛒 Live Spend & Category Analytics</span>`;
+      }
+      try {
+        if (typeof renderSpendAnalyticsView === 'function') {
+          renderSpendAnalyticsView(container);
+        } else if (typeof window !== 'undefined' && typeof window.renderSpendAnalyticsView === 'function') {
+          window.renderSpendAnalyticsView(container);
+        } else if (window.budgetApp && typeof window.budgetApp.renderSpendAnalyticsView === 'function') {
+          window.budgetApp.renderSpendAnalyticsView(container);
+        } else {
+          container.innerHTML = '<div style="padding:30px; text-align:center; color:var(--red);">⚠️ Live Spend module loading... Please hard refresh (Ctrl + F5).</div>';
+        }
+      } catch (err) {
+        console.error("Error rendering Live Spend:", err);
+        container.innerHTML = `<div style="padding:30px; text-align:center; color:var(--red);">⚠️ Error rendering Live Spend: ${err.message}</div>`;
+      }
       return;
     }
     if (appState.activeTab === 'Year') {
@@ -8003,15 +10391,19 @@ async function init() {
     // Setup background auto-reload on focus if container was rebuilt
     if (!window.__hasVersionFocusListener) {
       window.__hasVersionFocusListener = true;
+      let lastVersionCheck = Date.now();
       window.addEventListener('focus', async () => {
         try {
+          const now = Date.now();
+          if (now - lastVersionCheck < 60000) return; // At most once a minute
+          lastVersionCheck = now;
           let p = window.location.pathname;
           if (p.endsWith('index.html')) p = p.slice(0, -10);
           if (!p.endsWith('/')) p += '/';
           const r = await fetch(p + 'api/version', { cache: 'no-store' });
           if (r.ok) {
             const vData = await r.json();
-            if (vData && vData.build_id && window.__BUILD_ID__ && vData.build_id !== window.__BUILD_ID__) {
+            if (vData && vData.build_id && window.__BUILD_ID__ && String(vData.build_id) !== String(window.__BUILD_ID__)) {
               console.log('[BudgetApp] New version detected on server (' + vData.build_id + '). Auto-reloading...');
               window.location.reload(true);
             }
@@ -8023,11 +10415,60 @@ async function init() {
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
     }
+
+    // Check for Open Banking redirect callback (OAuth code, req_id, state)
+    try {
+      let searchStr = window.location.search;
+      try {
+        if ((!searchStr || searchStr.length <= 1) && window.top && window.top !== window && window.top.location && window.top.location.search) {
+          searchStr = window.top.location.search;
+        }
+      } catch (topErr) {}
+
+      if (searchStr && searchStr.length > 1) {
+        const urlParams = new URLSearchParams(searchStr);
+        const reqId = urlParams.get('req_id') || urlParams.get('ref');
+        const code = urlParams.get('code');
+        const state = urlParams.get('state') || urlParams.get('session_id');
+
+        if (code || reqId || state) {
+          console.log('[OpenBanking] Handling return callback:', { reqId, code, state });
+          const explicitRedirect = (appState.data?.settings?.open_banking?.redirect_uri || '').trim();
+          const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+          const cbRes = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
+          if (cbRes && cbRes.success) {
+            const cleanUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            try {
+              window.history.replaceState({path: cleanUrl}, '', cleanUrl);
+              if (window.top && window.top !== window) {
+                const topClean = window.top.location.protocol + "//" + window.top.location.host + window.top.location.pathname;
+                window.top.history.replaceState({path: topClean}, '', topClean);
+              }
+            } catch (histErr) {}
+            const freshData = await fetchBudget();
+            if (freshData) appState.data = freshData;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[OpenBanking] Callback handling error:', e);
+    }
+
     const cfg = getSettings();
     applyTheme(cfg.theme || 'grey_dark');
 
     bindGlobalEvents();
     initCalculator();
+
+    // Fetch and initialize dynamic categories from API/cache
+    try {
+      const catRes = await fetchCategories();
+      if (catRes && catRes.categories && typeof setDynamicCategories === 'function') {
+        setDynamicCategories(catRes.categories);
+      }
+    } catch (catErr) {
+      console.warn('[Categories] Init categories notice:', catErr);
+    }
 
     if (!cfg.onboarding_complete) {
       startOnboarding();
@@ -8039,6 +10480,10 @@ async function init() {
       const detected = detectCurrentMonthAndWeek(appState.currentYear);
       if (detected && detected.month) {
         appState.activeTab = detected.month;
+      }
+
+      if (window.budgetApp && typeof window.budgetApp.applyOpenBankingToCheckins === 'function') {
+        window.budgetApp.applyOpenBankingToCheckins();
       }
 
       calculateAndSyncRollovers();
@@ -8080,6 +10525,7 @@ async function init() {
 window.budgetApp = {
   init,
   renderContent,
+  renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
   updateTopBarTitle,
@@ -8148,6 +10594,772 @@ window.budgetApp = {
       }
       scrollToCurrentWeek(true);
     }
+  },
+
+  openBankLinkModal,
+  openTransactionLedgerModal,
+
+  toggleOpenBankingEnabled(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.enabled = !!enabled;
+    saveOpenBankingConfig({ enabled: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  updateOpenBankingProvider(provider) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.provider = provider;
+    saveOpenBankingConfig({ provider });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  async saveOpenBankingKeys() {
+    const provider = document.getElementById('cfg-openbanking-provider')?.value || 'enablebanking';
+    const env = document.getElementById('cfg-openbanking-env')?.value || 'live';
+    const secId = document.getElementById('cfg-openbanking-secret-id')?.value || '';
+    const secKey = document.getElementById('cfg-openbanking-secret-key')?.value || '';
+    const redirectUri = document.getElementById('cfg-openbanking-redirect-uri')?.value || '';
+    const intervalVal = parseInt(document.getElementById('cfg-openbanking-interval')?.value || '6', 10);
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.provider = provider;
+    cfg.open_banking.environment = env;
+    cfg.open_banking.secret_id = secId.trim();
+    cfg.open_banking.secret_key = secKey.trim();
+    cfg.open_banking.redirect_uri = redirectUri.trim();
+    cfg.open_banking.auto_sync_interval_hours = isNaN(intervalVal) ? 6 : intervalVal;
+
+    await saveOpenBankingConfig({
+      secret_id: secId.trim(),
+      secret_key: secKey.trim(),
+      provider: provider,
+      environment: env,
+      redirect_uri: redirectUri.trim(),
+      auto_sync_interval_hours: isNaN(intervalVal) ? 6 : intervalVal,
+      enabled: true
+    });
+    cfg.open_banking.enabled = true;
+    saveBudget(appState.data);
+    alert('✅ Provider API credentials and auto-sync settings saved successfully!');
+    renderContent();
+  },
+
+  openBankStatementUploadModal() {
+    openBankStatementUploadModal();
+  },
+
+  openManualAuthCodeModal() {
+    openManualAuthCodeModal();
+  },
+
+  async submitManualAuthCode(rawInput) {
+    if (!rawInput || !rawInput.trim()) {
+      alert('Please enter or paste the return URL or authorization code.');
+      return;
+    }
+    const txt = rawInput.trim();
+
+    // Check if the user accidentally pasted the initial auth link instead of the return URL
+    if (txt.includes('auth.truelayer.com') || (txt.includes('response_type=code') && !txt.includes('code='))) {
+      alert('⚠️ Notice: It looks like you pasted the initial bank authorization link instead of the return URL.\n\nPlease complete the bank login in your browser first. Once approved, your bank redirects to a URL containing "?code=...". Copy and paste that return URL here.');
+      return;
+    }
+
+    let code = null;
+    let state = null;
+    let reqId = null;
+    let extractedRedirectUri = null;
+
+    if (txt.includes('?') || txt.includes('&') || txt.includes('http')) {
+      try {
+        const urlObj = txt.startsWith('http') ? new URL(txt) : new URL('https://dummy.local/?' + txt.replace(/^\?/, ''));
+        code = urlObj.searchParams.get('code');
+        state = urlObj.searchParams.get('state') || urlObj.searchParams.get('session_id');
+        reqId = urlObj.searchParams.get('req_id') || urlObj.searchParams.get('ref');
+        if (txt.startsWith('http')) {
+          extractedRedirectUri = urlObj.origin + urlObj.pathname;
+        }
+      } catch (e) {
+        const codeMatch = txt.match(/[?&]code=([^&\s]+)/);
+        if (codeMatch) code = decodeURIComponent(codeMatch[1]);
+        const stateMatch = txt.match(/[?&]state=([^&\s]+)/);
+        if (stateMatch) state = decodeURIComponent(stateMatch[1]);
+      }
+    } else {
+      code = txt;
+    }
+
+    if (!code) {
+      alert('⚠️ No valid authorization code found in the pasted URL. Please make sure the return URL contains "?code=..."');
+      return;
+    }
+
+    const cfg = getSettings();
+    const explicitRedirect = cfg.open_banking?.redirect_uri?.trim();
+    const redirectUri = extractedRedirectUri || explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+
+    const res = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
+    if (res && res.success) {
+      const freshData = await fetchBudget();
+      if (freshData) appState.data = freshData;
+      calculateAndSyncRollovers();
+      closeModal();
+      renderContent();
+      const count = (res.linked_accounts || []).length;
+      alert(`🎉 Successfully connected and linked ${count} bank account${count === 1 ? '' : 's'}!`);
+    } else {
+      alert(`⚠️ Could not register bank account:\n${res?.error || 'Unknown error'}\n\nPlease verify that your Client ID and Client Secret in Settings match your TrueLayer Console.`);
+    }
+  },
+
+  async handleStatementFileSelected(event) {
+    const file = event.target?.files?.[0];
+    if (!file) return;
+
+    const statusEl = document.getElementById('statementUploadStatus');
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.color = 'var(--text-muted)';
+      statusEl.textContent = '⏳ Reading and processing statement file...';
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const content = e.target.result;
+      const targetAcc = document.getElementById('statementTargetAccount')?.value || 'Checking';
+      const owner = document.getElementById('statementOwner')?.value || 'Joint';
+
+      const res = await uploadBankStatement(content, file.name, targetAcc, owner);
+      if (res && res.success) {
+        if (statusEl) {
+          statusEl.style.color = 'var(--green)';
+          statusEl.textContent = `✅ Successfully imported ${res.imported_count} transactions (${res.auto_cleared_count} bills auto-cleared)!`;
+        }
+        await loadRemoteBudget();
+        renderContent();
+        setTimeout(() => {
+          window.budgetApp.closeModal();
+          alert(`✅ Successfully imported ${res.imported_count} transactions!\n⚡ ${res.auto_cleared_count} scheduled Direct Debits were automatically matched & marked Paid.`);
+        }, 800);
+      } else {
+        if (statusEl) {
+          statusEl.style.color = 'var(--red)';
+          statusEl.textContent = `❌ Import failed: ${res.error || 'Invalid file format'}`;
+        }
+      }
+    };
+    reader.readAsText(file);
+  },
+
+  _institutionsCache: [],
+
+  async loadBankInstitutions(country = 'GB') {
+    const listEl = document.getElementById('bankInstitutionsList');
+    if (!listEl) return;
+    listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">Loading supported banks...</div>`;
+
+    const res = await getOpenBankingInstitutions(country);
+    if (res && res.success && res.institutions) {
+      window.budgetApp._institutionsCache = res.institutions;
+      window.budgetApp.renderInstitutionsGrid(res.institutions);
+    } else {
+      listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--red); font-size:12px;">Failed to load institutions: ${res.error || 'Check API keys in Settings'}</div>`;
+    }
+  },
+
+  renderInstitutionsGrid(insts) {
+    const listEl = document.getElementById('bankInstitutionsList');
+    if (!listEl) return;
+    if (!insts || insts.length === 0) {
+      listEl.innerHTML = `<div style="grid-column:1/-1; text-align:center; padding:24px; color:var(--text-muted); font-size:12px;">No institutions found matching search.</div>`;
+      return;
+    }
+
+    listEl.innerHTML = insts.map(inst => {
+      const initial = (inst.name || 'B').replace(/[^a-zA-Z0-9]/g, '').charAt(0).toUpperCase() || 'B';
+      const brandColor = inst.color || '#0284c7';
+
+      const logoHtml = inst.logo ? `
+        <div style="position:relative; width:40px; height:40px; display:flex; align-items:center; justify-content:center; margin-bottom:6px;">
+          <img src="${inst.logo}" alt="" style="width:38px; height:38px; border-radius:8px; object-fit:contain;" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" loading="lazy">
+          <div style="display:none; width:38px; height:38px; border-radius:8px; background:${brandColor}; color:#fff; align-items:center; justify-content:center; font-weight:800; font-size:16px; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+            ${initial}
+          </div>
+        </div>
+      ` : `
+        <div style="width:38px; height:38px; border-radius:8px; background:${brandColor}; color:#fff; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:16px; margin-bottom:6px; box-shadow:0 2px 5px rgba(0,0,0,0.25);">
+          ${initial}
+        </div>
+      `;
+
+      return `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.selectBankInstitution(this.dataset.instid, this.dataset.instname, this.dataset.instlogo)" data-instid="${inst.id}" data-instname="${inst.name || 'Bank'}" data-instlogo="${inst.logo || ''}" style="display:flex; flex-direction:column; align-items:center; justify-content:center; padding:10px 6px; border-radius:10px; border:1px solid var(--border); text-align:center; min-height:92px; cursor:pointer; background:var(--panel-bg); transition:transform 0.1s, border-color 0.15s;" onmouseover="this.style.borderColor='var(--curr-border)'" onmouseout="this.style.borderColor='var(--border)'">
+          ${logoHtml}
+          <span style="font-size:11px; font-weight:600; line-height:1.2; color:var(--heading);">${inst.name || 'Bank'}</span>
+        </button>
+      `;
+    }).join('');
+  },
+
+  filterBankList(query) {
+    const q = (query || '').toLowerCase().trim();
+    const all = window.budgetApp._institutionsCache || [];
+    if (!q) {
+      window.budgetApp.renderInstitutionsGrid(all);
+    } else {
+      const filtered = all.filter(i => {
+        const name = (i.name || '').toLowerCase();
+        const id = (i.id || '').toLowerCase();
+        const bic = (i.bic || '').toLowerCase();
+        if (name.includes(q) || id.includes(q) || bic.includes(q)) return true;
+        // Nickname / alias matching
+        if (q === 'amex' && (name.includes('american express') || id.includes('amex'))) return true;
+        if (q.includes('barclay') && (name.includes('barclay') || id.includes('barclay'))) return true;
+        if (q.includes('capital') && (name.includes('capital') || id.includes('capital'))) return true;
+        if (q === 'mbna' && (name.includes('mbna') || id.includes('mbna'))) return true;
+        if (q === 'rbs' && (name.includes('royal bank of scotland') || id.includes('rbos'))) return true;
+        if (q === 'bos' && name.includes('bank of scotland')) return true;
+        if (q === 'boa' && name.includes('bank of america')) return true;
+        if (q === 'citi' && (name.includes('citibank') || name.includes('citi'))) return true;
+        if (q === 'coop' && name.includes('co-operative')) return true;
+        if (q === 'bnp' && name.includes('bnp')) return true;
+        if (q === 'td' && name.includes('td bank')) return true;
+        if (q === 'aib' && name.includes('allied irish')) return true;
+        if (q === 'boi' && name.includes('bank of ireland')) return true;
+        return false;
+      });
+      window.budgetApp.renderInstitutionsGrid(filtered);
+    }
+  },
+
+  changeBankCountry(country) {
+    window.budgetApp.loadBankInstitutions(country);
+  },
+
+  async selectBankInstitution(institutionId, institutionName, institutionLogo) {
+    const owner = document.getElementById('bankLinkOwner')?.value || 'Joint';
+    const cfg = getSettings();
+    const explicitRedirect = cfg.open_banking?.redirect_uri?.trim();
+    const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
+
+    const res = await createOpenBankingRequisition(institutionId, redirectUri, institutionName, institutionLogo, owner);
+    if (res && res.success && res.link) {
+      // Break out of Home Assistant Ingress iframe so X-Frame-Options does not block the bank login page
+      try {
+        if (window.top && window.top !== window) {
+          window.top.location.href = res.link;
+          return;
+        }
+      } catch (e) {
+        console.warn('Cross-origin iframe navigation notice:', e);
+      }
+      try {
+        window.location.href = res.link;
+      } catch (e) {
+        window.open(res.link, '_blank');
+      }
+    } else {
+      alert('⚠️ Could not initiate bank authorization: ' + (res.error || 'Unknown error'));
+    }
+  },
+
+  toggleOpenBankingAutoCheckins(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.auto_update_checkins = !!enabled;
+    saveOpenBankingConfig({ auto_update_checkins: !!enabled });
+    if (enabled) {
+      this.applyOpenBankingToCheckins();
+    }
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  toggleOpenBankingLiveDailyVariance(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.live_daily_variance = !!enabled;
+    saveOpenBankingConfig({ live_daily_variance: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  toggleOpenBankingDebugLogging(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.debug_logging = !!enabled;
+    saveOpenBankingConfig({ debug_logging: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  setSpendAnalyticsTimeframe(timeframe) {
+    appState.spendFilterTimeframe = timeframe;
+    renderContent();
+  },
+
+  setSpendAnalyticsAccount(account) {
+    appState.spendFilterAccount = account;
+    renderContent();
+  },
+
+  setSpendCategoryFilter(catId) {
+    appState.spendFilterCategory = (appState.spendFilterCategory === catId) ? 'all' : catId;
+    renderContent();
+  },
+
+  setSpendSearchQuery(query) {
+    appState.spendSearchQuery = query;
+    renderContent();
+  },
+
+  openRecategorizeModal(txnId, merchantName, currentCatId) {
+    openRecategorizeModal(txnId, merchantName, currentCatId);
+  },
+
+  applyOpenBankingToCheckins() {
+    const cfg = getSettings();
+    const obCfg = cfg.open_banking || {};
+    if (!obCfg.enabled || obCfg.auto_update_checkins === false) return false;
+
+    const linked = obCfg.linked_accounts || [];
+    if (!linked.length) return false;
+
+    const currentInfo = detectCurrentMonthAndWeek(appState.currentYear);
+    if (!currentInfo || !currentInfo.month || !currentInfo.week) return false;
+
+    const curMonth = currentInfo.month;
+    const curWeek = currentInfo.week;
+    const actuals = getWeekActuals(curMonth, curWeek);
+    if (!actuals._timestamps) actuals._timestamps = {};
+    if (!actuals._sources) actuals._sources = {};
+
+    let updated = false;
+    const currAccounts = cfg.current_accounts || [];
+    const creditAccounts = cfg.credit_accounts || [];
+    const savingsAccounts = cfg.savings_accounts || [];
+
+    for (const item of linked) {
+      const mappedRaw = item.mapped_habit_account_id || '';
+      const mapped = mappedRaw.replace(/^(credit|current|savings):/i, '').trim();
+      const liveBal = item.last_balance;
+      if (!mapped) continue;
+
+      // 1. Current Account
+      const isCurrent = currAccounts.some(a => {
+        const name = typeof a === 'string' ? a : (a.name || '');
+        return name.toLowerCase() === mapped.toLowerCase();
+      });
+      if (isCurrent) {
+        const cObj = currAccounts.find(a => (typeof a === 'string' ? a : (a.name || '')).toLowerCase() === mapped.toLowerCase());
+        const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
+        const fieldKey = `curr_${cName}`;
+        actuals[fieldKey] = Number(liveBal || 0);
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+
+      // 2. Savings Account
+      const isSavings = savingsAccounts.some(s => {
+        const name = typeof s === 'string' ? s : (s.name || '');
+        return name.toLowerCase() === mapped.toLowerCase();
+      });
+      if (isSavings) {
+        const sObj = savingsAccounts.find(s => (typeof s === 'string' ? s : (s.name || '')).toLowerCase() === mapped.toLowerCase());
+        const sName = typeof sObj === 'string' ? sObj : (sObj.name || mapped);
+        const fieldKey = `sav_${sName}`;
+        actuals[fieldKey] = Number(liveBal || 0);
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+
+      // 3. Credit Card
+      const cObj = creditAccounts.find(c => {
+        const name = typeof c === 'string' ? c : (c.name || '');
+        return name.toLowerCase() === mapped.toLowerCase() || name.toLowerCase() === mappedRaw.toLowerCase();
+      });
+      if (cObj) {
+        const cName = typeof cObj === 'string' ? cObj : (cObj.name || mapped);
+        let limit = Number(typeof cObj === 'object' ? (cObj.limit || 0) : 0);
+        if (limit <= 0 && item.credit_limit) {
+          limit = Number(item.credit_limit);
+          if (typeof cObj === 'object') cObj.limit = limit;
+        }
+
+        let debt = Math.abs(Number(liveBal || 0));
+        if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
+          const allTxns = appState.data?.open_banking_transactions || [];
+          const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
+          if (cardTxns.length > 0) {
+            let spentSum = 0;
+            for (const t of cardTxns) {
+              const amt = Number(t.amount || 0);
+              if (amt < 0) spentSum += Math.abs(amt);
+              else if (amt > 0) spentSum -= amt;
+            }
+            if (spentSum > 0) {
+              debt = Math.round(spentSum * 100) / 100;
+              item.last_balance = debt;
+            }
+          }
+        }
+
+        let avail = 0;
+        if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
+          avail = Number(item.last_available);
+        } else if (limit > 0) {
+          avail = Math.max(0, limit - debt);
+        }
+
+        const fieldKey = `c_avail_${cName}`;
+        actuals[fieldKey] = avail;
+        actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
+        actuals._sources[fieldKey] = 'open_banking';
+        updated = true;
+      }
+    }
+
+    if (updated) {
+      calculateAndSyncRollovers();
+      return true;
+    }
+    return false;
+  },
+
+  async updateLinkedAccountMapping(accountId, mappedHabitAccountId) {
+    const cfg = getSettings();
+    if (!cfg.open_banking) cfg.open_banking = {};
+    if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+
+    const acc = cfg.open_banking.linked_accounts.find(a => String(a.account_id) === String(accountId) || a.account_name === accountId);
+    if (acc) {
+      acc.mapped_habit_account_id = mappedHabitAccountId || null;
+      const cleanName = (mappedHabitAccountId || '').replace(/^(credit|current|savings):/i, '').trim();
+
+      if (appState.data && appState.data.open_banking_transactions) {
+        for (const t of appState.data.open_banking_transactions) {
+          if (String(t.account_id) === String(acc.account_id) || t.account_id === acc.account_name) {
+            t.account_name = cleanName || acc.account_name;
+          }
+        }
+      }
+
+      renderContent();
+      try {
+        await mapOpenBankingAccount(acc.account_id || accountId, mappedHabitAccountId || null, acc.owner || 'Joint');
+      } catch (e) {
+        console.warn("mapOpenBankingAccount error:", e);
+      }
+      this.applyOpenBankingToCheckins();
+      await saveBudget(appState.data);
+      renderContent();
+    }
+  },
+
+  async updateLinkedAccountOwner(accountId, newOwner) {
+    const cfg = getSettings();
+    if (!cfg.open_banking) cfg.open_banking = {};
+    if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+
+    const acc = cfg.open_banking.linked_accounts.find(a => String(a.account_id) === String(accountId) || a.account_name === accountId);
+    if (acc) {
+      acc.owner = newOwner;
+      renderContent();
+      try {
+        await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, newOwner);
+      } catch (e) {
+        console.warn("mapOpenBankingAccount error:", e);
+      }
+      await saveBudget(appState.data);
+      renderContent();
+    }
+  },
+
+  async unlinkAccount(accountId) {
+    if (!confirm('Are you sure you want to disconnect this bank account feed?')) return;
+    await unlinkOpenBanking(accountId);
+    const cfg = getSettings();
+    if (cfg.open_banking && cfg.open_banking.linked_accounts) {
+      cfg.open_banking.linked_accounts = cfg.open_banking.linked_accounts.filter(a => {
+        if (!a.account_id && (!accountId || String(accountId) === 'None' || String(accountId) === 'null')) return false;
+        return String(a.account_id) !== String(accountId);
+      });
+    }
+    await saveBudget(appState.data);
+    renderContent();
+  },
+
+  handleOpenBankingSyncErrorClick() {
+    this.openDrawer('settings');
+    setTimeout(() => {
+      const el = document.getElementById('openBankingErrorBanner') || document.getElementById('linkedAccountsList') || document.getElementById('cfg-openbanking-provider');
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 250);
+  },
+
+  async triggerOpenBankingSync() {
+    const res = await syncOpenBanking();
+    const freshData = await fetchBudget();
+    if (freshData) appState.data = freshData;
+    this.applyOpenBankingToCheckins();
+    calculateAndSyncRollovers();
+    renderContent();
+
+    if (res && res.status === 'success') {
+      alert(`✅ Synchronized ${res.synced_accounts || 0} accounts (${res.transactions_added || 0} new transactions).\n⚡ Live check-in balances have been updated for this week!`);
+    } else if (res && res.status === 'partial_error') {
+      alert(`⚠️ Partial Sync Notice:\nSynchronized ${res.synced_accounts || 0} of ${res.total_accounts || 0} accounts.\n${res.error || ''}`);
+    } else if (res && res.status === 'error') {
+      alert(`❌ Open Banking Sync Failed:\n${res.error || 'Unable to communicate with provider API.'}\n\nPlease check your bank authorization or view the debug log in Settings.`);
+    } else if (res && res.status === 'disabled') {
+      alert('Notice: Open Banking is currently disabled in Settings.');
+    } else {
+      alert('Notice: ' + (res?.status || 'Sync completed'));
+    }
+  },
+
+  findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    const mName = months.includes(monthName) ? monthName : (appState.activeTab || 'Jan');
+    const yData = getYearData();
+    const mData = getMonthData(mName);
+    const cfg = getSettings();
+    const amt = Number(billAmount) || 0;
+
+    const isMatch = (cand) => cand && (!billDesc || cand.desc === billDesc || cand.name === billDesc || (cand.rawDesc && cand.rawDesc === billDesc));
+
+    if (sourceType === 'direct_debit' && mData.direct_debits) {
+      if (sourceIdx !== undefined && isMatch(mData.direct_debits[sourceIdx])) return mData.direct_debits[sourceIdx];
+    } else if ((sourceType === 'payments_in' || sourceType === 'monthly_payment_in') && mData.payments_in) {
+      if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) return mData.payments_in[sourceIdx];
+    } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
+      if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
+    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'recurring_payment') {
+      const recurring = yData.recurring_payments || cfg.recurring_payments || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
+    } else if (sourceType === 'recurring_income') {
+      const recurring = yData.recurring_incomes || cfg.recurring_incomes || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
+    } else if (sourceType === 'budget_bill' || sourceType === 'budget') {
+      for (const b of (yData.yearly_budgets || [])) {
+        for (const t of (b.transactions || [])) {
+          const combined = `🎯 ${b.name}: ${t.desc || ''}`.trim();
+          if (t.desc === billDesc || combined === billDesc || (dateStr && t.date === dateStr) || Math.abs((Number(t.amount)||0) - amt) < 0.05) {
+            return t;
+          }
+        }
+        if (b.name && billDesc && billDesc.includes(b.name)) return b;
+      }
+    } else if (sourceType === 'birthday' || sourceType === 'birthdays') {
+      for (const b of (yData.birthdays || cfg.birthdays || [])) {
+        for (const t of (b.transactions || [])) {
+          if (t.desc === billDesc || (dateStr && t.date === dateStr)) {
+            return t;
+          }
+        }
+        if (b.name && billDesc && billDesc.includes(b.name)) return b;
+      }
+    }
+
+    if (billDesc) {
+      const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+
+      let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
+          || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
+      if (item) return item;
+
+      for (const b of (yData.yearly_budgets || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          const combinedLow = `${bNameLow} ${tDescLow}`;
+          if (combinedLow.includes(cleanTarget) || cleanTarget.includes(tDescLow) || cleanTarget.includes(bNameLow)) {
+            return t;
+          }
+        }
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          return b;
+        }
+      }
+
+      for (const b of (yData.birthdays || cfg.birthdays || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          if (tDescLow && cleanTarget.includes(tDescLow)) {
+            return t;
+          }
+        }
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          return b;
+        }
+      }
+    }
+
+    return null;
+  },
+
+  toggleScheduledBillCleared(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    const item = this.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr);
+
+    if (!item) {
+      alert('Could not find scheduled item.');
+      return;
+    }
+
+    const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
+    const isCleared = Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
+
+    if (isCleared) {
+      item.status = 'due';
+      item.auto_cleared = false;
+      item.manually_cleared = false;
+      item.matched_txn_id = null;
+      item.matched_date = null;
+      item.matched_payee = null;
+      if (occDateStr && item.cleared_dates) {
+        item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+      }
+      const allTxns = appState.data.open_banking_transactions || [];
+      allTxns.forEach(t => {
+        if (t.matched_bill_id === (item.desc || billDesc)) {
+          t.matched_bill_id = null;
+          t.auto_cleared = false;
+        }
+      });
+    } else {
+      item.status = 'paid';
+      item.auto_cleared = true;
+      item.manually_cleared = true;
+      item.matched_date = occDateStr;
+      if (occDateStr) {
+        item.cleared_dates = item.cleared_dates || [];
+        if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+      }
+    }
+
+    calculateAndSyncRollovers();
+    renderContent();
+    saveBudget(appState.data);
+  },
+
+  openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+    return openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr);
+  },
+
+  linkBillToTransaction(sourceType, sourceIdx, monthName, billDesc, transactionId, dateStr) {
+    const item = this.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, null, dateStr);
+    const allTxns = appState.data.open_banking_transactions || [];
+    const txn = allTxns.find(t => String(t.transaction_id) === String(transactionId));
+
+    if (item && txn) {
+      item.status = 'paid';
+      item.auto_cleared = true;
+      item.manually_cleared = true;
+      item.matched_txn_id = txn.transaction_id;
+      item.matched_date = txn.booking_date;
+      item.matched_amount = Math.abs(txn.amount);
+      item.matched_payee = txn.payee_name || txn.merchant_name;
+      const targetDate = dateStr || txn.booking_date;
+      if (targetDate) {
+        item.cleared_dates = item.cleared_dates || [];
+        if (!item.cleared_dates.includes(targetDate)) item.cleared_dates.push(targetDate);
+      }
+      txn.matched_bill_id = item.desc || billDesc;
+      txn.auto_cleared = true;
+      txn.manually_linked = true;
+    }
+
+    calculateAndSyncRollovers();
+    closeModal();
+    renderContent();
+    saveBudget(appState.data);
+  },
+
+  filterBillMatchTxns(query) {
+    const q = (query || '').toLowerCase().trim();
+    const rows = document.querySelectorAll('#billMatchTxnList .bill-match-row');
+    rows.forEach(r => {
+      const searchData = (r.getAttribute('data-search') || '').toLowerCase();
+      r.style.display = (!q || searchData.includes(q)) ? 'flex' : 'none';
+    });
+  },
+
+  async clearDebugLog() {
+    if (!confirm('Clear the Open Banking debug log file?')) return;
+    try {
+      const r = await fetch(getBaseApiUrl() + 'api/openbanking/debug/clear', { method: 'POST' });
+      const res = await r.json();
+      if (res && res.success) {
+        alert('Debug log cleared.');
+      }
+    } catch (e) {
+      alert('Error clearing debug log: ' + e.message);
+    }
+  },
+
+  async openDebugLogModal() {
+    return openDebugLogModal();
+  },
+
+  async copyDebugLog() {
+    const c = document.getElementById('debugLogContainer');
+    if (c && c.innerText) {
+      try {
+        await navigator.clipboard.writeText(c.innerText);
+        alert('Copied debug log to clipboard!');
+      } catch (e) {
+        // Fallback selection
+        const range = document.createRange();
+        range.selectNodeContents(c);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        alert('Copied debug log to clipboard!');
+      }
+    }
+  },
+
+  async downloadDebugLog() {
+    try {
+      const url = getBaseApiUrl() + 'api/openbanking/debug/log';
+      const r = await fetch(url, { cache: 'no-store' });
+      const text = await r.text();
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'open_banking_debug.txt';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      alert('Error downloading debug log: ' + e.message);
+    }
+  },
+
+  filterTxnLedger(query) {
+    const q = (query || '').toLowerCase().trim();
+    const rows = document.querySelectorAll('#txnLedgerList .txn-row');
+    rows.forEach(r => {
+      const text = r.textContent.toLowerCase();
+      r.style.display = (!q || text.includes(q)) ? 'flex' : 'none';
+    });
   },
 
   setSubTab(subTabName) {
@@ -10941,6 +14153,102 @@ window.budgetApp = {
     if (confirm("Are you sure you want to completely RESET all data to default? This cannot be undone!")) {
       await resetDatabase();
       window.location.reload();
+    }
+  },
+
+  async applyRecategorizationFromModal() {
+    const pending = this._pendingRecategorize || {};
+    const txnId = pending.txnId;
+    const originalMerchant = pending.merchantName || '';
+    const selEl = document.getElementById('modalRecategorizeSelect');
+    const inputEl = document.getElementById('modalRecatMerchantInput');
+    const saveRuleEl = document.getElementById('modalSaveMerchantRule');
+    const suggestEl = document.getElementById('modalSuggestToGitHub');
+
+    if (!selEl) return;
+    const targetCatId = selEl.value;
+    const pattern = (inputEl ? inputEl.value : originalMerchant).toLowerCase().trim();
+    const shouldSaveRule = saveRuleEl ? saveRuleEl.checked : true;
+    const shouldSuggest = suggestEl ? suggestEl.checked : false;
+
+    const allTxns = appState.data?.open_banking_transactions || [];
+
+    // 1. Direct match on the specific transaction
+    if (txnId) {
+      const match = allTxns.find(t => String(t.transaction_id) === String(txnId));
+      if (match) {
+        match.category = targetCatId;
+      }
+    }
+
+    // 2. Save rule and update all matching transactions (checking payee_name, raw_info, merchant_name, creditor_name, description)
+    if (shouldSaveRule && pattern) {
+      if (!appState.data.settings) appState.data.settings = {};
+      if (!appState.data.settings.merchant_category_rules) {
+        appState.data.settings.merchant_category_rules = {};
+      }
+      appState.data.settings.merchant_category_rules[pattern] = targetCatId;
+
+      // Retroactively update matching transactions across all possible descriptor fields
+      allTxns.forEach(t => {
+        const full = `${t.payee_name || ''} ${t.raw_info || ''} ${t.merchant_name || ''} ${t.creditor_name || ''} ${t.description || ''}`.toLowerCase();
+        if (full.includes(pattern)) {
+          t.category = targetCatId;
+        }
+      });
+    }
+
+    if (shouldSuggest && pattern) {
+      try {
+        if (typeof suggestCategoryMerchant === 'function') {
+          suggestCategoryMerchant(pattern, targetCatId).catch(() => {});
+        }
+      } catch (e) {}
+    }
+
+    closeModal();
+    this._pendingRecategorize = null;
+    await saveBudget(appState.data);
+    renderContent();
+  },
+
+  async syncCategoriesGitHub() {
+    try {
+      const res = await syncCategoriesFromGitHub();
+      if (res && res.success) {
+        if (res.categories && typeof setDynamicCategories === 'function') {
+          setDynamicCategories(res.categories);
+        }
+        alert(`✅ Successfully synced ${res.count || 'latest'} categories and merchants from GitHub!`);
+      } else {
+        alert("Notice: Could not reach GitHub to sync categories. Using current local cache.");
+      }
+    } catch (e) {
+      alert("Notice: GitHub sync failed: " + e.message);
+    }
+    renderContent();
+  },
+
+  async deleteMerchantCategoryRule(merchantKey) {
+    if (confirm(`Delete custom rule for "${merchantKey}"?`)) {
+      if (appState.data?.settings?.merchant_category_rules) {
+        delete appState.data.settings.merchant_category_rules[merchantKey];
+        renderContent();
+        if (getSettings().onboarding_complete) {
+          await saveBudget(appState.data);
+        }
+      }
+    }
+  },
+
+  async exportMerchantCategoryRules() {
+    const rules = appState.data?.settings?.merchant_category_rules || {};
+    const jsonStr = JSON.stringify(rules, null, 2);
+    try {
+      await navigator.clipboard.writeText(jsonStr);
+      alert("📋 Custom merchant category rules copied to clipboard in JSON format!");
+    } catch (e) {
+      prompt("Copy your custom rules JSON:", jsonStr);
     }
   }
 };

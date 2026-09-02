@@ -39,6 +39,7 @@ Explore the deep-dive documentation pages below:
 | 🚀 **[Installation & Getting Started](Installation-and-Getting-Started)** | Add-on repository installation, Ingress setup, and Onboarding Wizard walkthrough. |
 | 📅 **[Payday Cycles & Calendar Engine](Payday-Cycles-and-Calendar-Engine)** | Pay frequency mathematics, 4/5-week splits, bank holiday engine, and rollover equations. |
 | 💳 **[Accounts & Credit Cards](Accounts-and-Credit-Cards)** | Checking, Savings, Credit Cards, autopay/statement calculation engine, and limits. |
+| ⚡ **[Open Banking & Bank Sync](Open-Banking-and-Bank-Sync)** | Multi-provider Open Banking (Enable Banking, TrueLayer, GoCardless, SimpleFIN) and offline CSV/OFX statement imports. |
 | 📋 **[Scheduled Bills & Direct Debits](Scheduled-Bills-and-Direct-Debits)** | Direct Debits, standing orders, working-day shifts, and payment status lifecycle. |
 | 🔒 **[Multi-User Mode & Security](Multi-User-Mode-and-Security)** | Single-PIN envelope encryption, AES-256-GCM crypto, salary masking, and session lock. |
 | 🎯 **[Budgets & Occasions](Budgets-and-Occasions)** | Envelope budgeting, weekly safe-to-spend formula, and gift/occasion purchase tracking. |

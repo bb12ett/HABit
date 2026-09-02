@@ -1483,3 +1483,520 @@ export function openSetPinModal(person) {
   });
 }
 
+// ---------------------------------------------------------
+// OPEN BANKING MODALS
+// ---------------------------------------------------------
+
+export async function openBankLinkModal() {
+  const cfg = getSettings();
+  const isMulti = isMultiUserEnabled();
+  const activeUser = appState.activeUser || 'Joint';
+
+  showModal({
+    title: '⚡ Connect Bank Account (Open Banking)',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Select your banking institution below to initiate a secure, read-only Open Banking connection. You will be redirected to your bank's official app or web portal to authorize access.
+        </p>
+
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="text" id="bankSearchInput" placeholder="🔍 Search banks (e.g. Monzo, Barclays, Chase, HSBC, Lloyds...)" style="flex:1; font-size:12px;" oninput="window.budgetApp.filterBankList(this.value)">
+          <select id="bankCountrySelect" onchange="window.budgetApp.changeBankCountry(this.value)" style="width:90px; font-size:12px;">
+            <option value="GB" selected>🇬🇧 UK</option>
+            <option value="US">🇺🇸 US</option>
+            <option value="IE">🇮🇪 Ireland</option>
+            <option value="FR">🇫🇷 France</option>
+            <option value="DE">🇩🇪 Germany</option>
+            <option value="ES">🇪🇸 Spain</option>
+          </select>
+        </div>
+
+        ${isMulti ? `
+          <div style="display:flex; align-items:center; gap:8px; background:var(--panel-bg); border:1px solid var(--border); padding:8px 10px; border-radius:6px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase;">Account Owner:</label>
+            <select id="bankLinkOwner" style="flex:1; font-size:12px;">
+              <option value="Joint">👥 Joint / Shared Account</option>
+              ${(cfg.people || []).map(p => `<option value="${p}" ${activeUser === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+            </select>
+          </div>
+        ` : ''}
+
+        <div id="bankInstitutionsList" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(130px, 1fr)); gap:10px; max-height:260px; overflow-y:auto; padding:4px 2px;">
+          <div style="grid-column:1/-1; text-align:center; padding:20px; color:var(--text-muted); font-size:12px;">Loading supported banks...</div>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <span style="font-size:11px; color:var(--text-muted);">📱 On mobile or redirected to browser?</span>
+          <button type="button" class="btn secondary" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.openManualAuthCodeModal()">📋 Paste Return URL / Code</button>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+    `
+  });
+
+  window.budgetApp.loadBankInstitutions('GB');
+}
+
+export function openManualAuthCodeModal() {
+  showModal({
+    title: '📋 Complete Mobile Bank Authorization',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          When authorizing on a mobile phone or external browser, your bank redirects to your browser (e.g. <code>https://home.bb12ett.uk/?code=...</code>).
+        </p>
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Copy the full URL from your browser's address bar (or just the <code>code</code> parameter) and paste it below:
+        </p>
+        <div>
+          <label style="font-size:11px; font-weight:bold; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Return URL or Authorization Code:</label>
+          <textarea id="manualAuthUrlInput" rows="3" placeholder="https://home.bb12ett.uk/?code=...&state=..." style="width:100%; font-family:monospace; font-size:11.5px; padding:8px;"></textarea>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.submitManualAuthCode(document.getElementById('manualAuthUrlInput').value)">⚡ Complete Connection</button>
+    `
+  });
+}
+
+export function openTransactionLedgerModal(weekIndex = null, targetMonth = null) {
+  const data = appState.data || {};
+  const allTxns = data.open_banking_transactions || [];
+  const curr = getSettings().currency || '£';
+  const currentYear = appState.currentYear || new Date().getFullYear();
+  const mName = targetMonth || appState.activeTab || 'Jan';
+  const mIdx = months.indexOf(mName) !== -1 ? months.indexOf(mName) : 0;
+  const schedule = calculateMonthSchedule(currentYear, mIdx);
+
+  const selectedIdx = (weekIndex !== null && weekIndex !== undefined && weekIndex !== 'all') ? parseInt(weekIndex, 10) : 'all';
+
+  let filteredTxns = allTxns;
+  let weekLabel = "All Transactions";
+
+  if (selectedIdx !== 'all' && schedule.weeks && schedule.weeks[selectedIdx]) {
+    const wObj = schedule.weeks[selectedIdx];
+    weekLabel = `${mName} - ${wObj.name || `Week ${selectedIdx + 1}`} (${wObj.label || ''})`;
+    const wStart = new Date(wObj.startDate.getFullYear(), wObj.startDate.getMonth(), wObj.startDate.getDate(), 0, 0, 0).getTime();
+    const wEnd = new Date(wObj.endDate.getFullYear(), wObj.endDate.getMonth(), wObj.endDate.getDate(), 23, 59, 59).getTime();
+
+    filteredTxns = allTxns.filter(t => {
+      if (!t.booking_date) return false;
+      const cleanDate = t.booking_date.split('T')[0];
+      const parts = cleanDate.split('-');
+      if (parts.length === 3) {
+        const tTime = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0).getTime();
+        return tTime >= wStart && tTime <= wEnd;
+      }
+      return false;
+    });
+  } else if (selectedIdx === 'all' && targetMonth) {
+    weekLabel = `${mName} (All Weeks)`;
+    if (schedule.weeks && schedule.weeks.length > 0) {
+      const firstW = schedule.weeks[0];
+      const lastW = schedule.weeks[schedule.weeks.length - 1];
+      const mStart = new Date(firstW.startDate.getFullYear(), firstW.startDate.getMonth(), firstW.startDate.getDate(), 0, 0, 0).getTime();
+      const mEnd = new Date(lastW.endDate.getFullYear(), lastW.endDate.getMonth(), lastW.endDate.getDate(), 23, 59, 59).getTime();
+
+      filteredTxns = allTxns.filter(t => {
+        if (!t.booking_date) return false;
+        const cleanDate = t.booking_date.split('T')[0];
+        const parts = cleanDate.split('-');
+        if (parts.length === 3) {
+          const tTime = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0).getTime();
+          return tTime >= mStart && tTime <= mEnd;
+        }
+        return false;
+      });
+    }
+  }
+
+  const totalInflow = filteredTxns.filter(t => t.amount > 0).reduce((s, t) => s + t.amount, 0);
+  const totalOutflow = filteredTxns.filter(t => t.amount < 0).reduce((s, t) => s + Math.abs(t.amount), 0);
+
+  showModal({
+    title: `⚡ Live Bank Transactions: ${weekLabel}`,
+    body: `
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:8px; background:rgba(0,0,0,0.2); padding:8px 10px; border-radius:6px;">
+          <div>
+            <label style="font-size:10px; text-transform:uppercase; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:2px;">Month:</label>
+            <select id="txnLedgerMonthSelect" onchange="window.budgetApp.openTransactionLedgerModal(document.getElementById('txnLedgerWeekSelect')?.value || 'all', this.value)" style="width:100%; font-size:12px; font-weight:600;">
+              ${months.map(m => `<option value="${m}" ${m === mName ? 'selected' : ''}>${m}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10px; text-transform:uppercase; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:2px;">Week Period:</label>
+            <select id="txnLedgerWeekSelect" onchange="window.budgetApp.openTransactionLedgerModal(this.value, document.getElementById('txnLedgerMonthSelect')?.value || '${mName}')" style="width:100%; font-size:12px; font-weight:600;">
+              <option value="all" ${selectedIdx === 'all' ? 'selected' : ''}>📅 Whole Month (${mName})</option>
+              ${schedule.weeks.map((w, idx) => `
+                <option value="${idx}" ${selectedIdx === idx ? 'selected' : ''}>${w.name || `Week ${idx + 1}`} (${w.label || ''})</option>
+              `).join('')}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; font-size:11.5px;">
+          <div>Outflows: <strong style="color:var(--red);">${curr}${totalOutflow.toFixed(2)}</strong></div>
+          <div>Inflows: <strong style="color:var(--green);">${curr}${totalInflow.toFixed(2)}</strong></div>
+          <div style="color:var(--text-muted);">Showing <strong>${filteredTxns.length}</strong> transactions</div>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+          <input type="text" placeholder="🔍 Filter transactions by payee, description, or amount..." id="txnSearchInput" style="flex:1; min-width:180px; font-size:12px;" oninput="window.budgetApp.filterTxnLedger(this.value)">
+        </div>
+
+        <div id="txnLedgerList" style="display:flex; flex-direction:column; gap:6px; max-height:340px; overflow-y:auto; padding-right:2px;">
+          ${filteredTxns.length === 0 ? `
+            <div style="text-align:center; padding:30px; color:var(--text-muted); font-size:12px;">
+              No transactions found for ${weekLabel}.
+            </div>
+          ` : filteredTxns.slice().reverse().map(t => {
+            const cfg = getSettings();
+            const linkedAccounts = cfg.open_banking?.linked_accounts || [];
+            const linkedAcc = linkedAccounts.find(la => String(la.account_id) === String(t.account_id));
+            let dispAccountName = t.account_name || 'Checking';
+            if (linkedAcc && linkedAcc.mapped_habit_account_id) {
+              dispAccountName = linkedAcc.mapped_habit_account_id.replace(/^(credit|current|savings):/i, '').trim();
+            }
+            const matchBadge = t.matched_bill_id 
+              ? `<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Matched: ${t.matched_bill_id}</span>`
+              : (t.auto_cleared ? '<span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); font-size:9.5px; padding:2px 6px; margin-left:4px; font-weight:600; border:1px solid rgba(16,185,129,0.35);">⚡ Auto-Cleared Bill</span>' : '');
+
+            return `
+            <div class="txn-row" style="display:flex; justify-content:space-between; align-items:center; padding:8px 10px; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; font-size:11.5px;">
+              <div style="min-width:0; flex:1; margin-right:12px;">
+                <div style="font-weight:600; color:var(--heading); word-break:break-word;">${t.payee_name || 'Transaction'}</div>
+                <div style="font-size:10px; color:var(--text-muted); display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-top:2px;">
+                  <span>${t.booking_date} • ${dispAccountName}</span>
+                  ${matchBadge}
+                </div>
+              </div>
+              <div style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap;">
+                ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
+              </div>
+            </div>
+          `;
+          }).join('')}
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>
+      <button class="btn green" onclick="window.budgetApp.triggerOpenBankingSync()">🔄 Sync Now</button>
+    `
+  });
+}
+
+export function openBankStatementUploadModal() {
+  const cfg = getSettings();
+  const isMulti = isMultiUserEnabled();
+  const activeUser = appState.activeUser || 'Joint';
+
+  showModal({
+    title: '📁 Import Bank Statement (Offline CSV / OFX / QIF)',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; line-height:1.4;">
+          Upload your bank statement export (.csv, .ofx, .qif) from Monzo, Barclays, Starling, HSBC, Lloyds, NatWest, Chase, Amex, or any other bank. Transactions are processed 100% locally and will auto-match scheduled bills!
+        </p>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <div style="flex:1; min-width:180px;">
+            <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Target Account:</label>
+            <select id="statementTargetAccount" style="width:100%; font-size:12px;">
+              ${(cfg.current_accounts || []).map(ca => `<option value="${ca}">Checking: ${ca}</option>`).join('')}
+              ${(cfg.credit_accounts || []).map(ca => `<option value="${ca.name}">Credit: ${ca.name}</option>`).join('')}
+            </select>
+          </div>
+
+          ${isMulti ? `
+            <div style="flex:1; min-width:140px;">
+              <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Owner:</label>
+              <select id="statementOwner" style="width:100%; font-size:12px;">
+                <option value="Joint">👥 Joint / Shared</option>
+                ${(cfg.people || []).map(p => `<option value="${p}" ${activeUser === p ? 'selected' : ''}>👤 ${p}</option>`).join('')}
+              </select>
+            </div>
+          ` : ''}
+        </div>
+
+        <div id="dropZone" style="border:2px dashed var(--border); border-radius:10px; padding:24px 16px; text-align:center; background:rgba(0,0,0,0.1); cursor:pointer; transition:border-color 0.2s;" onclick="document.getElementById('statementFileInput').click()">
+          <div style="font-size:32px; margin-bottom:6px;">📄</div>
+          <div style="font-weight:600; font-size:13px; color:var(--heading); margin-bottom:4px;">Click or Drag & Drop Bank Statement</div>
+          <div style="font-size:11px; color:var(--text-muted);">Supports .CSV, .OFX, .QFX, and .QIF files</div>
+          <input type="file" id="statementFileInput" accept=".csv,.ofx,.qfx,.qif,.tsv" style="display:none;" onchange="window.budgetApp.handleStatementFileSelected(event)">
+        </div>
+
+        <div id="statementUploadStatus" style="font-size:11.5px; text-align:center; display:none;"></div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+    `
+  });
+}
+
+export async function openDebugLogModal() {
+  showModal({
+    title: '📄 Open Banking Debug Log',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-size:11px; color:var(--text-muted);">Real-time log output from <code>open_banking_debug.txt</code></div>
+          <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.openDebugLogModal()">🔄 Refresh</button>
+        </div>
+        <div id="debugLogContainer" style="background:#0c0d14; color:#00ff88; font-family:Consolas, Monaco, monospace; font-size:11px; padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border); line-height:1.4;">
+          Loading log...
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.copyDebugLog()">📋 Copy Log</button>
+      <button class="btn secondary" onclick="window.budgetApp.downloadDebugLog()">⬇️ Download .txt</button>
+      <button class="btn secondary" onclick="window.budgetApp.clearDebugLog(); window.budgetApp.openDebugLogModal();">🗑️ Clear</button>
+      <button class="btn green" onclick="window.budgetApp.closeModal()">Done</button>
+    `
+  });
+
+  try {
+    const basePath = (window.location.pathname.endsWith('index.html') ? window.location.pathname.slice(0, -10) : window.location.pathname).replace(/\/+$/, '');
+    const url = (basePath ? basePath : '') + '/api/openbanking/debug/log';
+    const r = await fetch(url, { cache: 'no-store' });
+    const text = await r.text();
+    const c = document.getElementById('debugLogContainer');
+    if (c) {
+      c.innerText = text;
+      c.scrollTop = c.scrollHeight;
+    }
+  } catch (e) {
+    const c = document.getElementById('debugLogContainer');
+    if (c) c.innerText = 'Error loading log: ' + e.message;
+  }
+}
+
+export function openRecategorizeModal(txnId, merchantName, currentCatId) {
+  const allTxns = (window.appState && window.appState.data && window.appState.data.open_banking_transactions) || [];
+  const foundTxn = allTxns.find(t => String(t.transaction_id) === String(txnId));
+  const effectiveMerchant = merchantName || foundTxn?.merchant_name || foundTxn?.payee_name || foundTxn?.raw_info || foundTxn?.description || 'Transaction';
+
+  const categories = window.SPEND_CATEGORIES || [];
+  if (window.budgetApp) {
+    window.budgetApp._pendingRecategorize = { txnId, merchantName: effectiveMerchant };
+  }
+
+  // Clean suggested merchant name
+  const cleanMerchant = (effectiveMerchant || '')
+    .replace(/[*\-_#/:.,;]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  showModal({
+    title: '🏷️ Categorize Transaction',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:14px;">
+        <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+          Assign a spend category for <strong id="modalRecatMerchantName" style="color:var(--heading);">${effectiveMerchant}</strong>:
+        </p>
+
+        <div>
+          <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Merchant / Keyword Rule:</label>
+          <input type="text" id="modalRecatMerchantInput" value="${cleanMerchant}" style="width:100%; font-size:12px; padding:6px 8px; border-radius:6px;" placeholder="Merchant name or pattern">
+        </div>
+
+        <div>
+          <label style="font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Spend Category:</label>
+          <select id="modalRecategorizeSelect" style="width:100%; font-size:12.5px; font-weight:600; padding:6px 8px; border-radius:6px;">
+            ${categories.map(c => `<option value="${c.id}" ${c.id === currentCatId ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:6px; padding:12px; display:flex; flex-direction:column; gap:10px;">
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--heading); cursor:pointer;">
+            <input type="checkbox" id="modalSaveMerchantRule" checked style="margin-top:2px;">
+            <div>
+              <span style="font-weight:600;">Save to Personal Rules</span>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Always categorize all past & future transactions matching this merchant keyword locally.</div>
+            </div>
+          </label>
+
+          <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; border-top:1px dashed var(--border); padding-top:8px;">
+            <input type="checkbox" id="modalSuggestToGitHub" checked style="margin-top:2px;">
+            <div>
+              <span style="font-weight:600;">🌐 Suggest to GitHub Community Database (1-Click / Anonymous)</span>
+              <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Share this merchant anonymously so all HABit users benefit in the next category sync. No GitHub account needed!</div>
+            </div>
+          </label>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.applyRecategorizationFromModal()">Save & Apply</button>
+    `
+  });
+
+  setTimeout(() => {
+    const el = document.getElementById('modalRecatMerchantName');
+    if (el) el.innerText = merchantName || 'this transaction';
+  }, 10);
+}
+
+export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr) {
+  const mName = months.includes(monthName) ? monthName : (appState.activeTab || 'Jan');
+  const yData = getYearData();
+  const mData = getMonthData(mName);
+  const cfg = getSettings();
+  const curr = cfg.currency_symbol || '£';
+  const desc = billDesc || 'Scheduled Bill';
+  const amt = billAmount !== undefined ? Number(billAmount) : 0;
+
+  // Locate the bill item using budgetApp.findScheduledItem if available, or full fallback
+  let item = (window.budgetApp && typeof window.budgetApp.findScheduledItem === 'function')
+    ? window.budgetApp.findScheduledItem(sourceType, sourceIdx, monthName, billDesc, billAmount, dateStr)
+    : null;
+
+  if (!item) {
+    const isMatch = (cand) => cand && (!billDesc || cand.desc === billDesc || cand.name === billDesc || (cand.rawDesc && cand.rawDesc === billDesc));
+
+    if (sourceType === 'direct_debit' && mData.direct_debits) {
+      if (sourceIdx !== undefined && isMatch(mData.direct_debits[sourceIdx])) item = mData.direct_debits[sourceIdx];
+    } else if ((sourceType === 'payments_in' || sourceType === 'monthly_payment_in') && mData.payments_in) {
+      if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) item = mData.payments_in[sourceIdx];
+    } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
+      if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) item = mData.scheduled_items[sourceIdx];
+    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) item = yData.yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
+      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) item = yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'recurring_payment') {
+      const recurring = yData.recurring_payments || cfg.recurring_payments || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) item = recurring[sourceIdx];
+    } else if (sourceType === 'recurring_income') {
+      const recurring = yData.recurring_incomes || cfg.recurring_incomes || [];
+      if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) item = recurring[sourceIdx];
+    }
+  }
+
+  if (!item && billDesc) {
+    const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+
+    item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
+        || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
+        || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
+
+    if (!item) {
+      for (const b of (yData.yearly_budgets || [])) {
+        const bNameLow = (b.name || '').toLowerCase();
+        for (const t of (b.transactions || [])) {
+          const tDescLow = (t.desc || '').toLowerCase();
+          const combinedLow = `${bNameLow} ${tDescLow}`;
+          if (combinedLow.includes(cleanTarget) || cleanTarget.includes(tDescLow) || cleanTarget.includes(bNameLow)) {
+            item = t;
+            break;
+          }
+        }
+        if (item) break;
+        if (bNameLow.includes(cleanTarget) || cleanTarget.includes(bNameLow)) {
+          item = b;
+          break;
+        }
+      }
+    }
+  }
+
+  const finalAmt = (amt > 0 ? amt : Number(item?.amount || 0));
+  const isCleared = Boolean(item?.status === 'paid' || item?.auto_cleared || (dateStr && item?.cleared_dates && item.cleared_dates.includes(dateStr)));
+
+  const allTxns = appState.data.open_banking_transactions || [];
+  const cleanDesc = (desc || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  const sortedTxns = [...allTxns].sort((a, b) => {
+    const aAmtDiff = Math.abs(Math.abs(Number(a.amount) || 0) - amt);
+    const bAmtDiff = Math.abs(Math.abs(Number(b.amount) || 0) - amt);
+    if (aAmtDiff < 0.05 && bAmtDiff >= 0.05) return -1;
+    if (bAmtDiff < 0.05 && aAmtDiff >= 0.05) return 1;
+    return new Date(b.booking_date || 0) - new Date(a.booking_date || 0);
+  });
+
+  const bodyHtml = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div style="background:rgba(255,255,255,0.04); border:1px solid var(--border); border-radius:var(--radius-card); padding:10px 14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+        <div>
+          <div style="font-weight:700; font-size:13px; color:var(--heading);">
+            ${desc} <span style="color:var(--curr-border); margin-left:4px;">${curr}${amt.toFixed(2)}</span>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+            Status: <strong style="color:${isCleared ? 'var(--green)' : 'var(--amber)'};">${isCleared ? '✓ Cleared / Paid' : '⚠️ Due'}</strong>
+            ${item?.matched_payee ? ` • Matched with <em>${item.matched_payee}</em> (${item.matched_date || ''})` : ''}
+          </div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          ${isCleared ? `
+            <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">❌ Set as Due / Un-match</button>
+          ` : `
+            <button type="button" class="btn green" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleScheduledBillCleared('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', ${amt}, '${dateStr || ''}'); window.budgetApp.closeModal();">⚡ Mark Cleared (Manual)</button>
+          `}
+        </div>
+      </div>
+
+      <div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <label style="font-size:11px; font-weight:700; text-transform:uppercase; color:var(--text-muted);">Select Bank Transaction to Link / Match:</label>
+          <input type="text" placeholder="🔍 Filter transactions..." style="font-size:11px; padding:3px 8px; width:160px;" oninput="window.budgetApp.filterBillMatchTxns(this.value)">
+        </div>
+        <div id="billMatchTxnList" style="max-height:280px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; border:1px solid var(--border); border-radius:6px; padding:6px; background:#0c0d14;">
+          ${sortedTxns.length === 0 ? `
+            <div style="font-size:11px; color:var(--text-muted); text-align:center; padding:16px;">No Open Banking transactions available. Run a Sync in Settings first.</div>
+          ` : sortedTxns.map(t => {
+            const tAmt = Math.abs(Number(t.amount) || 0);
+            const isAmtMatch = Math.abs(tAmt - amt) <= 0.05;
+            const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
+            const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
+            const isRecMatch = isAmtMatch || isNameMatch;
+            const isCurrentMatch = item?.matched_txn_id === t.transaction_id;
+
+            return `
+              <div class="bill-match-row" data-search="${tPayee.toLowerCase()} ${t.account_name || ''} ${tAmt}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; background:${isCurrentMatch ? 'rgba(16,185,129,0.18)' : (isRecMatch ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)')}; border:1px solid ${isCurrentMatch ? 'var(--green)' : (isRecMatch ? 'rgba(56,189,248,0.3)' : 'transparent')};">
+                <div style="min-width:0; flex:1;">
+                  <div style="font-size:11.5px; font-weight:600; color:var(--heading); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+                    ${tPayee}
+                    ${isRecMatch ? `<span class="badge" style="font-size:9px; background:rgba(56,189,248,0.25); color:var(--curr-border); padding:1px 4px; margin-left:4px;">✨ Suggested Match</span>` : ''}
+                    ${isCurrentMatch ? `<span class="badge" style="font-size:9px; background:rgba(16,185,129,0.25); color:var(--green); padding:1px 4px; margin-left:4px;">✓ Current Match</span>` : ''}
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted);">
+                    ${t.booking_date || ''} • ${t.account_name || 'Account'} ${t.matched_bill_id && !isCurrentMatch ? `• (Matched: ${t.matched_bill_id})` : ''}
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px; flex-shrink:0;">
+                  <span style="font-weight:700; font-size:12px; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'};">
+                    ${t.amount < 0 ? '-' : '+'}${curr}${tAmt.toFixed(2)}
+                  </span>
+                  <button type="button" class="btn ${isCurrentMatch ? 'secondary' : 'green'}" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.linkBillToTransaction('${sourceType}', ${sourceIdx}, '${mName}', '${desc.replace(/'/g, "\\'")}', '${t.transaction_id}', '${dateStr || ''}')">
+                    ${isCurrentMatch ? 'Re-link' : '🔗 Match & Clear'}
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: `🔗 Match Scheduled Bill: ${desc}`,
+    body: bodyHtml,
+    actions: `<button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`
+  });
+}
+

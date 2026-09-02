@@ -1,0 +1,79 @@
+[
+  {
+    "id": "groceries",
+    "label": "Supermarket & Groceries",
+    "icon": "🛒",
+    "color": "#10b981",
+    "file": "groceries.json"
+  },
+  {
+    "id": "transport",
+    "label": "Fuel, Travel & Vehicles",
+    "icon": "⛽",
+    "color": "#0284c7",
+    "file": "transport.json"
+  },
+  {
+    "id": "dining",
+    "label": "Dining, Cafes, Bars & Takeaways",
+    "icon": "☕",
+    "color": "#f59e0b",
+    "file": "dining.json"
+  },
+  {
+    "id": "shopping",
+    "label": "Shopping, Retail, Tech & Home",
+    "icon": "🛍️",
+    "color": "#ec4899",
+    "file": "shopping.json"
+  },
+  {
+    "id": "entertainment",
+    "label": "Entertainment, Gaming, Leisure & Media",
+    "icon": "🎮",
+    "color": "#8b5cf6",
+    "file": "entertainment.json"
+  },
+  {
+    "id": "bills",
+    "label": "Bills, Utilities, Telecoms & Housing",
+    "icon": "🏡",
+    "color": "#6366f1",
+    "file": "bills.json"
+  },
+  {
+    "id": "health",
+    "label": "Health, Fitness, Medical & Beauty",
+    "icon": "🏥",
+    "color": "#14b8a6",
+    "file": "health.json"
+  },
+  {
+    "id": "travel",
+    "label": "Travel, Airlines, Hotels & Holidays",
+    "icon": "✈️",
+    "color": "#06b6d4",
+    "file": "travel.json"
+  },
+  {
+    "id": "education",
+    "label": "Education, Courses & Childcare",
+    "icon": "📚",
+    "color": "#3b82f6",
+    "file": "education.json"
+  },
+  {
+    "id": "transfers",
+    "label": "Transfers, Savings, Investments & Wallets",
+    "icon": "🔄",
+    "color": "#64748b",
+    "file": "transfers.json"
+  },
+  {
+    "id": "general",
+    "label": "General & Miscellaneous",
+    "icon": "📦",
+    "color": "#94a3b8",
+    "file": "general.json"
+  }
+]

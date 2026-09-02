@@ -211,8 +211,14 @@ export function renderBillsView(container) {
                     `}
                   </td>
                   <td>
-                    <div style="display:flex; align-items:center; gap:2px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
                       ${flowBadge} ${cadenceBadge}
+                      <button type="button" class="badge" style="background:${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.15)'}; color:${(b.auto_cleared || b.status === 'paid') ? 'var(--green)' : 'var(--amber)'}; font-size:9.5px; padding:2px 6px; font-weight:600; border:1px solid ${(b.auto_cleared || b.status === 'paid') ? 'rgba(16,185,129,0.35)' : 'rgba(245,158,11,0.35)'}; cursor:pointer;" onclick="window.budgetApp.toggleScheduledBillCleared('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="${(b.auto_cleared || b.status === 'paid') ? 'Cleared' + (b.matched_payee ? ' (' + b.matched_payee + ')' : '') + '. Click to mark Due' : 'Due. Click to mark Cleared'}">
+                        ${(b.auto_cleared || b.status === 'paid') ? '⚡ Cleared' : '⚠️ Due'}
+                      </button>
+                      ${globalEditMode ? `
+                        <button type="button" class="btn secondary" style="font-size:9px; padding:1px 5px;" onclick="window.budgetApp.openManualBillMatchModal('${b.source_type}', ${b.source_idx}, '${appState.activeTab}', '${(b.desc || '').replace(/'/g, "\\'")}', ${b.amount || 0})" title="Match with Bank Transaction">🔗 Match</button>
+                      ` : ''}
                     </div>
                   </td>
                   <td>
