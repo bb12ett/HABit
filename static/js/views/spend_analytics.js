@@ -484,6 +484,7 @@ export function renderSpendAnalyticsView(container) {
                   </td>
                   <td class="text-right" style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap; padding:8px;">
                     ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
+                    ${t.amount > 0 ? `<div style="font-size:9.5px; font-weight:600; color:var(--green); opacity:0.9;">↩️ Refund / Offset</div>` : ''}
                   </td>
                 </tr>
               `;

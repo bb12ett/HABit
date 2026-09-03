@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Category Inheritance on Annual Budgets**:
   - Added a **Category** selector to Annual Budgets with real-time title auto-detection (e.g. *Holiday/Trip* ➔ `✈️ Travel`, *Christmas* ➔ `🎁 Gifts`, *Car MOT/Service* ➔ `⛽ Transport`, *Home DIY/Garden* ➔ `🛍️ Shopping`).
   - Transactions matched to annual budgets automatically inherit that budget's category rather than being misclassified as generic "Bills".
+- **Reimbursements & Refunds Offsetting in Spend Analytics**:
+  - Positive transactions assigned to a spending category (e.g. shared holiday reimbursements, store returns, or cashback) now intelligently offset category totals (e.g. £760 Airbnb minus £380 reimbursement = £380 net Travel spend).
+  - Reimbursements display with green amounts and an informative `↩️ Refund / Offset` badge in the Categorized Transactions list.
+  - Standard salary and general account transfers in remain excluded so regular income never distorts spending charts.
 - **Spend Category on Scheduled Outgoings**:
   - Added Spend Category selector to the Scheduled Outgoings / Direct Debits creation form in the Bills view.
 - **Precedence Hierarchy & Direct Debit Keyword Refinement**:

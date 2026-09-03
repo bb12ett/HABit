@@ -3619,8 +3619,8 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
   }
 
   const filtered = (transactions || []).filter(t => {
-    const amt = Number(t.amount || 0);
-    if (amt >= 0) return false;
+    const rawAmt = Number(t.amount || 0);
+    if (Math.abs(rawAmt) < 0.001) return false;
 
     if (t.booking_date) {
       const tDate = new Date(t.booking_date);
@@ -3638,7 +3638,20 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
       if (t.owner && t.owner !== 'Joint' && t.owner !== activeUser) return false;
     }
 
-    return true;
+    // Outflow expenses are always included
+    if (rawAmt < 0) return true;
+
+    // Incoming transactions: include as refund / reimbursement if tagged to a spend category
+    const cat = categorizeTransaction(t, customRules);
+    const payeeLower = `${t.payee_name || ''} ${t.merchant_name || ''} ${t.raw_info || ''} ${t.description || ''}`.toLowerCase();
+    const isExplicitRefund = payeeLower.includes('refund') || payeeLower.includes('cashback') || payeeLower.includes('return') || payeeLower.includes('reversal') || payeeLower.includes('reimbursement');
+
+    // Include if manually set, or explicit refund keyword, or matched a discretionary spend category
+    if (t.category && t.category !== 'transfers' && t.category !== 'general') return true;
+    if (isExplicitRefund && cat.id !== 'transfers' && cat.id !== 'general') return true;
+    if (cat.id !== 'transfers' && cat.id !== 'general' && cat.id !== 'bills') return true;
+
+    return false;
   });
 
   const totalsByCategory = {};
@@ -3656,17 +3669,29 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
 
   filtered.forEach(t => {
     const cat = categorizeTransaction(t, customRules);
-    const absAmt = Math.abs(Number(t.amount || 0));
+    const rawAmt = Number(t.amount || 0);
+    const absAmt = Math.abs(rawAmt);
+    const isOffset = (rawAmt > 0);
 
-    totalsByCategory[cat.id].totalAmount += absAmt;
-    totalsByCategory[cat.id].count += 1;
-    totalsByCategory[cat.id].transactions.push({ ...t, assignedCategory: cat });
+    const enrichedTxn = { ...t, assignedCategory: cat, is_offset: isOffset };
 
-    const mName = t.payee_name || 'Unknown Merchant';
-    merchantTotals[mName] = (merchantTotals[mName] || 0) + absAmt;
+    if (isOffset) {
+      totalsByCategory[cat.id].totalAmount = Math.max(0, totalsByCategory[cat.id].totalAmount - absAmt);
+      totalsByCategory[cat.id].transactions.push(enrichedTxn);
+      if (cat.id !== 'transfers') {
+        grandTotal = Math.max(0, grandTotal - absAmt);
+      }
+    } else {
+      totalsByCategory[cat.id].totalAmount += absAmt;
+      totalsByCategory[cat.id].count += 1;
+      totalsByCategory[cat.id].transactions.push(enrichedTxn);
 
-    if (cat.id !== 'transfers') {
-      grandTotal += absAmt;
+      const mName = t.payee_name || t.merchant_name || 'Unknown Merchant';
+      merchantTotals[mName] = (merchantTotals[mName] || 0) + absAmt;
+
+      if (cat.id !== 'transfers') {
+        grandTotal += absAmt;
+      }
     }
   });
 
@@ -3684,7 +3709,7 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
     .slice(0, 8);
 
   return {
-    filteredTransactions: filtered.map(t => ({ ...t, assignedCategory: categorizeTransaction(t, customRules) })),
+    filteredTransactions: filtered.map(t => ({ ...t, assignedCategory: categorizeTransaction(t, customRules), is_offset: Number(t.amount || 0) > 0 })),
     categoryList,
     topMerchants,
     grandTotal,
@@ -11799,6 +11824,7 @@ function renderSpendAnalyticsView(container) {
                   </td>
                   <td class="text-right" style="font-weight:700; color:${t.amount < 0 ? 'var(--red)' : 'var(--green)'}; font-size:12.5px; white-space:nowrap; padding:8px;">
                     ${t.amount < 0 ? '-' : '+'}${curr}${Math.abs(Number(t.amount || 0)).toFixed(2)}
+                    ${t.amount > 0 ? `<div style="font-size:9.5px; font-weight:600; color:var(--green); opacity:0.9;">↩️ Refund / Offset</div>` : ''}
                   </td>
                 </tr>
               `;
