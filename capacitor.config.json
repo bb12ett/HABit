@@ -1,0 +1,9 @@
+﻿{
+  "appId": "com.habit.budgetplanner",
+  "appName": "HABit",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "https"
+  }
+}

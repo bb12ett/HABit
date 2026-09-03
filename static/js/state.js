@@ -255,20 +255,20 @@ export function getYearData(year = appState.currentYear) {
 export function getMonthData(mName, year = appState.currentYear) {
   const yData = getYearData(year);
   if (!yData.months) yData.months = {};
+  const cfg = getSettings();
   if (!yData.months[mName]) {
-    const cfg = getSettings();
-    yData.months[mName] = {
-      current_data: {},
-      credit_data: {},
-      savings_data: {},
-      weekly_items: {},
-      weekly_actuals: {},
-      direct_debits: JSON.parse(JSON.stringify(cfg.default_direct_debits || [])),
-      payments_in: JSON.parse(JSON.stringify(cfg.default_payments_in || [])),
-      deductions_list: JSON.parse(JSON.stringify(cfg.default_deductions || []))
-    };
+    yData.months[mName] = {};
   }
-  return yData.months[mName];
+  const md = yData.months[mName];
+  if (!md.current_data) md.current_data = {};
+  if (!md.credit_data) md.credit_data = {};
+  if (!md.savings_data) md.savings_data = {};
+  if (!md.weekly_items) md.weekly_items = {};
+  if (!md.weekly_actuals) md.weekly_actuals = {};
+  if (!md.direct_debits) md.direct_debits = JSON.parse(JSON.stringify(cfg.default_direct_debits || []));
+  if (!md.payments_in) md.payments_in = JSON.parse(JSON.stringify(cfg.default_payments_in || []));
+  if (!md.deductions_list) md.deductions_list = JSON.parse(JSON.stringify(cfg.default_deductions || []));
+  return md;
 }
 
 export function getWeekItems(mName, wName, year = appState.currentYear) {

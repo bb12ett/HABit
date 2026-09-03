@@ -5,6 +5,17 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.7] - 2026-09-03
+
+### Added & Enhanced
+- **Open Banking Balance Sync Mode (Available vs Current)**:
+  - Added user-configurable **Balance Sync Mode** in Settings (`⚡ Available Balance (Include Pending - Recommended)`, `💳 Available for Credit Cards, Cleared for Bank Accounts`, and `🏛️ Current / Booked Balance (Cleared Transactions Only)`).
+  - Fixed TrueLayer credit card balance response parsing to reliably capture both cleared booked debt and live available credit (`last_available`).
+  - Added individual per-account balance mode overrides (`Mode: Global`, `⚡ Available (Pending)`, `🏛️ Current (Cleared)`) in Connected Bank Accounts.
+  - Enhanced weekly check-in modal quick-fill buttons (`⚡ Live Avail (Pending)` / `⚡ Live Cleared`) with informative tooltips showing cleared debt, live available credit, and active sync mode.
+
+---
+
 ## [0.3.6] - 2026-09-02
 
 ### Enhanced

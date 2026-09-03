@@ -630,14 +630,32 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
                 const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
                 return mapped === acc.toLowerCase();
               });
-              const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
+              const globalMode = cfg.open_banking?.balance_type || 'available';
+              const accMode = linkedItem?.balance_type || 'default';
+              const effMode = (accMode === 'available' || accMode === 'current') ? accMode : globalMode;
+              const useAvail = (effMode === 'available');
+              const hasAvail = linkedItem && linkedItem.last_available !== undefined && linkedItem.last_available !== null;
+              const hasBooked = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null;
+              let liveBal = null;
+              let btnLabel = 'Live';
+              let btnTitle = 'Fill with latest Open Banking balance';
+
+              if (useAvail && hasAvail) {
+                liveBal = Number(linkedItem.last_available);
+                btnLabel = 'Live Avail';
+                btnTitle = `Fill with available balance (includes pending: ${curr}${liveBal.toFixed(2)}${hasBooked ? `, cleared: ${curr}${Number(linkedItem.last_balance).toFixed(2)}` : ''})`;
+              } else if (hasBooked) {
+                liveBal = Number(linkedItem.last_balance);
+                btnLabel = 'Live Cleared';
+                btnTitle = `Fill with cleared balance (${curr}${liveBal.toFixed(2)}${hasAvail ? `, available: ${curr}${Number(linkedItem.last_available).toFixed(2)}` : ''})`;
+              }
               return `
                 <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                   <div>
                     <strong style="color:var(--heading); font-size:13px;">${acc}</strong>
                     ${liveBal !== null ? `
                       <div style="margin-top:2px;">
-                        <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_curr_${acc}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                        <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_curr_${acc}').value = '${liveBal.toFixed(2)}'" title="${btnTitle}">⚡ ${btnLabel}: ${curr}${liveBal.toFixed(2)}</button>
                       </div>
                     ` : ''}
                   </div>
@@ -662,12 +680,33 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
                   const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
                   return mapped === c.name.toLowerCase() || (item.mapped_habit_account_id || '').toLowerCase() === c.name.toLowerCase();
                 });
+                const globalMode = cfg.open_banking?.balance_type || 'available';
+                const accMode = linkedItem?.balance_type || 'default';
+                const effMode = (accMode === 'available' || accMode === 'current') ? accMode : globalMode;
+                const useCardAvail = (effMode === 'available' || effMode === 'cards_available');
                 let liveAvail = null;
+                let btnLabel = 'Live Avail';
+                let btnTitle = 'Fill with latest Open Banking available credit';
+
                 if (linkedItem) {
-                  if (linkedItem.last_available !== undefined && linkedItem.last_available !== null && Number(linkedItem.last_available) > 0) {
-                    liveAvail = Number(linkedItem.last_available);
-                  } else if (Number(c.limit || 0) > 0 && linkedItem.last_balance !== undefined) {
-                    liveAvail = Math.max(0, Number(c.limit) - Math.abs(Number(linkedItem.last_balance)));
+                  const cardLimit = Number(c.limit || linkedItem.credit_limit || 0);
+                  const debt = Math.abs(Number(linkedItem.last_balance || 0));
+                  const rawAvail = (linkedItem.last_available !== undefined && linkedItem.last_available !== null && Number(linkedItem.last_available) > 0)
+                    ? Number(linkedItem.last_available)
+                    : null;
+
+                  if (useCardAvail && rawAvail !== null) {
+                    liveAvail = rawAvail;
+                    btnLabel = 'Live Avail (Pending)';
+                    btnTitle = `Fill with available credit remaining (${curr}${liveAvail.toFixed(2)}, cleared debt: ${curr}${debt.toFixed(2)})`;
+                  } else if (cardLimit > 0 && linkedItem.last_balance !== undefined) {
+                    liveAvail = Math.max(0, cardLimit - debt);
+                    btnLabel = 'Live Cleared';
+                    btnTitle = `Fill with cleared available credit (${curr}${liveAvail.toFixed(2)}, cleared debt: ${curr}${debt.toFixed(2)}${rawAvail !== null ? `, live available: ${curr}${rawAvail.toFixed(2)}` : ''})`;
+                  } else if (rawAvail !== null) {
+                    liveAvail = rawAvail;
+                    btnLabel = 'Live Avail';
+                    btnTitle = `Fill with available credit (${curr}${liveAvail.toFixed(2)})`;
                   }
                 }
                 return `
@@ -677,7 +716,7 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
                       <span style="font-size:10px; color:var(--text-muted); margin-left:4px;">(Credit Limit: ${curr}${c.limit})</span>
                       ${liveAvail !== null ? `
                         <div style="margin-top:2px;">
-                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_c_avail_${c.name}').value = '${liveAvail.toFixed(2)}'" title="Fill with latest Open Banking available credit">⚡ Live Avail: ${curr}${liveAvail.toFixed(2)}</button>
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_c_avail_${c.name}').value = '${liveAvail.toFixed(2)}'" title="${btnTitle}">⚡ ${btnLabel}: ${curr}${liveAvail.toFixed(2)}</button>
                         </div>
                       ` : ''}
                     </div>
@@ -703,14 +742,32 @@ export function openQuickCheckInModal(selectedWeek, selectedMonth) {
                   const mapped = (item.mapped_habit_account_id || '').replace(/^(credit|current|savings):/i, '').trim().toLowerCase();
                   return mapped === s.toLowerCase();
                 });
-                const liveBal = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null ? Number(linkedItem.last_balance) : null;
+                const globalMode = cfg.open_banking?.balance_type || 'available';
+                const accMode = linkedItem?.balance_type || 'default';
+                const effMode = (accMode === 'available' || accMode === 'current') ? accMode : globalMode;
+                const useAvail = (effMode === 'available');
+                const hasAvail = linkedItem && linkedItem.last_available !== undefined && linkedItem.last_available !== null;
+                const hasBooked = linkedItem && linkedItem.last_balance !== undefined && linkedItem.last_balance !== null;
+                let liveBal = null;
+                let btnLabel = 'Live';
+                let btnTitle = 'Fill with latest Open Banking balance';
+
+                if (useAvail && hasAvail) {
+                  liveBal = Number(linkedItem.last_available);
+                  btnLabel = 'Live Avail';
+                  btnTitle = `Fill with available balance (includes pending: ${curr}${liveBal.toFixed(2)}${hasBooked ? `, cleared: ${curr}${Number(linkedItem.last_balance).toFixed(2)}` : ''})`;
+                } else if (hasBooked) {
+                  liveBal = Number(linkedItem.last_balance);
+                  btnLabel = 'Live Cleared';
+                  btnTitle = `Fill with cleared balance (${curr}${liveBal.toFixed(2)}${hasAvail ? `, available: ${curr}${Number(linkedItem.last_available).toFixed(2)}` : ''})`;
+                }
                 return `
                   <div style="background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
                     <div>
                       <strong style="color:var(--heading); font-size:13px;">${s}</strong>
                       ${liveBal !== null ? `
                         <div style="margin-top:2px;">
-                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_sav_${s}').value = '${liveBal.toFixed(2)}'" title="Fill with latest Open Banking balance">⚡ Live: ${curr}${liveBal.toFixed(2)}</button>
+                          <button type="button" class="btn secondary" style="font-size:10px; padding:1px 6px; line-height:1.4;" onclick="document.getElementById('qchk_sav_${s}').value = '${liveBal.toFixed(2)}'" title="${btnTitle}">⚡ ${btnLabel}: ${curr}${liveBal.toFixed(2)}</button>
                         </div>
                       ` : ''}
                     </div>

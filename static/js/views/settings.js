@@ -1,4 +1,5 @@
 import { appState, getSettings, getAccountConfig, ALL_AVAILABLE_WIDGETS, isMultiUserEnabled, isPersonSalaryHidden, getPersonSettings, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner, hasPersonPin, isAccountVisibleToActiveUser } from '../state.js';
+import { getStorageMode } from '../api.js';
 
 export function renderSettingsView(container) {
   const cfg = getSettings();
@@ -8,6 +9,7 @@ export function renderSettingsView(container) {
   if (currentTheme === 'dark') currentTheme = 'navy_dark';
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
+  const storageMode = typeof getStorageMode === 'function' ? getStorageMode() : 'ha';
 
   // Visible accounts and members for current user persona
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
@@ -479,6 +481,20 @@ export function renderSettingsView(container) {
                 </div>
                 <div style="grid-column:1/-1;">
                   <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
+                    Balance Sync Mode (Include Pending vs Cleared Only):
+                  </label>
+                  <select id="cfg-openbanking-balance-type" style="width:100%; font-size:12px;" onchange="window.budgetApp.updateOpenBankingBalanceType(this.value)">
+                    <option value="available" ${(!cfg.open_banking.balance_type || cfg.open_banking.balance_type === 'available') ? 'selected' : ''}>⚡ Available Balance (Include Pending Transactions - Recommended)</option>
+                    <option value="cards_available" ${cfg.open_banking.balance_type === 'cards_available' ? 'selected' : ''}>💳 Available for Credit Cards (Pending), Cleared for Bank Accounts</option>
+                    <option value="current" ${cfg.open_banking.balance_type === 'current' ? 'selected' : ''}>🏛️ Current / Booked Balance (Cleared Transactions Only)</option>
+                  </select>
+                  <div style="font-size:10.5px; color:var(--text-muted); margin-top:3px; line-height:1.4;">
+                    <strong>Available:</strong> Updates faster by factoring in authorized/pending card spending immediately.<br>
+                    <strong>Current:</strong> Only reflects posted transactions that have officially cleared through the banking network.
+                  </div>
+                </div>
+                <div style="grid-column:1/-1;">
+                  <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
                     Registered Redirect URI (Must match developer console exactly):
                   </label>
                   <input type="text" id="cfg-openbanking-redirect-uri" value="${cfg.open_banking.redirect_uri || ''}" placeholder="e.g. https://home.bb12ett.uk/ or leave blank for auto-detect" style="width:100%;">
@@ -561,13 +577,22 @@ export function renderSettingsView(container) {
                             return caName.toLowerCase() === mappedClean.toLowerCase() || caName.toLowerCase() === (acc.mapped_habit_account_id || '').toLowerCase();
                           });
                           const isCard = Boolean(cardObj || acc.account_type === 'CARD' || acc.last_available !== undefined || (acc.account_name && acc.account_name.toLowerCase().includes('card')));
+                          const globalMode = cfg.open_banking?.balance_type || 'available';
+                          const effMode = (acc.balance_type && acc.balance_type !== 'default') ? acc.balance_type : globalMode;
                           if (isCard) {
                             const debt = Number(acc.last_balance || 0);
                             const cardLimit = Number(typeof cardObj === 'object' ? (cardObj.limit || acc.credit_limit || 0) : (acc.credit_limit || 0));
                             const avail = acc.last_available !== undefined && Number(acc.last_available) > 0 ? Number(acc.last_available) : Math.max(0, cardLimit - debt);
-                            return `Debt: ${cfg.currency || '£'}${Math.abs(debt).toFixed(2)} (Available: ${cfg.currency || '£'}${avail.toFixed(2)})`;
+                            const usingLabel = (effMode === 'available' || effMode === 'cards_available') ? 'Syncing Available' : 'Syncing Cleared';
+                            return `Debt: ${cfg.currency || '£'}${Math.abs(debt).toFixed(2)} (Available: ${cfg.currency || '£'}${avail.toFixed(2)}) • <span style="color:var(--green);">${usingLabel}</span>`;
                           }
-                          return `Last Balance: ${cfg.currency || '£'}${Number(acc.last_balance || 0).toFixed(2)}`;
+                          const bal = Number(acc.last_balance || 0);
+                          const avail = (acc.last_available !== undefined && acc.last_available !== null) ? Number(acc.last_available) : null;
+                          const usingLabel = (effMode === 'available' && avail !== null) ? 'Syncing Available' : 'Syncing Cleared';
+                          if (avail !== null) {
+                            return `Cleared: ${cfg.currency || '£'}${bal.toFixed(2)} (Available: ${cfg.currency || '£'}${avail.toFixed(2)}) • <span style="color:var(--green);">${usingLabel}</span>`;
+                          }
+                          return `Last Balance: ${cfg.currency || '£'}${bal.toFixed(2)}`;
                         })()}
                       </div>
                     </div>
@@ -591,6 +616,12 @@ export function renderSettingsView(container) {
                         const isSel = acc.mapped_habit_account_id && (acc.mapped_habit_account_id === saName || acc.mapped_habit_account_id === `savings:${saName}`);
                         return `<option value="${saName}" ${isSel ? 'selected' : ''}>Savings: ${saName}</option>`;
                       }).join('')}
+                    </select>
+
+                    <select onchange="window.budgetApp.updateLinkedAccountBalanceType('${acc.account_id}', this.value)" style="font-size:11px; padding:3px 6px;" title="Account Balance Preference">
+                      <option value="default" ${(!acc.balance_type || acc.balance_type === 'default') ? 'selected' : ''}>⚙️ Mode: Global</option>
+                      <option value="available" ${acc.balance_type === 'available' ? 'selected' : ''}>⚡ Available (Pending)</option>
+                      <option value="current" ${acc.balance_type === 'current' ? 'selected' : ''}>🏛️ Current (Cleared)</option>
                     </select>
 
                     ${isMulti ? `
@@ -664,6 +695,46 @@ export function renderSettingsView(container) {
                 `).join('')}
               </div>
             `}
+          </div>
+        </div>
+
+        <!-- APPLICATION RUNTIME & UNIVERSAL STORAGE ADAPTER -->
+        <div class="panel" style="margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>📱</span> Application Runtime & Storage Engine
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                HABit Universal Adapter automatically detects whether you are running inside Home Assistant or as a standalone mobile app.
+              </p>
+            </div>
+            <div>
+              <span class="badge" style="background:${storageMode === 'ha' ? 'rgba(16,185,129,0.2)' : 'rgba(56,189,248,0.2)'}; color:${storageMode === 'ha' ? 'var(--green)' : 'var(--primary)'}; border:1px solid ${storageMode === 'ha' ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.4)'}; padding:4px 10px; font-size:11px; font-weight:bold;">
+                ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
+              </span>
+            </div>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div>
+                <div style="font-size:12.5px; font-weight:600; color:var(--heading);">
+                  ${storageMode === 'ha' ? 'Connected to Home Assistant Storage (/data)' : 'Standalone Offline Storage (IndexedDB / Local)'}
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                  ${storageMode === 'ha' ? 'Persistent JSON storage on Home Assistant host disk with real-time sensor updates.' : 'Private on-device storage with zero external server requirements. 100% offline-first.'}
+                </div>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleStorageModeOverride()">
+                  ${storageMode === 'ha' ? 'Switch to Standalone Local' : 'Auto-Detect Home Assistant'}
+                </button>
+                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.exportFullBudgetBackup()">
+                  💾 Export Full Backup
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

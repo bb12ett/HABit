@@ -676,7 +676,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
   const cardAutoPayments = {};
   cfg.credit_accounts.forEach(c => {
     if (c.autopay_enabled) {
-      const openingDebt = Number(md.credit_data[c.name] && md.credit_data[c.name].opening_spent) || 0;
+      const openingDebt = Number(md.credit_data && md.credit_data[c.name] && md.credit_data[c.name].opening_spent) || 0;
       let payAmt = c.autopay_type === 'full' ? openingDebt : Math.min(openingDebt, Number(c.autopay_fixed_amt) || 0);
       cardAutoPayments[c.name] = { payAmt, from: c.autopay_from || cfg.current_accounts[0] };
     }
@@ -735,7 +735,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     if (actVal !== "" && actVal !== null && actVal !== undefined) {
       closingCurrent[acc] = parseFloat(actVal) || 0;
     } else {
-      let bal = md.current_data[acc] ? (Number(md.current_data[acc].opening) || 0) : 0;
+      let bal = (md.current_data && md.current_data[acc]) ? (Number(md.current_data[acc].opening) || 0) : 0;
       (md.deductions_list || []).forEach(d => {
         if (d.target_account === acc) {
           cfg.people.forEach(p => {
@@ -772,7 +772,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
         if (cardAutoPayments[c.name] && cardAutoPayments[c.name].from === acc) bal -= cardAutoPayments[c.name].payAmt;
       });
       schedule.weeks.forEach(wObj => {
-        const items = md.weekly_items[wObj.name] || [];
+        const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.current_accounts[0];
           const isCurrent = it.account_type === 'current' || (it.desc && it.desc.toLowerCase().includes('cash'));
@@ -794,7 +794,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     } else if (actSpent !== "" && actSpent !== null && actSpent !== undefined) {
       closingCredit[c.name] = parseFloat(actSpent) || 0;
     } else {
-      let spent = md.credit_data[c.name] ? (Number(md.credit_data[c.name].opening_spent) || 0) : 0;
+      let spent = (md.credit_data && md.credit_data[c.name]) ? (Number(md.credit_data[c.name].opening_spent) || 0) : 0;
       (md.direct_debits || []).forEach(dd => {
         if (dd.account === c.name) spent += Number(dd.amount) || 0;
       });
@@ -821,7 +821,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
       });
       if (cardAutoPayments[c.name]) spent -= cardAutoPayments[c.name].payAmt;
       schedule.weeks.forEach(wObj => {
-        const items = md.weekly_items[wObj.name] || [];
+        const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.credit_accounts[0]?.name;
           const isCredit = it.account_type === 'credit' || (!it.desc || !it.desc.toLowerCase().includes('cash'));
@@ -836,7 +836,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
   });
 
   cfg.savings_accounts.forEach(acc => {
-    const s = md.savings_data[acc] ? md.savings_data[acc] : { opening: 0 };
+    const s = (md.savings_data && md.savings_data[acc]) ? md.savings_data[acc] : { opening: 0 };
     const autoInflow = (savingsInflowFromSalary[acc] || 0) + (savingsInflowFromDD[acc] || 0);
     let directDebitOutflow = 0;
     (md.direct_debits || []).forEach(dd => {
@@ -864,7 +864,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     });
     let weeklySavingsNet = 0;
     schedule.weeks.forEach(wObj => {
-      const items = md.weekly_items[wObj.name] || [];
+      const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
       items.forEach(it => {
         if (it.account_type === 'savings' && it.account_name === acc) {
           const amt = Number(it.amount) || 0;
@@ -900,30 +900,40 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
 export function calculateAndSyncRollovers(year = appState.currentYear) {
   const cfg = getSettings();
+  const currentAccounts = cfg.current_accounts || [];
+  const creditAccounts = cfg.credit_accounts || [];
+  const savingsAccounts = cfg.savings_accounts || [];
+
   for (let i = 0; i < months.length - 1; i++) {
     const curMonthName = months[i];
     const nextMonthName = months[i + 1];
     const closing = computeMonthClosing(curMonthName, i, year);
     const nextMonthData = getMonthData(nextMonthName, year);
 
-    cfg.current_accounts.forEach(acc => {
+    if (!nextMonthData.current_data) nextMonthData.current_data = {};
+    if (!nextMonthData.credit_data) nextMonthData.credit_data = {};
+    if (!nextMonthData.savings_data) nextMonthData.savings_data = {};
+
+    currentAccounts.forEach(acc => {
       if (!nextMonthData.current_data[acc]) nextMonthData.current_data[acc] = {};
       if (!nextMonthData.current_data[acc].user_edited) {
-        nextMonthData.current_data[acc].opening = closing.current[acc] !== undefined ? closing.current[acc] : 0;
+        nextMonthData.current_data[acc].opening = (closing.current && closing.current[acc] !== undefined) ? closing.current[acc] : 0;
       }
     });
 
-    cfg.credit_accounts.forEach(c => {
-      if (!nextMonthData.credit_data[c.name]) nextMonthData.credit_data[c.name] = {};
-      if (!nextMonthData.credit_data[c.name].user_edited) {
-        nextMonthData.credit_data[c.name].opening_spent = closing.credit[c.name] !== undefined ? closing.credit[c.name] : 0;
+    creditAccounts.forEach(c => {
+      const cName = c && c.name ? c.name : c;
+      if (!cName) return;
+      if (!nextMonthData.credit_data[cName]) nextMonthData.credit_data[cName] = {};
+      if (!nextMonthData.credit_data[cName].user_edited) {
+        nextMonthData.credit_data[cName].opening_spent = (closing.credit && closing.credit[cName] !== undefined) ? closing.credit[cName] : 0;
       }
     });
 
-    cfg.savings_accounts.forEach(acc => {
+    savingsAccounts.forEach(acc => {
       if (!nextMonthData.savings_data[acc]) nextMonthData.savings_data[acc] = {};
       if (!nextMonthData.savings_data[acc].user_edited) {
-        nextMonthData.savings_data[acc].opening = closing.savings[acc] !== undefined ? closing.savings[acc] : 0;
+        nextMonthData.savings_data[acc].opening = (closing.savings && closing.savings[acc] !== undefined) ? closing.savings[acc] : 0;
       }
     });
   }
@@ -935,24 +945,30 @@ export function calculateAndSyncRollovers(year = appState.currentYear) {
     const decClosing = computeMonthClosing('Dec', 11, year);
     const janNextData = getMonthData('Jan', nextYearNum);
 
-    cfg.current_accounts.forEach(acc => {
+    if (!janNextData.current_data) janNextData.current_data = {};
+    if (!janNextData.credit_data) janNextData.credit_data = {};
+    if (!janNextData.savings_data) janNextData.savings_data = {};
+
+    currentAccounts.forEach(acc => {
       if (!janNextData.current_data[acc]) janNextData.current_data[acc] = {};
       if (!janNextData.current_data[acc].user_edited) {
-        janNextData.current_data[acc].opening = decClosing.current[acc] !== undefined ? decClosing.current[acc] : 0;
+        janNextData.current_data[acc].opening = (decClosing.current && decClosing.current[acc] !== undefined) ? decClosing.current[acc] : 0;
       }
     });
 
-    cfg.credit_accounts.forEach(c => {
-      if (!janNextData.credit_data[c.name]) janNextData.credit_data[c.name] = {};
-      if (!janNextData.credit_data[c.name].user_edited) {
-        janNextData.credit_data[c.name].opening_spent = decClosing.credit[c.name] !== undefined ? decClosing.credit[c.name] : 0;
+    creditAccounts.forEach(c => {
+      const cName = c && c.name ? c.name : c;
+      if (!cName) return;
+      if (!janNextData.credit_data[cName]) janNextData.credit_data[cName] = {};
+      if (!janNextData.credit_data[cName].user_edited) {
+        janNextData.credit_data[cName].opening_spent = (decClosing.credit && decClosing.credit[cName] !== undefined) ? decClosing.credit[cName] : 0;
       }
     });
 
-    cfg.savings_accounts.forEach(acc => {
+    savingsAccounts.forEach(acc => {
       if (!janNextData.savings_data[acc]) janNextData.savings_data[acc] = {};
       if (!janNextData.savings_data[acc].user_edited) {
-        janNextData.savings_data[acc].opening = decClosing.savings[acc] !== undefined ? decClosing.savings[acc] : 0;
+        janNextData.savings_data[acc].opening = (decClosing.savings && decClosing.savings[acc] !== undefined) ? decClosing.savings[acc] : 0;
       }
     });
   }

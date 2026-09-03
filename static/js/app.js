@@ -43,7 +43,9 @@ import {
   createBudgetYear,
   propagateScheduledBillsApi,
   exportFullBudgetBackupApi,
-  importFullBudgetBackupApi
+  importFullBudgetBackupApi,
+  getStorageMode,
+  setStorageMode
 } from './api.js';
 
 import {
@@ -1077,10 +1079,12 @@ window.budgetApp = {
     const secKey = document.getElementById('cfg-openbanking-secret-key')?.value || '';
     const redirectUri = document.getElementById('cfg-openbanking-redirect-uri')?.value || '';
     const intervalVal = parseInt(document.getElementById('cfg-openbanking-interval')?.value || '6', 10);
+    const balanceType = document.getElementById('cfg-openbanking-balance-type')?.value || 'available';
     const cfg = getSettings();
     cfg.open_banking = cfg.open_banking || {};
     cfg.open_banking.provider = provider;
     cfg.open_banking.environment = env;
+    cfg.open_banking.balance_type = balanceType;
     cfg.open_banking.secret_id = secId.trim();
     cfg.open_banking.secret_key = secKey.trim();
     cfg.open_banking.redirect_uri = redirectUri.trim();
@@ -1091,11 +1095,13 @@ window.budgetApp = {
       secret_key: secKey.trim(),
       provider: provider,
       environment: env,
+      balance_type: balanceType,
       redirect_uri: redirectUri.trim(),
       auto_sync_interval_hours: isNaN(intervalVal) ? 6 : intervalVal,
       enabled: true
     });
     cfg.open_banking.enabled = true;
+    this.applyOpenBankingToCheckins();
     saveBudget(appState.data);
     alert('✅ Provider API credentials and auto-sync settings saved successfully!');
     renderContent();
@@ -1350,6 +1356,20 @@ window.budgetApp = {
     renderContent();
   },
 
+  updateOpenBankingBalanceType(balanceType) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.balance_type = balanceType;
+    saveOpenBankingConfig({ balance_type: balanceType });
+    this.applyOpenBankingToCheckins();
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  setOpenBankingBalanceType(balanceType) {
+    this.updateOpenBankingBalanceType(balanceType);
+  },
+
   setSpendAnalyticsTimeframe(timeframe) {
     appState.spendFilterTimeframe = timeframe;
     renderContent();
@@ -1437,12 +1457,17 @@ window.budgetApp = {
     const currAccounts = cfg.current_accounts || [];
     const creditAccounts = cfg.credit_accounts || [];
     const savingsAccounts = cfg.savings_accounts || [];
+    const globalMode = obCfg.balance_type || 'available';
 
     for (const item of linked) {
       const mappedRaw = item.mapped_habit_account_id || '';
       const mapped = mappedRaw.replace(/^(credit|current|savings):/i, '').trim();
       const liveBal = item.last_balance;
+      const liveAvail = item.last_available;
       if (!mapped) continue;
+
+      const accMode = item.balance_type || 'default';
+      const effMode = (accMode === 'available' || accMode === 'current') ? accMode : globalMode;
 
       // 1. Current Account
       const isCurrent = currAccounts.some(a => {
@@ -1456,7 +1481,11 @@ window.budgetApp = {
         if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
           // Manual check-in overrides Open Banking
         } else {
-          actuals[fieldKey] = Number(liveBal || 0);
+          const useAvail = (effMode === 'available');
+          const val = (useAvail && liveAvail !== undefined && liveAvail !== null)
+            ? Number(liveAvail)
+            : Number(liveBal || 0);
+          actuals[fieldKey] = val;
           actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
           actuals._sources[fieldKey] = 'open_banking';
           updated = true;
@@ -1475,7 +1504,11 @@ window.budgetApp = {
         if (actuals._sources && actuals._sources[fieldKey] === 'manual') {
           // Manual check-in overrides Open Banking
         } else {
-          actuals[fieldKey] = Number(liveBal || 0);
+          const useAvail = (effMode === 'available');
+          const val = (useAvail && liveAvail !== undefined && liveAvail !== null)
+            ? Number(liveAvail)
+            : Number(liveBal || 0);
+          actuals[fieldKey] = val;
           actuals._timestamps[fieldKey] = item.last_sync_timestamp || new Date().toISOString();
           actuals._sources[fieldKey] = 'open_banking';
           updated = true;
@@ -1500,7 +1533,7 @@ window.budgetApp = {
           }
 
           let debt = Math.abs(Number(liveBal || 0));
-          if (debt === 0 && (!item.last_available || Number(item.last_available) === 0)) {
+          if (debt === 0 && (liveAvail === undefined || liveAvail === null || Number(liveAvail) === 0)) {
             const allTxns = appState.data?.open_banking_transactions || [];
             const cardTxns = allTxns.filter(t => String(t.account_id) === String(item.account_id));
             if (cardTxns.length > 0) {
@@ -1517,9 +1550,10 @@ window.budgetApp = {
             }
           }
 
+          const useCardAvail = (effMode === 'available' || effMode === 'cards_available');
           let avail = 0;
-          if (item.last_available !== undefined && item.last_available !== null && Number(item.last_available) > 0) {
-            avail = Number(item.last_available);
+          if (useCardAvail && liveAvail !== undefined && liveAvail !== null && Number(liveAvail) > 0) {
+            avail = Number(liveAvail);
           } else if (limit > 0) {
             avail = Math.max(0, limit - debt);
           }
@@ -1559,7 +1593,7 @@ window.budgetApp = {
 
       renderContent();
       try {
-        await mapOpenBankingAccount(acc.account_id || accountId, mappedHabitAccountId || null, acc.owner || 'Joint');
+        await mapOpenBankingAccount(acc.account_id || accountId, mappedHabitAccountId || null, acc.owner || 'Joint', acc.balance_type || 'default');
       } catch (e) {
         console.warn("mapOpenBankingAccount error:", e);
       }
@@ -1579,10 +1613,30 @@ window.budgetApp = {
       acc.owner = newOwner;
       renderContent();
       try {
-        await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, newOwner);
+        await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, newOwner, acc.balance_type || 'default');
       } catch (e) {
         console.warn("mapOpenBankingAccount error:", e);
       }
+      await saveBudget(appState.data);
+      renderContent();
+    }
+  },
+
+  async updateLinkedAccountBalanceType(accountId, newBalanceType) {
+    const cfg = getSettings();
+    if (!cfg.open_banking) cfg.open_banking = {};
+    if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+
+    const acc = cfg.open_banking.linked_accounts.find(a => String(a.account_id) === String(accountId) || a.account_name === accountId);
+    if (acc) {
+      acc.balance_type = newBalanceType;
+      renderContent();
+      try {
+        await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, acc.owner || 'Joint', newBalanceType);
+      } catch (e) {
+        console.warn("mapOpenBankingAccount error:", e);
+      }
+      this.applyOpenBankingToCheckins();
       await saveBudget(appState.data);
       renderContent();
     }
@@ -1944,6 +1998,20 @@ window.budgetApp = {
 
   startOnboarding() {
     startOnboarding();
+  },
+
+  async toggleStorageModeOverride() {
+    const current = getStorageMode();
+    const next = current === 'ha' ? 'local' : 'ha';
+    setStorageMode(next);
+    console.log('[BudgetApp] Storage mode switched to:', next);
+    const freshData = await fetchBudget(appState.currentYear);
+    if (freshData) appState.data = freshData;
+    renderContent();
+  },
+
+  exportFullBudgetBackup() {
+    this.exportData();
   },
 
   async exportData() {

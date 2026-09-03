@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.6")
+    return os.environ.get("APP_VERSION", "0.3.7")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -1012,6 +1012,41 @@ def build_bundle():
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
     };
   }
+
+  if (typeof app.updateOpenBankingBalanceType !== 'function') {
+    app.updateOpenBankingBalanceType = function(val) {
+      var cfg = getSettings();
+      cfg.open_banking = cfg.open_banking || {};
+      cfg.open_banking.balance_type = val;
+      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ balance_type: val }); }
+      if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
+      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
+      renderContent();
+    };
+  }
+
+  if (typeof app.updateLinkedAccountBalanceType !== 'function') {
+    app.updateLinkedAccountBalanceType = async function(accountId, newBalanceType) {
+      var cfg = getSettings();
+      if (!cfg.open_banking) cfg.open_banking = {};
+      if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
+      var acc = cfg.open_banking.linked_accounts.find(function(a) { return String(a.account_id) === String(accountId) || a.account_name === accountId; });
+      if (acc) {
+        acc.balance_type = newBalanceType;
+        renderContent();
+        if (typeof mapOpenBankingAccount === 'function') {
+          try {
+            await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, acc.owner || 'Joint', newBalanceType);
+          } catch (e) {
+            console.warn("mapOpenBankingAccount error:", e);
+          }
+        }
+        if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
+        if (getSettings().onboarding_complete && typeof saveBudget === 'function') { await saveBudget(appState.data); }
+        renderContent();
+      }
+    };
+  }
 })();
 """
     bundle_parts.append(settings_patch)
@@ -1020,6 +1055,42 @@ def build_bundle():
     with open("static/js/bundle.js", "w", encoding="utf-8") as f:
         f.write("\n".join(bundle_parts))
     print("App bundle generated successfully.")
+
+    # Build static www distribution for Capacitor / PWA / Standalone execution
+    try:
+        www_dir = "www"
+        os.makedirs(os.path.join(www_dir, "static", "js"), exist_ok=True)
+        os.makedirs(os.path.join(www_dir, "static", "css"), exist_ok=True)
+        os.makedirs(os.path.join(www_dir, "static", "img"), exist_ok=True)
+
+        # Copy bundle & styles
+        shutil.copy("static/js/bundle.js", os.path.join(www_dir, "static", "js", "bundle.js"))
+        if os.path.exists("static/css/styles.css"):
+            shutil.copy("static/css/styles.css", os.path.join(www_dir, "static", "css", "styles.css"))
+        if os.path.exists("static/manifest.json"):
+            shutil.copy("static/manifest.json", os.path.join(www_dir, "static", "manifest.json"))
+        if os.path.exists("static/sw.js"):
+            shutil.copy("static/sw.js", os.path.join(www_dir, "static", "sw.js"))
+        if os.path.exists("icon.png"):
+            shutil.copy("icon.png", os.path.join(www_dir, "icon.png"))
+
+        # Copy images
+        if os.path.exists("static/img"):
+            for img_file in os.listdir("static/img"):
+                s_path = os.path.join("static/img", img_file)
+                if os.path.isfile(s_path):
+                    shutil.copy(s_path, os.path.join(www_dir, "static", "img", img_file))
+
+        # Render static www/index.html
+        if os.path.exists("templates/index.html"):
+            with open("templates/index.html", "r", encoding="utf-8") as tf:
+                tmpl = tf.read()
+            rendered_html = tmpl.replace("{{ BUILD_ID }}", BUILD_ID).replace("{{ app_version }}", APP_VERSION)
+            with open(os.path.join(www_dir, "index.html"), "w", encoding="utf-8") as wf:
+                wf.write(rendered_html)
+            print("Static www distribution compiled successfully.")
+    except Exception as www_err:
+        print(f"Notice: Failed to compile static www distribution: {www_err}")
 
 try:
     build_bundle()
@@ -1996,22 +2067,47 @@ class TrueLayerClient:
                             else:
                                 debt_val = 0.0
 
-                            bal_entry = {
+                            # Booked / Cleared balance entry (Current debt)
+                            bal_booked = {
                                 "balanceAmount": {"amount": str(debt_val), "currency": curr},
+                                "balanceType": "interimBooked",
                                 "availableAmount": {"amount": str(avail_val) if avail_val is not None else (str(limit_val - debt_val) if limit_val else str(debt_val))},
                                 "is_card": True
                             }
                             if limit_val is not None:
-                                bal_entry["creditLimit"] = {"amount": str(limit_val), "currency": curr}
+                                bal_booked["creditLimit"] = {"amount": str(limit_val), "currency": curr}
+                            balances.append(bal_booked)
+
+                            # Available credit line entry (includes pending transactions)
+                            if avail_val is not None:
+                                bal_avail = {
+                                    "balanceAmount": {"amount": str(avail_val), "currency": curr},
+                                    "balanceType": "interimAvailable",
+                                    "availableAmount": {"amount": str(avail_val)},
+                                    "is_card": True
+                                }
+                                if limit_val is not None:
+                                    bal_avail["creditLimit"] = {"amount": str(limit_val), "currency": curr}
+                                balances.append(bal_avail)
                         else:
                             # Standard bank account (Current/Savings)
                             amt = curr_val if curr_val is not None else (avail_val if avail_val is not None else 0.0)
-                            bal_entry = {
+                            bal_booked = {
                                 "balanceAmount": {"amount": str(amt), "currency": curr},
+                                "balanceType": "interimBooked",
                                 "availableAmount": {"amount": str(avail_val if avail_val is not None else amt), "currency": curr},
                                 "is_card": False
                             }
-                        balances.append(bal_entry)
+                            balances.append(bal_booked)
+
+                            if avail_val is not None:
+                                bal_avail = {
+                                    "balanceAmount": {"amount": str(avail_val), "currency": curr},
+                                    "balanceType": "interimAvailable",
+                                    "availableAmount": {"amount": str(avail_val), "currency": curr},
+                                    "is_card": False
+                                }
+                                balances.append(bal_avail)
 
                     if balances:
                         log_open_banking_debug(f"[TrueLayer] Parsed balances for {aid}: {json.dumps(balances)}")
@@ -2672,25 +2768,59 @@ def sync_open_banking_data(data):
 
                 if avail_bal:
                     item["last_available"] = float(avail_bal.get("balanceAmount", {}).get("amount", 0.0))
+                else:
+                    for b in b_list:
+                        if b.get("availableAmount"):
+                            raw_a = b.get("availableAmount")
+                            a_val = raw_a.get("amount") if isinstance(raw_a, dict) else raw_a
+                            if a_val is not None:
+                                item["last_available"] = float(a_val)
+                                break
 
                 for b in b_list:
                     if b.get("creditLimit"):
-                        item["credit_limit"] = float(b.get("creditLimit", 0.0))
+                        raw_l = b.get("creditLimit")
+                        l_val = raw_l.get("amount") if isinstance(raw_l, dict) else raw_l
+                        if l_val is not None:
+                            item["credit_limit"] = float(l_val)
 
                 item["last_sync_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 item["status"] = "active"
                 synced_accounts += 1
 
                 live_bal = item.get("last_balance", 0.0)
+                live_avail = item.get("last_available")
                 mapped_id = item.get("mapped_habit_account_id")
-                log_open_banking_debug(f"Saved for {acc_id}: last_balance={live_bal}, last_available={item.get('last_available')}, credit_limit={item.get('credit_limit')}")
+                log_open_banking_debug(f"Saved for {acc_id}: last_balance={live_bal}, last_available={live_avail}, credit_limit={item.get('credit_limit')}")
+
+                # Determine effective balance to assign to account's current_balance
+                global_mode = ob_cfg.get("balance_type", "available")
+                acc_mode = item.get("balance_type") or "default"
+                eff_mode = acc_mode if acc_mode in ["available", "current"] else global_mode
+
+                is_card_acc = bool(any(b.get("is_card") for b in b_list) or item.get("account_type") == "CARD" or (mapped_id and str(mapped_id).lower().startswith("credit:")))
+                if not is_card_acc and mapped_id:
+                    clean_m = re.sub(r'^(credit|current|savings):', '', str(mapped_id), flags=re.IGNORECASE).strip().lower()
+                    is_card_acc = any((str(c.get("name") if isinstance(c, dict) else c).lower() == clean_m) for c in (data.get("settings", {}).get("credit_accounts", [])))
+
+                if is_card_acc:
+                    if eff_mode in ["available", "cards_available"] and live_avail is not None and item.get("credit_limit"):
+                        sync_bal = max(0.0, float(item["credit_limit"]) - float(live_avail))
+                    else:
+                        sync_bal = live_bal
+                else:
+                    if eff_mode == "available" and live_avail is not None:
+                        sync_bal = float(live_avail)
+                    else:
+                        sync_bal = live_bal
+
                 if mapped_id:
                     for acc in accounts_list:
                         if acc.get("id") == mapped_id or acc.get("name") == mapped_id:
-                            acc["current_balance"] = live_bal
+                            acc["current_balance"] = sync_bal
                     for acc in settings_accounts:
                         if acc.get("id") == mapped_id or acc.get("name") == mapped_id:
-                            acc["current_balance"] = live_bal
+                            acc["current_balance"] = sync_bal
             elif bal_data is not None:
                 item["last_sync_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
                 synced_accounts += 1
@@ -2806,14 +2936,19 @@ def sync_open_banking_data(data):
         now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
 
         log_open_banking_debug(f"\n--- Updating Active Check-In ({m_name} {w_name}) ---")
+        global_mode = ob_cfg.get("balance_type", "available")
         for item in linked:
             mapped_raw = item.get("mapped_habit_account_id") or ""
             mapped = re.sub(r'^(credit|current|savings):', '', mapped_raw, flags=re.IGNORECASE).strip()
             acc_id = item.get("account_id")
             live_bal = item.get("last_balance")
+            live_avail = item.get("last_available")
             if not mapped:
                 log_open_banking_debug(f"Account {acc_id} has no mapped HABit account. Skipping checkin.")
                 continue
+
+            acc_mode = item.get("balance_type") or "default"
+            eff_mode = acc_mode if acc_mode in ["available", "current"] else global_mode
 
             # 1. Current Account
             is_curr = any((str(a).lower() == mapped.lower() if isinstance(a, str) else str(a.get("name", "")).lower() == mapped.lower()) for a in cfg_curr)
@@ -2823,10 +2958,12 @@ def sync_open_banking_data(data):
                 if sources_map.get(f_key) == "manual":
                     log_open_banking_debug(f"Field {f_key} has manual check-in override. Skipping auto-sync.")
                 else:
-                    week_act[f_key] = float(live_bal or 0)
+                    use_avail = (eff_mode == "available")
+                    val = float(live_avail) if (use_avail and live_avail is not None) else float(live_bal or 0)
+                    week_act[f_key] = val
                     ts_map[f_key] = now_iso
                     sources_map[f_key] = "open_banking"
-                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
+                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]} (Mode: {eff_mode})")
 
             # 2. Savings Account
             is_sav = any((str(s).lower() == mapped.lower() if isinstance(s, str) else str(s.get("name", "")).lower() == mapped.lower()) for s in cfg_sav)
@@ -2836,10 +2973,12 @@ def sync_open_banking_data(data):
                 if sources_map.get(f_key) == "manual":
                     log_open_banking_debug(f"Field {f_key} has manual check-in override. Skipping auto-sync.")
                 else:
-                    week_act[f_key] = float(live_bal or 0)
+                    use_avail = (eff_mode == "available")
+                    val = float(live_avail) if (use_avail and live_avail is not None) else float(live_bal or 0)
+                    week_act[f_key] = val
                     ts_map[f_key] = now_iso
                     sources_map[f_key] = "open_banking"
-                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]}")
+                    log_open_banking_debug(f"Updated check-in field {f_key} = {week_act[f_key]} (Mode: {eff_mode})")
 
             # 3. Credit Card
             for c in cfg_cred:
@@ -2858,7 +2997,7 @@ def sync_open_banking_data(data):
 
                     # If available balance is directly known from the bank, use it
                     debt = abs(float(live_bal or 0))
-                    if debt == 0.0 and (item.get("last_available") is None or float(item.get("last_available", 0)) == 0):
+                    if debt == 0.0 and (live_avail is None or float(live_avail or 0) == 0):
                         card_txns = [t for t in all_txns if str(t.get("account_id")) == str(acc_id)]
                         if card_txns:
                             net_spent = sum(-t.get("amount", 0.0) for t in card_txns if t.get("amount", 0.0) < 0) - sum(t.get("amount", 0.0) for t in card_txns if t.get("amount", 0.0) > 0)
@@ -2867,8 +3006,9 @@ def sync_open_banking_data(data):
                                 item["last_balance"] = debt
                                 log_open_banking_debug(f"Calculated debt from {len(card_txns)} transactions: {debt}")
 
-                    if item.get("last_available") is not None and float(item["last_available"]) > 0:
-                        avail = float(item["last_available"])
+                    use_card_avail = (eff_mode in ["available", "cards_available"])
+                    if use_card_avail and live_avail is not None and float(live_avail) > 0:
+                        avail = float(live_avail)
                     elif card_limit > 0:
                         avail = max(0.0, card_limit - debt)
                     else:
@@ -2877,7 +3017,7 @@ def sync_open_banking_data(data):
                     week_act[f_key] = avail
                     ts_map[f_key] = now_iso
                     sources_map[f_key] = "open_banking"
-                    log_open_banking_debug(f"Updated card check-in {f_key} = {avail} (Limit: {card_limit}, Debt: {debt})")
+                    log_open_banking_debug(f"Updated card check-in {f_key} = {avail} (Mode: {eff_mode}, Limit: {card_limit}, Debt: {debt}, LiveAvail: {live_avail})")
 
     ob_cfg["last_sync_timestamp"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     if synced_accounts == 0 and linked:
@@ -3007,6 +3147,7 @@ def openbanking_status():
         "enabled": ob_cfg.get("enabled", False),
         "provider": ob_cfg.get("provider", "gocardless"),
         "environment": ob_cfg.get("environment", "live"),
+        "balance_type": ob_cfg.get("balance_type", "available"),
         "auto_update_checkins": ob_cfg.get("auto_update_checkins", True),
         "has_credentials": bool(ob_cfg.get("secret_id")),
         "secret_id_masked": (ob_cfg.get("secret_id", "")[:4] + "••••" + ob_cfg.get("secret_id", "")[-4:]) if len(ob_cfg.get("secret_id", "")) > 8 else "••••",
@@ -3029,6 +3170,8 @@ def openbanking_config():
         ob_cfg["enabled"] = bool(payload["enabled"])
     if "auto_update_checkins" in payload:
         ob_cfg["auto_update_checkins"] = bool(payload["auto_update_checkins"])
+    if "balance_type" in payload:
+        ob_cfg["balance_type"] = str(payload["balance_type"]).strip().lower()
     if "provider" in payload:
         ob_cfg["provider"] = str(payload["provider"]).strip().lower()
     if "environment" in payload:
@@ -3292,6 +3435,7 @@ def openbanking_map_account():
     acc_id = payload.get("account_id")
     mapped_habit_account_id = payload.get("mapped_habit_account_id")
     owner = payload.get("owner")
+    balance_type = payload.get("balance_type")
 
     if not acc_id:
         return jsonify({"success": False, "error": "Missing account_id"}), 400
@@ -3308,12 +3452,15 @@ def openbanking_map_account():
             target["mapped_habit_account_id"] = mapped_habit_account_id
         if owner is not None:
             target["owner"] = owner
+        if balance_type is not None:
+            target["balance_type"] = balance_type
     else:
         target = {
             "account_id": acc_id,
             "account_name": mapped_habit_account_id or "Account",
             "owner": owner or "Joint",
             "mapped_habit_account_id": mapped_habit_account_id,
+            "balance_type": balance_type or "default",
             "last_balance": 0.0,
             "status": "active"
         }
@@ -3437,11 +3584,17 @@ def budget_create_year_api():
         new_months = {}
         for m in MONTH_NAMES:
             new_months[m] = {
+                "current_data": {},
+                "credit_data": {},
+                "savings_data": {},
                 "direct_debits": copy.deepcopy(default_dds),
                 "payments_in": copy.deepcopy(default_incomes),
+                "deductions_list": copy.deepcopy(settings.get("default_deductions", [])),
                 "start_balance": 0.0,
                 "credit_spend": 0.0,
                 "weeks": {},
+                "weekly_items": {},
+                "weekly_actuals": {},
                 "actuals": {}
             }
 
@@ -3654,4 +3807,10 @@ except Exception as _e:
     print(f"Notice: Initial HA sensor sync: {_e}")
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8099)
+    try:
+        from waitress import serve
+        print("[Server] Running production WSGI server (Waitress) on http://0.0.0.0:8099")
+        serve(app, host="0.0.0.0", port=8099, threads=4)
+    except ImportError:
+        print("[Server] Waitress not installed, falling back to Flask development server...")
+        app.run(host="0.0.0.0", port=8099)
