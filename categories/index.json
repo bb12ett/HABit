@@ -70,6 +70,13 @@
     "file": "transfers.json"
   },
   {
+    "id": "gifts",
+    "label": "Gifts, Birthdays & Occasions",
+    "icon": "🎁",
+    "color": "#f43f5e",
+    "file": "gifts.json"
+  },
+  {
     "id": "general",
     "label": "General & Miscellaneous",
     "icon": "📦",

@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.8")
+    return os.environ.get("APP_VERSION", "0.3.9")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -2372,6 +2372,22 @@ def get_open_banking_client(data):
         return GoCardlessClient(secret_id, secret_key)
 
 
+def detect_budget_category(name):
+    if not name:
+        return None
+    n = str(name).lower()
+    if any(k in n for k in ['holiday', 'trip', 'vacation', 'flight', 'hotel', 'euro', 'spain', 'greece', 'cotswold', 'getaway', 'weekend away', 'lodge', 'resort', 'travel', 'airbnb', 'booking']):
+        return 'travel'
+    if any(k in n for k in ['christmas', 'xmas', 'birthday', 'bday', 'present', 'gift', 'wedding', 'anniversary', 'baby shower']):
+        return 'gifts'
+    if any(k in n for k in ['car', 'mot', 'tyre', 'tire', 'service', 'vehicle', 'brake', 'mechanic', 'clutch']):
+        return 'transport'
+    if any(k in n for k in ['garden', 'diy', 'renovation', 'decorat', 'furniture', 'shed', 'fence', 'patio', 'kitchen', 'bathroom', 'home improvement']):
+        return 'shopping'
+    if any(k in n for k in ['concert', 'festival', 'theatre', 'theater', 'gig', 'event', 'party', 'show', 'tickets']):
+        return 'entertainment'
+    return None
+
 def reconcile_transactions_and_bills(data):
     """Retroactively reconciles all open banking and imported transactions with scheduled bills & direct debits."""
     all_txns = data.get("open_banking_transactions", [])
@@ -2539,6 +2555,7 @@ def reconcile_transactions_and_bills(data):
 
             budget_items = []
             for b_idx, b_obj in enumerate(year_data.get("yearly_budgets", [])):
+                b_cat = b_obj.get("category") or detect_budget_category(b_obj.get("name"))
                 for t_idx, b_txn in enumerate(b_obj.get("transactions", [])):
                     budget_items.append({
                         "id": b_txn.get("id") or f"budget_{b_idx}_{t_idx}",
@@ -2550,7 +2567,8 @@ def reconcile_transactions_and_bills(data):
                         "status": b_txn.get("status", "due"),
                         "auto_cleared": b_txn.get("auto_cleared", False),
                         "manually_cleared": b_txn.get("manually_cleared", False),
-                        "cleared_dates": b_txn.get("cleared_dates", [])
+                        "cleared_dates": b_txn.get("cleared_dates", []),
+                        "budget_category": b_cat or detect_budget_category(b_txn.get("desc"))
                     })
 
             birthday_items = []
@@ -2566,7 +2584,8 @@ def reconcile_transactions_and_bills(data):
                         "status": b_txn.get("status", "due"),
                         "auto_cleared": b_txn.get("auto_cleared", False),
                         "manually_cleared": b_txn.get("manually_cleared", False),
-                        "cleared_dates": b_txn.get("cleared_dates", [])
+                        "cleared_dates": b_txn.get("cleared_dates", []),
+                        "budget_category": "gifts"
                     })
 
             bill_collections = [
@@ -2647,6 +2666,9 @@ def reconcile_transactions_and_bills(data):
                                     raw_cleared.append(occ_iso)
 
                         t["matched_bill_id"] = b_name
+                        t["matched_bill_type"] = b_type
+                        if b.get("budget_category"):
+                            t["matched_budget_category"] = b["budget_category"]
                         t["auto_cleared"] = True
                         matched_bill_keys.add(b_key)
                         matched_this_txn = True

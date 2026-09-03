@@ -5,6 +5,23 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-09-03
+
+### Added & Enhanced
+- **Dedicated `🎁 Gifts, Birthdays & Occasions` Category**:
+  - Added a dedicated 12th spending category with rich keywords covering card shops (`Moonpig`, `Card Factory`, `Clintons`), florists (`Interflora`, `Bloom & Wild`), toys/games (`Smyths Toys`, `The Entertainer`, `Hamleys`), hampers, and gift experiences (`Virgin Experience Days`, `Buyagift`).
+  - Integrated with the **Birthdays** tab: all transactions clearing birthday items automatically inherit and categorize under **`🎁 Gifts, Birthdays & Occasions`**.
+- **Category Inheritance on Annual Budgets**:
+  - Added a **Category** selector to Annual Budgets with real-time title auto-detection (e.g. *Holiday/Trip* ➔ `✈️ Travel`, *Christmas* ➔ `🎁 Gifts`, *Car MOT/Service* ➔ `⛽ Transport`, *Home DIY/Garden* ➔ `🛍️ Shopping`).
+  - Transactions matched to annual budgets automatically inherit that budget's category rather than being misclassified as generic "Bills".
+- **Spend Category on Scheduled Outgoings**:
+  - Added Spend Category selector to the Scheduled Outgoings / Direct Debits creation form in the Bills view.
+- **Precedence Hierarchy & Direct Debit Keyword Refinement**:
+  - Removed generic `"direct debit"` keyword from `transfers.json` so regular contractual direct debits (e.g. Council Tax, utilities) aren't misidentified as internal transfers.
+  - Refined precedence so genuine retail/travel merchants (e.g. Airbnb, Smyths Toys) always take priority over bill matching.
+
+---
+
 ## [0.3.8] - 2026-09-03
 
 ### Security & Privacy Fixes

@@ -2554,6 +2554,8 @@ window.budgetApp = {
       titleEl.style.color = isIncome ? 'var(--green)' : 'var(--curr-border)';
     }
     if (transBox) transBox.style.display = isIncome ? 'none' : 'block';
+    const catBox = document.getElementById('new-sched-cat-box');
+    if (catBox) catBox.style.display = isIncome ? 'none' : 'block';
     if (accLabel) accLabel.innerText = isIncome ? 'Credited Account' : 'Paid From Account';
     if (holidayRuleEl) {
       holidayRuleEl.value = isIncome ? 'previous' : 'following';
@@ -2598,6 +2600,8 @@ window.budgetApp = {
     const acc = accEl ? accEl.value : getSettings().current_accounts[0];
     const transferTo = (transEl && !isIncome) ? transEl.value : 'none';
     const holidayRule = holidayRuleEl ? holidayRuleEl.value : (isIncome ? 'previous' : 'following');
+    const catEl = document.getElementById('new-sched-cat');
+    const schedCat = (!isIncome && catEl) ? catEl.value : (isIncome ? null : 'bills');
 
     if (!desc || isNaN(amt) || amt <= 0) {
       alert("Please enter a description and valid positive amount.");
@@ -2643,12 +2647,13 @@ window.budgetApp = {
           start_date: startDateVal,
           account: acc,
           is_income: true,
-          holiday_rule: holidayRule
+          holiday_rule: holidayRule,
+          category: schedCat
         });
       }
     } else {
       if (freq === 'monthly') {
-        const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule };
+        const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat };
         if (!cfg.default_direct_debits) cfg.default_direct_debits = [];
         cfg.default_direct_debits.push(newDD);
 
@@ -2665,7 +2670,7 @@ window.budgetApp = {
         }
       } else if (freq === 'yearly') {
         if (!yData.yearly_recurring) yData.yearly_recurring = [];
-        yData.yearly_recurring.push({ desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule });
+        yData.yearly_recurring.push({ desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat });
       } else {
         const startDateVal = (startDateEl && startDateEl.value) ? startDateEl.value : `${appState.currentYear}-01-01`;
         const parsedStartDate = new Date(startDateVal.includes('T') ? startDateVal : startDateVal + 'T00:00:00');
@@ -2681,7 +2686,8 @@ window.budgetApp = {
           start_date: startDateVal,
           account: acc,
           transfer_to: transferTo,
-          holiday_rule: holidayRule
+          holiday_rule: holidayRule,
+          category: schedCat
         });
       }
     }
@@ -3431,14 +3437,27 @@ window.budgetApp = {
   },
 
   // Yearly Budgets View Handlers
+  autoDetectBudgetCategory(name) {
+    const cat = (typeof detectBudgetCategory === 'function') ? detectBudgetCategory(name) : (typeof window !== 'undefined' && window.detectBudgetCategory ? window.detectBudgetCategory(name) : null);
+    const el = document.getElementById('bg-cat');
+    if (cat && el) {
+      el.value = cat;
+    }
+  },
+
   openAddBudgetModal() {
     const cfg = getSettings();
     showModal({
       title: "🎯 Create Annual Budget & Goal",
       body: `
         <label style="font-size:11px; text-transform:uppercase;">Budget / Goal Name</label>
-        <input type="text" id="bg-name" placeholder="e.g. Summer Holiday, House Renovation" style="margin-bottom:8px;">
+        <input type="text" id="bg-name" placeholder="e.g. Summer Holiday, House Renovation" style="margin-bottom:8px;" oninput="window.budgetApp.autoDetectBudgetCategory(this.value)">
         
+        <label style="font-size:11px; text-transform:uppercase;">Spend Category</label>
+        <select id="bg-cat" style="margin-bottom:8px;">
+          ${(window.SPEND_CATEGORIES || []).filter(c => c.id !== 'general').map(c => `<option value="${c.id}" ${c.id === 'shopping' ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+        </select>
+
         <label style="font-size:11px; text-transform:uppercase;">Total Budget Allocation (${cfg.currency})</label>
         <input type="number" step="0.01" id="bg-total" placeholder="1500.00" style="margin-bottom:8px;">
         
@@ -3468,6 +3487,8 @@ window.budgetApp = {
 
   async confirmAddBudget() {
     const name = document.getElementById('bg-name').value.trim();
+    const catEl = document.getElementById('bg-cat');
+    const cat = catEl ? catEl.value : null;
     const total = parseFloat(document.getElementById('bg-total').value);
     const acc = document.getElementById('bg-acc').value;
     const endDate = document.getElementById('bg-date').value;
@@ -3478,6 +3499,7 @@ window.budgetApp = {
     if (!yData.yearly_budgets) yData.yearly_budgets = [];
     yData.yearly_budgets.push({
       name,
+      category: cat,
       total_budget: total,
       account: acc,
       end_date: endDate,

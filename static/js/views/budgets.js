@@ -1,3 +1,4 @@
+import { detectBudgetCategory } from '../calculations.js';
 import { appState, getSettings, getYearData, getBirthdays, months } from '../state.js';
 
 export function renderBudgetsView(container) {
@@ -228,11 +229,14 @@ export function renderBudgetsView(container) {
           const remaining = (Number(b.total_budget) || 0) - spent;
           const pct = Math.min(100, Math.round((spent / (Number(b.total_budget) || 1)) * 100));
           const strategy = b.deduction_strategy || 'none';
+          const bCatId = b.category || (typeof detectBudgetCategory === 'function' ? detectBudgetCategory(b.name) : null) || 'shopping';
+          const spendCats = (window.SPEND_CATEGORIES || []);
+          const catObj = spendCats.find(c => c.id === bCatId) || { label: 'Shopping', icon: '🛍️', color: '#ec4899' };
 
           return `
             <div class="account-card" style="display:flex; flex-direction:column; justify-content:space-between;">
               <div>
-                <div class="account-card-header" style="margin-bottom:8px;">
+                <div class="account-card-header" style="margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
                   ${globalEditMode ? `
                     <div style="display:flex; gap:6px; align-items:center; width:100%;">
                       <input type="text" value="${b.name}" onchange="window.budgetApp.editYearlyBudgetField(${bIdx}, 'name', this.value)" style="font-weight:bold; font-size:14px; flex:1;" placeholder="Budget Name">
@@ -240,6 +244,18 @@ export function renderBudgetsView(container) {
                     </div>
                   ` : `
                     <strong style="color:var(--heading); font-size:14px;">🎯 ${b.name}</strong>
+                    <span class="badge" style="background:rgba(255,255,255,0.06); border:1px solid ${catObj.color}60; color:${catObj.color}; font-size:10px; padding:2px 7px; font-weight:600;">${catObj.icon} ${catObj.label}</span>
+                  `}
+                </div>
+
+                <div class="account-row" style="margin-bottom:4px;">
+                  <span>Spend Category:</span>
+                  ${globalEditMode ? `
+                    <select onchange="window.budgetApp.editYearlyBudgetField(${bIdx}, 'category', this.value)" style="font-size:11px; padding:2px 4px; max-width:180px;">
+                      ${spendCats.filter(c => c.id !== 'general').map(c => `<option value="${c.id}" ${bCatId === c.id ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+                    </select>
+                  ` : `
+                    <span style="font-size:11px; color:${catObj.color}; font-weight:600;">${catObj.icon} ${catObj.label}</span>
                   `}
                 </div>
 

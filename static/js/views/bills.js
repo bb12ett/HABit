@@ -376,6 +376,23 @@ export function renderBillsView(container) {
             ${(cfg.savings_accounts || []).map(s => `<option value="${s}">📈 ${s} (Savings Transfer)</option>`).join('')}
           </select>
         </div>
+
+        <!-- SPEND CATEGORY (FOR OUTGOINGS) -->
+        <div id="new-sched-cat-box">
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Spend Category</label>
+          <select id="new-sched-cat" style="width:100%; margin-top:3px;">
+            <option value="bills" selected>🏡 Bills, Utilities & Housing</option>
+            <option value="travel">✈️ Travel, Airlines, Hotels & Holidays</option>
+            <option value="gifts">🎁 Gifts, Birthdays & Occasions</option>
+            <option value="shopping">🛍️ Shopping, Retail, Tech & Home</option>
+            <option value="transport">⛽ Fuel, Travel & Vehicles</option>
+            <option value="entertainment">🎮 Entertainment, Gaming & Media</option>
+            <option value="health">🏥 Health, Medical & Beauty</option>
+            <option value="groceries">🛒 Supermarket & Groceries</option>
+            <option value="education">📚 Education & Childcare</option>
+            <option value="transfers">🔄 Transfers, Savings & Wallets</option>
+          </select>
+        </div>
       </div>
 
       <div style="display:flex; justify-content:flex-end; gap:8px;">
