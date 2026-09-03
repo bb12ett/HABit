@@ -1855,12 +1855,25 @@ export async function openDebugLogModal() {
   showModal({
     title: '📄 Open Banking Debug Log',
     body: `
-      <div style="display:flex; flex-direction:column; gap:10px;">
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="background:rgba(239, 68, 68, 0.1); border:1.5px solid #ef4444; border-radius:8px; padding:12px; display:flex; gap:10px; align-items:flex-start;">
+          <div style="font-size:22px; line-height:1; flex-shrink:0;">⚠️</div>
+          <div style="font-size:11.5px; line-height:1.45; color:var(--text);">
+            <div style="font-weight:700; color:#ef4444; font-size:12.5px; margin-bottom:4px; text-transform:uppercase; letter-spacing:0.5px;">
+              Confidential Financial Information • Do Not Share
+            </div>
+            <div>
+              This debug log contains sensitive, unencrypted banking data including account identifiers, live balances, scheduled bills, and transaction records.
+              <strong>Any personal or financial information must be redacted or cleared before sharing this log with anyone.</strong>
+            </div>
+          </div>
+        </div>
+
         <div style="display:flex; justify-content:space-between; align-items:center;">
           <div style="font-size:11px; color:var(--text-muted);">Real-time log output from <code>open_banking_debug.txt</code></div>
           <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.openDebugLogModal()">🔄 Refresh</button>
         </div>
-        <div id="debugLogContainer" style="background:#0c0d14; color:#00ff88; font-family:Consolas, Monaco, monospace; font-size:11px; padding:12px; border-radius:6px; max-height:400px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border); line-height:1.4;">
+        <div id="debugLogContainer" style="background:#0c0d14; color:#00ff88; font-family:Consolas, Monaco, monospace; font-size:11px; padding:12px; border-radius:6px; max-height:360px; overflow-y:auto; white-space:pre-wrap; word-break:break-all; border:1px solid var(--border); line-height:1.4;">
           Loading log...
         </div>
       </div>
@@ -1887,6 +1900,61 @@ export async function openDebugLogModal() {
     const c = document.getElementById('debugLogContainer');
     if (c) c.innerText = 'Error loading log: ' + e.message;
   }
+}
+
+export function openDisclaimerModal() {
+  showModal({
+    title: '⚖️ Financial Disclaimer & Terms of Use',
+    body: `
+      <div style="display:flex; flex-direction:column; gap:14px; line-height:1.5; font-size:12px; color:var(--text); max-height:450px; overflow-y:auto; padding-right:6px;">
+        <div style="background:rgba(239, 68, 68, 0.08); border:1.5px solid #ef4444; border-radius:8px; padding:12px; display:flex; gap:10px; align-items:flex-start;">
+          <div style="font-size:22px; line-height:1; flex-shrink:0;">⚠️</div>
+          <div style="font-size:11.5px; line-height:1.45; color:var(--text);">
+            <strong style="color:#ef4444; font-size:12px; display:block; margin-bottom:2px; text-transform:uppercase; letter-spacing:0.5px;">Important Notice — Estimations &amp; Planning Only</strong>
+            HABit is an informational personal cashflow tracking tool. It is not an accounting service, financial adviser, or banking institution.
+          </div>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">1. Informational &amp; Estimation Purposes Only</h4>
+          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
+            All calculations, safe-to-spend daily pace metrics, month-end projections, credit card auto-pay calculations, bank holiday shift schedules, and bank balances provided by HABit are mathematical estimates intended strictly for personal planning and budgeting reference. Projections may contain errors, rounding variances, or timing delays from manual entries or third-party banking APIs.
+          </p>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">2. Not Professional Financial Advice</h4>
+          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
+            Nothing contained within this software constitutes regulated financial, investment, legal, tax, or debt management advice. The author and contributors do not hold themselves out as financial advisers, accountants, or certified financial planners.
+          </p>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">3. User Responsibility &amp; Independent Verification</h4>
+          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
+            <strong>You are solely responsible for independently verifying all account balances, credit card limits, bill due dates, and direct debit commitments directly with your official financial institutions</strong> before making payment, purchase, or transfer decisions. You should never rely solely on this software to prevent overdrafts, missed payments, or fees.
+          </p>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">4. Limitation of Liability</h4>
+          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
+            To the fullest extent permitted by applicable law, this software is provided &ldquo;as is&rdquo; without warranty of any kind, express or implied. Under no circumstances shall the authors, maintainers, or contributors be held liable for any direct, indirect, incidental, or consequential damages, including without limitation overdraft fees, bank charges, late payment penalties, interest charges, or financial losses arising out of or in connection with the use of or inability to use this application.
+          </p>
+        </div>
+
+        <div>
+          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">5. Open Banking &amp; Third-Party Services</h4>
+          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
+            Open Banking integrations, statement file parsers, and external APIs are provided for user convenience. The authors bear no responsibility for third-party API availability, data accuracy, consent token expiration, or transmission interruptions.
+          </p>
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn green" onclick="window.budgetApp.closeModal()">I Understand &amp; Agree</button>
+    `
+  });
 }
 
 export function openRecategorizeModal(txnId, merchantName, currentCatId) {

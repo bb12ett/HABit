@@ -5,6 +5,40 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.8] - 2026-09-03
+
+### Security & Privacy Fixes
+- **Disable Open Banking Debug Output to Home Assistant Logs & Sensitive Data Disclaimers**:
+  - Removed stdout debug printing (`print(f"[OpenBankingDebug] {msg}")`) to ensure that sensitive financial details (including account IDs, balances, transaction payloads, and token references) are never written to Home Assistant Supervisor or add-on container logs.
+  - Debug logging is strictly confined to the local debug log file (`open_banking_debug.txt`) when explicitly enabled by the user in Settings, accessible safely through the authenticated web UI.
+  - Added a prominent, high-visibility warning banner to the **Open Banking Debug Log** window warning users not to share the log unredacted and requiring that all personal/financial information be cleared before sharing.
+  - Added an unmissable security disclaimer header at the top of the debug log file (`open_banking_debug.txt`) upon generation, viewing, and clearing.
+  - Added a redaction reminder alert when copying the log to clipboard and a caution note beneath the debug toggle in Settings.
+  - Hardened debug logger to fail closed (suppress logging) if settings cannot be loaded.
+  - Routed Open Banking network and scheduler notices to the internal debug log rather than stdout.
+  - Removed temporary OAuth callback code logging from the browser console.
+- **Financial Disclaimer & Limitation of Liability**:
+  - Added a dedicated **⚖️ Financial Disclaimer & Terms of Use** modal clarifying that HABit is an informational estimation tool and not a provider of financial advice.
+  - Added clear terms establishing that all calculations/pacing figures are estimates, requiring users to independently verify balances with their banks, and limiting liability for financial losses, overdraft fees, or banking charges.
+  - Added accessible disclaimer triggers across the app: Settings footer button, side-drawer footer link, and the initial onboarding setup wizard.
+  - Documented the full Financial Disclaimer & Limitation of Liability across `README.md` and the project Wiki (`wiki/Financial-Disclaimer.md`, `wiki/Home.md`, `wiki/_Sidebar.md`, and `wiki/_Footer.md`).
+
+### Added & Enhanced
+- **Comprehensive Spend Categorization Engine & 15,600+ Merchant Database**:
+  - Massively expanded categorized dictionary to 15,640+ verified merchants, retailers, supermarkets, local pubs, farm parks, soft play centres, forecourts, and utilities.
+  - Embedded full dictionary catalog directly into `calculations.js` and distribution bundles, ensuring instant offline/standalone categorization without network or API delays.
+  - Added **📥 Export CSV** button to the Categorized Transactions list with filter awareness, RFC 4180 escaping, and Excel UTF-8 BOM encoding.
+  - Added automatic UK bank truncation expansion (`filling stati` -> `filling station`, `service s` -> `service station`, `fish and chi` -> `fish and chips`, `convenience stor` -> `convenience store`, `halifax credit car` -> `halifax credit card`).
+  - Fixed Amazon Marketplace (`AMZNMktplace*`), Shopify (`SP `), and multi-asterisk gateway (`SumUp **`, `CRV*`) preprocessing.
+  - Added **Smart Transfer Auto-Identification**:
+    - Unallocated movements to/from designated Savings accounts, pots, vaults, and ISAs now automatically default to **🔄 Transfers**.
+    - Automatic household member and family surname matching for inter-account and family transfers.
+    - Automatic inspection of Open Banking transaction categories (`t.transaction_category`), bank type codes (`TFR`, `INT`), and ISO 20022 codes (`PMNT-ICDT`).
+    - Added direct keyword recognition for credit card payoffs (`Halifax Clarity`) and peer-to-peer personal transfers.
+  - Upgraded PWA Service Worker to `habit-cache-v2` with Network-First strategy on script and HTML files to prevent browser stale-cache lock.
+
+---
+
 ## [0.3.7] - 2026-09-03
 
 ### Added & Enhanced

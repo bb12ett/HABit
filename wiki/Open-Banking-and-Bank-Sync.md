@@ -304,3 +304,5 @@ HABit features a dedicated **Live Spend & Category Analytics** page accessible d
 - **100% Local Storage**: Tokens, credentials, and transaction histories reside purely within Home Assistant (or encrypted SQLite/JSON).
 - **Read-Only AIS**: Open Banking protocols strictly grant read-only Account Information Services (AIS). HABit cannot move money or initiate transfers.
 - **90-Day Renewal**: Due to PSD2 regulatory standards, Open Banking consents expire every 90 days. HABit notifies you when renewal is approaching so you can re-authenticate with 1 click.
+- **Isolated Debug Logging**: Open Banking debug information is never printed to Home Assistant container logs. Logs are strictly written to the local `open_banking_debug.txt` file when debug logging is enabled.
+- **Confidential Debug Data Warning**: Debug logs contain raw account identifiers, balances, and transaction details. Any personal or sensitive financial information must be redacted before sharing logs for support. See the [Financial Disclaimer](Financial-Disclaimer) for full details.

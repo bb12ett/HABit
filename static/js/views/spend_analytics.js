@@ -184,6 +184,12 @@ export function renderSpendAnalyticsView(container) {
     ...allTxns.map(t => t.account_name).filter(Boolean)
   ]));
 
+  if (window.budgetApp) {
+    window.budgetApp._currentSpendDisplayTxns = displayTxns;
+    window.budgetApp._currentSpendAllTxns = breakdown.filteredTransactions;
+    window.budgetApp._currentSpendTimeframe = timeframe;
+  }
+
   container.innerHTML = `
     <!-- HEADER PANEL -->
     <div class="panel" style="margin-bottom:16px;">
@@ -346,6 +352,11 @@ export function renderSpendAnalyticsView(container) {
             <input type="text" id="spendSearchInputTop" placeholder="🔍 Search merchant..." value="${appState.spendSearchQuery || ''}" oninput="window.budgetApp.setSpendSearchQuery(this.value)" style="font-size:11.5px; padding:4px 8px; width:160px; border-radius:6px;">
             ${appState.spendSearchQuery ? `<button style="position:absolute; right:4px; top:4px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:11px;" onclick="window.budgetApp.setSpendSearchQuery('')">&times;</button>` : ''}
           </div>
+
+          <!-- Export CSV Button -->
+          <button class="btn secondary" style="font-size:11.5px; padding:4px 10px; display:inline-flex; align-items:center; gap:5px;" onclick="window.budgetApp.exportCategorizedTransactionsCsv()" title="Export ${displayTxns.length} categorized transactions to CSV">
+            <span>📥</span> Export CSV
+          </button>
         </div>
       </div>
 

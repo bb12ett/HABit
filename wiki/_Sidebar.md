@@ -19,6 +19,7 @@
 
 ### 🔒 Security & Privacy
 - [Multi-User Mode & Security](Multi-User-Mode-and-Security)
+- [Financial Disclaimer & Terms](Financial-Disclaimer)
 
 ---
 
@@ -34,5 +35,6 @@
 
 ### 📄 Project Links
 - [GitHub Repository](https://github.com/bb12ett/HABit)
+- [Financial Disclaimer](Financial-Disclaimer)
 - [Bug Reports](https://github.com/bb12ett/HABit/issues)
 - [Discussions](https://github.com/bb12ett/HABit/discussions)

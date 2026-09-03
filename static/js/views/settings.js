@@ -642,6 +642,9 @@ export function renderSettingsView(container) {
                     <input type="checkbox" id="cfg-openbanking-debug-logging" ${cfg.open_banking.debug_logging ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingDebugLogging(this.checked)">
                     <span>🛠️ <strong>Enable Open Banking Debug Logging:</strong> Log detailed API requests, responses, and sync calculations to <code>open_banking_debug.txt</code></span>
                   </label>
+                  <div style="font-size:10.5px; color:var(--text-muted); margin-top:4px; margin-left:24px;">
+                    ⚠️ Contains confidential banking data and transaction histories. Redact all personal details before sharing this file.
+                  </div>
                 </div>
                 <div style="display:flex; gap:6px;">
                   <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openDebugLogModal()">📄 View Debug Log</button>
@@ -739,7 +742,10 @@ export function renderSettingsView(container) {
         </div>
       </div>
 
-      <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:flex-end;">
+      <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <button type="button" class="btn secondary" style="font-size:11.5px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openDisclaimerModal()">
+          <span>⚖️</span> Financial Disclaimer &amp; Terms
+        </button>
         <button class="btn green" onclick="window.budgetApp.saveSettingsForm()">Save Settings</button>
       </div>
     </div>

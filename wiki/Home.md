@@ -46,6 +46,7 @@ Explore the deep-dive documentation pages below:
 | 📈 **[Annual Trajectory & Spend Analytics](Annual-Trajectory-and-Analytics)** | 12-month projections, Live Spend donut charts, Top Merchants, and custom merchant rules. |
 | 🏠 **[Home Assistant Sensors & Automations](Home-Assistant-Sensors-and-Automations)** | Entity reference, Lovelace dashboard YAML cards, and notification automations. |
 | 🛠️ **[Interface, Navigation & Tools](Interface-Navigation-and-Tools)** | Material Design 3 navigation rail, mobile bottom bar, Financial Calculator (`Alt+C`), Value Picker, and Themes. |
+| ⚖️ **[Financial Disclaimer & Terms](Financial-Disclaimer)** | Legal disclaimers, mathematical estimation notices, bank verification, and liability limitations. |
 
 ---
 
@@ -89,3 +90,14 @@ graph TD
 HABit is licensed under the **[GNU Affero General Public License v3.0 (AGPLv3)](https://www.gnu.org/licenses/agpl-3.0.html)**. 
 - **100% Free**: Free to use, modify, and distribute for the Home Assistant and self-hosting community.
 - **Copyleft Protection**: Ensures that no commercial entity or cloud vendor can take HABit, close the source code, and sell it as a paid product. All derivative works must remain free and open source under AGPLv3.
+
+---
+
+## ⚖️ Financial Disclaimer & Limitation of Liability
+
+**HABit is an informational personal cashflow estimation tool, not a certified financial planner, accountant, or banking service.**
+
+- All calculations, projections, safe-to-spend allowances, and holiday bill schedules are mathematical approximations.
+- Users are solely responsible for independently verifying all account balances, credit limits, and scheduled bill dates directly with their official financial institutions.
+- To the fullest extent permitted by law, the authors and contributors disclaim all liability for any financial losses, overdraft charges, bank fees, or penalties arising from the use of this software.
+- Read the full [Financial Disclaimer & Terms](Financial-Disclaimer).

@@ -96,6 +96,7 @@ import {
   openTransactionLedgerModal,
   openBankStatementUploadModal,
   openDebugLogModal,
+  openDisclaimerModal,
   openRecategorizeModal,
   openManualBillMatchModal
 } from './views/modals.js';
@@ -826,7 +827,6 @@ export async function init() {
         const state = urlParams.get('state') || urlParams.get('session_id');
 
         if (code || reqId || state) {
-          console.log('[OpenBanking] Handling return callback:', { reqId, code, state });
           const explicitRedirect = (appState.data?.settings?.open_banking?.redirect_uri || '').trim();
           const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
           const cbRes = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
@@ -1436,6 +1436,95 @@ window.budgetApp = {
     openRecategorizeModal(txnId, merchantName, currentCatId);
   },
 
+  exportCategorizedTransactionsCsv() {
+    const txns = this._currentSpendDisplayTxns || [];
+    if (!txns.length) {
+      alert("No categorized transactions available to export for this view.");
+      return;
+    }
+
+    const cfg = getSettings();
+    const isMulti = Boolean(cfg.enable_multi_user);
+    const defaultCurr = cfg.currency || 'GBP';
+
+    const headers = [
+      "Date",
+      "Payee / Merchant",
+      "Raw Description",
+      "Account",
+      ...(isMulti ? ["Owner"] : []),
+      "Category",
+      "Category ID",
+      "Amount",
+      "Currency",
+      "Transaction ID"
+    ];
+
+    const escapeCsv = (val) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val);
+      if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+        return `"${str.replace(/"/g, '""')}"`;
+      }
+      return `"${str}"`;
+    };
+
+    const rows = [headers.map(escapeCsv).join(',')];
+
+    for (const t of txns) {
+      const cat = t.assignedCategory || (typeof getCategoryById === 'function' ? getCategoryById(t.category || 'general') : { id: 'general', label: 'General & Miscellaneous' });
+      const merchantDisp = t.merchant_name || t.payee_name || t.description || t.raw_info || 'Transaction';
+      const rawDesc = t.raw_info || t.description || '';
+      const amtNum = Number(t.amount || 0);
+      const row = [
+        escapeCsv(t.booking_date || ''),
+        escapeCsv(merchantDisp),
+        escapeCsv(rawDesc),
+        escapeCsv(t.account_name || 'Account'),
+        ...(isMulti ? [escapeCsv(t.owner || 'Joint')] : []),
+        escapeCsv((cat && cat.label) ? `${cat.icon ? cat.icon + ' ' : ''}${cat.label}` : 'General & Miscellaneous'),
+        escapeCsv((cat && cat.id) || 'general'),
+        escapeCsv(amtNum.toFixed(2)),
+        escapeCsv(t.currency || defaultCurr),
+        escapeCsv(t.transaction_id || '')
+      ];
+      rows.push(row.join(','));
+    }
+
+    const csvContent = '\uFEFF' + rows.join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const timeframe = this._currentSpendTimeframe || 'transactions';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const filename = `habit_categorized_${timeframe}_${dateStr}.csv`;
+
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      URL.revokeObjectURL(a.href);
+      a.remove();
+    }, 150);
+  },
+
+  exportCategorizedTransactionsJson() {
+    const txns = this._currentSpendDisplayTxns || [];
+    if (!txns.length) {
+      alert("No categorized transactions available to export for this view.");
+      return;
+    }
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(txns, null, 2));
+    const timeframe = this._currentSpendTimeframe || 'transactions';
+    const dateStr = new Date().toISOString().split('T')[0];
+    const a = document.createElement('a');
+    a.href = dataStr;
+    a.download = `habit_categorized_${timeframe}_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { a.remove(); }, 150);
+  },
+
   applyOpenBankingToCheckins() {
     const cfg = getSettings();
     const obCfg = cfg.open_banking || {};
@@ -1898,12 +1987,16 @@ window.budgetApp = {
     return openDebugLogModal();
   },
 
+  openDisclaimerModal() {
+    return openDisclaimerModal();
+  },
+
   async copyDebugLog() {
     const c = document.getElementById('debugLogContainer');
     if (c && c.innerText) {
       try {
         await navigator.clipboard.writeText(c.innerText);
-        alert('Copied debug log to clipboard!');
+        alert('Copied debug log to clipboard!\n\n⚠️ DISCLAIMER: This log contains sensitive financial details. Please redact or clear all personal and account information before sharing.');
       } catch (e) {
         // Fallback selection
         const range = document.createRange();
@@ -1912,7 +2005,7 @@ window.budgetApp = {
         sel.removeAllRanges();
         sel.addRange(range);
         document.execCommand('copy');
-        alert('Copied debug log to clipboard!');
+        alert('Copied debug log to clipboard!\n\n⚠️ DISCLAIMER: This log contains sensitive financial details. Please redact or clear all personal and account information before sharing.');
       }
     }
   },

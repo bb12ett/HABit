@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.7")
+    return os.environ.get("APP_VERSION", "0.3.8")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -1112,8 +1112,25 @@ def load_categories_catalog():
     global _IN_MEMORY_CATEGORIES
     cats = []
     
-    # Check cache dir first, then fallback to local categories/ folder
-    source_dir = CATEGORIES_CACHE_DIR if (os.path.exists(CATEGORIES_CACHE_DIR) and os.path.exists(os.path.join(CATEGORIES_CACHE_DIR, "index.json"))) else CATEGORIES_DIR
+    # Check cache dir vs bundled categories/ folder, ensuring we use whichever is more comprehensive
+    source_dir = CATEGORIES_DIR
+    if os.path.exists(CATEGORIES_CACHE_DIR) and os.path.exists(os.path.join(CATEGORIES_CACHE_DIR, "index.json")):
+        try:
+            bundled_sample = os.path.join(CATEGORIES_DIR, "bills.json")
+            cache_sample = os.path.join(CATEGORIES_CACHE_DIR, "bills.json")
+            if os.path.exists(bundled_sample) and os.path.exists(cache_sample):
+                with open(bundled_sample, "r", encoding="utf-8") as bf, open(cache_sample, "r", encoding="utf-8") as cf:
+                    b_cnt = len(json.load(bf).get("keywords", []))
+                    c_cnt = len(json.load(cf).get("keywords", []))
+                    if c_cnt >= b_cnt:
+                        source_dir = CATEGORIES_CACHE_DIR
+                    else:
+                        source_dir = CATEGORIES_DIR
+            else:
+                source_dir = CATEGORIES_CACHE_DIR
+        except Exception:
+            source_dir = CATEGORIES_DIR
+
     index_file = os.path.join(source_dir, "index.json")
     
     if os.path.exists(index_file):
@@ -1426,24 +1443,49 @@ def auth_set_pin_api():
 # OPEN BANKING CLIENTS & AUTOMATED CASHFLOW ENGINE
 # ---------------------------------------------------------
 
-DEBUG_LOG_FILE = "/data/open_banking_debug.txt" if os.path.exists("/data") else "open_banking_debug.txt"
+DEBUG_LOG_FILE = os.path.join(DATA_DIR, "open_banking_debug.txt")
+
+DEBUG_LOG_DISCLAIMER = (
+    "================================================================================\n"
+    "⚠️  SECURITY & PRIVACY WARNING: SENSITIVE FINANCIAL INFORMATION\n"
+    "================================================================================\n"
+    "DO NOT SHARE THIS LOG PUBLICLY OR UNREDACTED.\n"
+    "\n"
+    "This debug log contains confidential banking data, including account identifiers,\n"
+    "live balances, scheduled bills, merchant names, payees, and transaction details.\n"
+    "\n"
+    "If you share this log for debugging or support, you MUST first inspect and\n"
+    "redact or clear all personal identifying information, account numbers, and amounts.\n"
+    "================================================================================\n\n"
+)
 
 def log_open_banking_debug(msg, force=False):
     try:
-        data = load_data()
-        ob_cfg = data.get("settings", {}).get("open_banking", {})
+        settings = load_settings()
+        ob_cfg = settings.get("open_banking", {})
         if not ob_cfg.get("debug_logging", False) and not force:
             return
     except Exception:
-        pass
+        return
 
     now_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     line = f"[{now_str}] {msg}\n"
-    print(f"[OpenBankingDebug] {msg}")
-    for p in [DEBUG_LOG_FILE, "open_banking_debug.txt", "/data/open_banking_debug.txt"]:
+    # Never print to stdout / HA logs - Open Banking logs contain sensitive financial data
+    # Logs are strictly appended to the local debug log file for viewing in the Settings UI
+    target_paths = list(dict.fromkeys([DEBUG_LOG_FILE, os.path.join(DATA_DIR, "open_banking_debug.txt"), "open_banking_debug.txt"]))
+    for p in target_paths:
+        if not p:
+            continue
         try:
+            parent = os.path.dirname(os.path.abspath(p))
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            needs_header = not os.path.exists(p) or os.path.getsize(p) == 0
             with open(p, "a", encoding="utf-8") as f:
+                if needs_header:
+                    f.write(DEBUG_LOG_DISCLAIMER)
                 f.write(line)
+            break
         except Exception:
             pass
 
@@ -3082,7 +3124,7 @@ def background_open_banking_scheduler():
                         log_open_banking_debug(f"\n[AutoSync] Background scheduled sync started (Interval: {interval_hours}h)...")
                         sync_open_banking_data(data)
         except Exception as e:
-            print(f"[AutoSync] Background scheduler exception: {e}")
+            log_open_banking_debug(f"[AutoSync] Background scheduler exception: {e}")
 
         # Check every 60 seconds
         time.sleep(60)
@@ -3093,14 +3135,14 @@ try:
     _scheduler_thread = threading.Thread(target=background_open_banking_scheduler, daemon=True, name="OpenBankingAutoSync")
     _scheduler_thread.start()
 except Exception as _th_err:
-    print(f"Notice: Failed to start Open Banking scheduler thread: {_th_err}")
+    log_open_banking_debug(f"Notice: Failed to start background scheduler thread: {_th_err}")
 
 
 @app.route("/api/openbanking/debug/log", methods=["GET"])
 def openbanking_get_debug_log():
     content = ""
-    for path in [DEBUG_LOG_FILE, "/data/open_banking_debug.txt", "open_banking_debug.txt"]:
-        if os.path.exists(path):
+    for path in list(dict.fromkeys([DEBUG_LOG_FILE, "/data/open_banking_debug.txt", "open_banking_debug.txt"])):
+        if path and os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     c = f.read()
@@ -3110,13 +3152,20 @@ def openbanking_get_debug_log():
                 pass
     if not content:
         try:
-            data = load_data()
-            ob_cfg = data.get("settings", {}).get("open_banking", {})
+            settings = load_settings()
+            ob_cfg = settings.get("open_banking", {})
             is_enabled = ob_cfg.get("debug_logging", False)
             status_msg = "enabled" if is_enabled else "currently disabled"
         except Exception:
             status_msg = "disabled"
-        content = f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] Open Banking debug logging is {status_msg}.\nEnable 'Debug Logging' in Settings → Open Banking and click 'Sync Now' to record detailed logs."
+        content = (
+            f"{DEBUG_LOG_DISCLAIMER}"
+            f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] Open Banking debug logging is {status_msg}.\n"
+            "Enable 'Debug Logging' in Settings → Open Banking and click 'Sync Now' to record detailed logs."
+        )
+    elif "SECURITY & PRIVACY WARNING" not in content:
+        content = DEBUG_LOG_DISCLAIMER + content
+
     resp = make_response(content, 200)
     resp.headers["Content-Type"] = "text/plain; charset=utf-8"
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -3126,13 +3175,18 @@ def openbanking_get_debug_log():
 
 @app.route("/api/openbanking/debug/clear", methods=["POST"])
 def openbanking_clear_debug_log():
-    for path in [DEBUG_LOG_FILE, "open_banking_debug.txt", "/data/open_banking_debug.txt"]:
-        try:
-            if os.path.exists(path):
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    clear_msg = f"{DEBUG_LOG_DISCLAIMER}[{now_iso}] Log cleared by user.\n"
+    for path in list(dict.fromkeys([DEBUG_LOG_FILE, "open_banking_debug.txt", "/data/open_banking_debug.txt"])):
+        if path:
+            try:
+                parent = os.path.dirname(os.path.abspath(path))
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
                 with open(path, "w", encoding="utf-8") as f:
-                    f.write(f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] Log cleared.\n")
-        except Exception:
-            pass
+                    f.write(clear_msg)
+            except Exception:
+                pass
     return jsonify({"success": True, "message": "Debug log cleared"})
 
 
@@ -3203,7 +3257,7 @@ def openbanking_institutions():
             if live_institutions and isinstance(live_institutions, list) and len(live_institutions) > 0:
                 return jsonify({"success": True, "country": country, "institutions": live_institutions, "source": "live"})
         except Exception as e:
-            print(f"[OpenBanking] Live fetch notice: {e}")
+            log_open_banking_debug(f"[OpenBanking] Live fetch notice: {e}")
             
     # Default / fallback to curated catalog of major banks
     curated = CURATED_INSTITUTIONS.get(country, CURATED_INSTITUTIONS.get("GB", []))
@@ -3253,7 +3307,7 @@ def openbanking_upload_statement():
     try:
         sync_ha_sensors(data)
     except Exception as e:
-        print(f"[OpenBanking] HA sync notice: {e}")
+        log_open_banking_debug(f"[OpenBanking] HA sync notice: {e}")
 
     save_data(data)
     return jsonify({
@@ -3471,7 +3525,7 @@ def openbanking_map_account():
     try:
         sync_open_banking_data(data)
     except Exception as e:
-        print(f"[OpenBanking] sync on map error: {e}")
+        log_open_banking_debug(f"[OpenBanking] sync on map error: {e}")
 
     return jsonify({"success": True, "account": target})
 

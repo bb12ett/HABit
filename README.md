@@ -107,6 +107,17 @@ Questions, feature suggestions, or bug reports?
 
 ---
 
+## ⚖️ Financial Disclaimer & Limitation of Liability
+
+**HABit** is an open-source, self-hosted budgeting and cashflow estimation tool provided for **informational and personal planning purposes only**.
+
+- **Not Financial Advice**: HABit is not a registered financial adviser, accountant, or banking institution. Nothing contained in this application or its documentation constitutes financial, investment, legal, tax, or debt management advice.
+- **Estimations & Projections**: All figures, safe-to-spend pace indicators, month-end projections, credit card auto-pay calculations, and bank holiday bill shift schedules are mathematical estimates and may contain variances, rounding differences, or third-party banking sync delays.
+- **Independent Verification Required**: **You are solely responsible for verifying your real-world bank balances, scheduled bill dates, and direct debit commitments directly with your official financial institutions** before making financial decisions, expenditures, or transfers.
+- **Limitation of Liability**: To the maximum extent permitted by applicable law, the authors, maintainers, and contributors shall not be liable for any direct, indirect, incidental, or consequential financial losses, bank fees, overdraft charges, late payment penalties, or interest charges arising from the use of or inability to use this software.
+
+---
+
 <div align="center">
   <sub>Built with ❤️ for the Home Assistant Community by bb12ett</sub>
 </div>
