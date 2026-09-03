@@ -1842,12 +1842,7 @@ export function categorizeTransaction(t, customRules = {}) {
   if (classText.includes('education') || classText.includes('school') || classText.includes('tuition') || classText.includes('childcare')) return getCategoryById('education');
   if (classText.includes('transfer') || classText.includes('tfr') || classText.includes('internal') || classText.includes('deposit') || classText.includes('withdrawal') || classText.includes('atm') || classText.includes('investment') || classText.includes('savings') || classText.includes('pmnt-icdt') || classText.includes('pmnt-rcdt')) return getCategoryById('transfers');
 
-  // 3. Auto-cleared direct debits / recurring bills
-  if (t.auto_cleared || t.matched_bill_id) {
-    return getCategoryById('bills');
-  }
-
-  // 4. Normalized string matching: strip processor prefixes, punctuation, extra spaces
+  // 3. Normalized string matching: strip processor prefixes, punctuation, extra spaces
   const clean = normalizeTransactionText(fullText);
   if (!clean) return getCategoryById('general');
 
@@ -1881,6 +1876,11 @@ export function categorizeTransaction(t, customRules = {}) {
     if (cleanPadded.includes(' ' + item.keyword + ' ')) {
       return item.category;
     }
+  }
+
+  // 5. Matched Scheduled Bills & Direct Debits (for unbranded/non-retail expenses like rent, private landlords, mortgages)
+  if (t.auto_cleared || t.matched_bill_id) {
+    return getCategoryById('bills');
   }
 
   // 6. Savings Account Activity: Unallocated movements to/from a designated savings account, pot, or ISA are internal transfers
