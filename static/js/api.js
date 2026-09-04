@@ -229,27 +229,38 @@ const LocalEngine = {
     }
 
     const curYr = year ? parseInt(year, 10) : (new Date().getFullYear());
-    const yStr = String(curYr);
+    const adv = parseInt(settings.months_in_advance !== undefined ? settings.months_in_advance : 12, 10);
+    const arr = parseInt(settings.months_in_arrears !== undefined ? settings.months_in_arrears : 3, 10);
+    const curM = new Date().getMonth();
+    const startYr = Math.floor((curYr * 12 + curM - arr) / 12);
+    const endYr = Math.floor((curYr * 12 + curM + adv) / 12);
 
-    let yearData = await localStore.get(`habit_year_${yStr}`);
-    if (!yearData) {
-      yearData = {
-        archived: false,
-        birthdays: JSON.parse(JSON.stringify(settings.birthdays || [])),
-        recurring_payments: JSON.parse(JSON.stringify(settings.recurring_payments || [])),
-        recurring_incomes: JSON.parse(JSON.stringify(settings.recurring_incomes || [])),
-        yearly_recurring: JSON.parse(JSON.stringify(settings.default_yearly_recurring || [])),
-        yearly_income: JSON.parse(JSON.stringify(settings.default_yearly_income || [])),
-        yearly_budgets: [],
-        months: {}
-      };
-      await localStore.set(`habit_year_${yStr}`, yearData);
+    let allYears = await localStore.get('habit_available_years') || [];
+    const neededYears = new Set([...allYears, curYr]);
+    for (let y = startYr; y <= endYr; y++) {
+      neededYears.add(y);
     }
+    allYears = Array.from(neededYears).sort();
+    await localStore.set('habit_available_years', allYears);
 
-    let allYears = await localStore.get('habit_available_years');
-    if (!allYears || !Array.isArray(allYears) || !allYears.includes(curYr)) {
-      allYears = Array.from(new Set([...(allYears || []), curYr])).sort();
-      await localStore.set('habit_available_years', allYears);
+    const yearsObj = {};
+    for (const y of allYears) {
+      const yStr = String(y);
+      let yearData = await localStore.get(`habit_year_${yStr}`);
+      if (!yearData) {
+        yearData = {
+          archived: false,
+          birthdays: JSON.parse(JSON.stringify(settings.birthdays || [])),
+          recurring_payments: JSON.parse(JSON.stringify(settings.recurring_payments || [])),
+          recurring_incomes: JSON.parse(JSON.stringify(settings.recurring_incomes || [])),
+          yearly_recurring: JSON.parse(JSON.stringify(settings.default_yearly_recurring || [])),
+          yearly_income: JSON.parse(JSON.stringify(settings.default_yearly_income || [])),
+          yearly_budgets: [],
+          months: {}
+        };
+        await localStore.set(`habit_year_${yStr}`, yearData);
+      }
+      yearsObj[yStr] = yearData;
     }
 
     const txns = await localStore.get('habit_open_banking_txns') || [];
@@ -259,9 +270,7 @@ const LocalEngine = {
       current_year: curYr,
       available_years: allYears,
       open_banking_transactions: txns,
-      years: {
-        [yStr]: yearData
-      }
+      years: yearsObj
     };
   },
 
@@ -272,20 +281,22 @@ const LocalEngine = {
         await localStore.set('habit_settings', state.settings);
       }
 
-      const curYr = year || state.current_year || (new Date().getFullYear());
-      const yStr = String(curYr);
-
-      if (state.years && state.years[yStr]) {
-        await localStore.set(`habit_year_${yStr}`, state.years[yStr]);
+      if (state.years && typeof state.years === 'object') {
+        for (const yStr of Object.keys(state.years)) {
+          if (state.years[yStr]) {
+            await localStore.set(`habit_year_${yStr}`, state.years[yStr]);
+          }
+        }
       }
 
       if (Array.isArray(state.open_banking_transactions)) {
         await localStore.set('habit_open_banking_txns', state.open_banking_transactions);
       }
 
-      let allYears = await localStore.get('habit_available_years');
-      if (!allYears || !allYears.includes(parseInt(curYr, 10))) {
-        allYears = Array.from(new Set([...(allYears || []), parseInt(curYr, 10)])).sort();
+      let allYears = await localStore.get('habit_available_years') || [];
+      if (state.years) {
+        const yearNums = Object.keys(state.years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
+        allYears = Array.from(new Set([...allYears, ...yearNums])).sort();
         await localStore.set('habit_available_years', allYears);
       }
 

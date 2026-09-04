@@ -452,7 +452,7 @@ export function renderOverviewView(container) {
     `
   };
 
-  const isArchived = !!(getYearData().months[activeTab] && getYearData().months[activeTab].archived);
+  const isArchived = !!(getYearData(currentYear).months[activeTab] && getYearData(currentYear).months[activeTab].archived);
 
   let html = `
     <!-- MONTH PAYDAY PERIOD BANNER -->
@@ -460,7 +460,7 @@ export function renderOverviewView(container) {
       <div class="payday-period-text" style="display:flex; align-items:center; gap:6px; cursor:pointer; min-width:0;" onclick="window.budgetApp.openDateOverrideModal('${activeTab}')" title="Click to override payday period">
         <span style="font-size:12px; color:var(--heading); font-weight:500;">📅 Payday: <strong style="color:var(--curr-border); font-weight:700;">${schedule.dateRangeStr}</strong> (${schedule.numWeeks} Wks) ✏️</span>
       </div>
-      <button class="btn secondary payday-archive-btn" onclick="window.budgetApp.toggleArchiveMonth('${activeTab}')" title="${isArchived ? 'Restore this month to navigation tabs' : 'Hide this completed month from top bar'}">
+      <button class="btn secondary payday-archive-btn" onclick="window.budgetApp.toggleArchiveMonth('${activeTab}', false, ${currentYear})" title="${isArchived ? 'Restore this month to navigation tabs' : 'Hide this completed month from top bar'}">
         <span class="btn-icon">📦</span><span class="btn-text"> ${isArchived ? 'Unarchive Month' : 'Archive Month'}</span>
       </button>
     </div>

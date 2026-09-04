@@ -9,6 +9,8 @@ export const DEFAULT_SETTINGS = {
   payday_first_day: 15,
   payday_second_day: "last_day",
   payday_is_last_working_day: false,
+  months_in_advance: 12,
+  months_in_arrears: 3,
   track_savings: true,
   enable_yearly_budgets: true,
   enable_multi_user: false,
@@ -142,9 +144,93 @@ export function getPrimarySection(tabName = appState.activeTab) {
   return 'monthly';
 }
 
+export function getCurrentPeriodMonthAndYear() {
+  if (typeof window !== 'undefined' && typeof window.detectCurrentMonthAndWeek === 'function') {
+    const curY = new Date().getFullYear();
+    try {
+      const detected = window.detectCurrentMonthAndWeek(curY);
+      if (detected && detected.monthIdx !== undefined) {
+        return { year: curY, monthIdx: detected.monthIdx, month: months[detected.monthIdx] };
+      }
+    } catch (e) {}
+  }
+  const now = new Date();
+  const m = now.getMonth();
+  return { year: now.getFullYear(), monthIdx: m, month: months[m] };
+}
+
+export function getSlidingWindowMonths() {
+  const cfg = getSettings();
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+  const current = getCurrentPeriodMonthAndYear();
+
+  const totalCurrent = current.year * 12 + current.monthIdx;
+  const list = [];
+  const yearsSet = new Set();
+  const addedKeys = new Set();
+
+  for (let k = -arr; k <= adv; k++) {
+    const t = totalCurrent + k;
+    const y = Math.floor(t / 12);
+    const mIdx = ((t % 12) + 12) % 12;
+    const mName = months[mIdx];
+    yearsSet.add(y);
+    addedKeys.add(`${y}_${mName}`);
+    list.push({
+      year: y,
+      monthIdx: mIdx,
+      month: mName,
+      offset: k,
+      isCurrent: (k === 0),
+      totalM: t
+    });
+  }
+
+  // Also include any explicitly unarchived months in appState.data.years
+  if (appState.data && appState.data.years) {
+    Object.keys(appState.data.years).forEach(yStr => {
+      const y = parseInt(yStr, 10);
+      if (isNaN(y)) return;
+      const yData = appState.data.years[yStr];
+      if (!yData || !yData.months) return;
+
+      months.forEach((mName, mIdx) => {
+        const key = `${y}_${mName}`;
+        if (addedKeys.has(key)) return;
+        const md = yData.months[mName];
+        if (md && md.archived === false) {
+          const t = y * 12 + mIdx;
+          yearsSet.add(y);
+          addedKeys.add(key);
+          list.push({
+            year: y,
+            monthIdx: mIdx,
+            month: mName,
+            offset: t - totalCurrent,
+            isCurrent: (t === totalCurrent),
+            totalM: t
+          });
+        }
+      });
+    });
+  }
+
+  list.sort((a, b) => a.totalM - b.totalM);
+
+  const multiYear = yearsSet.size > 1;
+  list.forEach(item => {
+    item.label = multiYear ? `${item.month} '${String(item.year).slice(-2)}` : item.month;
+  });
+
+  return list;
+}
+
 if (typeof window !== 'undefined') {
   window.__budgetAppState = appState;
   window.getPrimarySection = getPrimarySection;
+  window.getCurrentPeriodMonthAndYear = getCurrentPeriodMonthAndYear;
+  window.getSlidingWindowMonths = getSlidingWindowMonths;
 }
 
 export function applyTheme(theme) {
@@ -290,19 +376,40 @@ export function getWeekActuals(mName, wName, year = appState.currentYear) {
 }
 
 export function getAccountTrackingSettings(year = appState.currentYear) {
-  const yData = getYearData(year);
-  if (!yData.account_configs) {
-    yData.account_configs = {
+  const cfg = getSettings();
+  if (!cfg.account_configs) {
+    cfg.account_configs = {
       current: {},
       credit: {},
       savings: {}
     };
   }
-  const cfg = getSettings();
+
+  // Inherit master configs from active base year (e.g. 2026) or first configured year
+  const baseYear = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear().year
+    : 2026;
+  const baseConfigs = (appState.data?.years?.[String(baseYear)]?.account_configs)
+    || (appState.data?.years?.[String(appState.currentYear)]?.account_configs)
+    || (appState.data?.years?.['2026']?.account_configs)
+    || (appState.data?.years?.['2027']?.account_configs);
+
+  if (baseConfigs) {
+    ['current', 'credit', 'savings'].forEach(type => {
+      if (!cfg.account_configs[type]) cfg.account_configs[type] = {};
+      if (baseConfigs[type]) {
+        Object.keys(baseConfigs[type]).forEach(acc => {
+          if (!cfg.account_configs[type][acc]) {
+            cfg.account_configs[type][acc] = JSON.parse(JSON.stringify(baseConfigs[type][acc]));
+          }
+        });
+      }
+    });
+  }
 
   cfg.current_accounts.forEach(acc => {
-    if (!yData.account_configs.current[acc]) {
-      yData.account_configs.current[acc] = {
+    if (!cfg.account_configs.current[acc]) {
+      cfg.account_configs.current[acc] = {
         tracking: 'weekly',
         include_in_net: true
       };
@@ -310,24 +417,35 @@ export function getAccountTrackingSettings(year = appState.currentYear) {
   });
 
   cfg.credit_accounts.forEach(c => {
-    if (!yData.account_configs.credit[c.name]) {
-      yData.account_configs.credit[c.name] = {
+    const cName = c && c.name ? c.name : c;
+    if (!cfg.account_configs.credit[cName]) {
+      cfg.account_configs.credit[cName] = {
         tracking: 'weekly',
         include_in_net: true
       };
     }
   });
 
-  cfg.savings_accounts.forEach(s => {
-    if (!yData.account_configs.savings[s]) {
-      yData.account_configs.savings[s] = {
-        tracking: 'monthly',
-        include_in_net: true
-      };
-    }
-  });
+  if (cfg.track_savings) {
+    cfg.savings_accounts.forEach(s => {
+      if (!cfg.account_configs.savings[s]) {
+        cfg.account_configs.savings[s] = {
+          tracking: 'monthly',
+          include_in_net: false
+        };
+      }
+    });
+  }
 
-  return yData.account_configs;
+  // Keep target year and memory synchronized with master cfg.account_configs
+  if (appState.data && appState.data.years) {
+    const yData = getYearData(year);
+    if (yData) {
+      yData.account_configs = cfg.account_configs;
+    }
+  }
+
+  return cfg.account_configs;
 }
 
 export function getAccountConfig(accType, accName, year = appState.currentYear) {
@@ -511,7 +629,26 @@ if (typeof window !== 'undefined') {
   window.isAccountVisibleToActiveUser = isAccountVisibleToActiveUser;
   window.setPersonSalaryPrivacy = setPersonSalaryPrivacy;
   window.months = months;
+  window.getCurrentPeriodMonthAndYear = getCurrentPeriodMonthAndYear;
+  window.getSlidingWindowMonths = getSlidingWindowMonths;
   window.applyTheme = applyTheme;
+}
+
+export function getMasterYearlyBudgets() {
+  const cfg = getSettings();
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: appState.currentYear, monthIdx: new Date().getMonth() };
+  const yData = getYearData(curPeriod.year);
+
+  if (yData && yData.yearly_budgets && yData.yearly_budgets.length > 0) {
+    return yData.yearly_budgets;
+  }
+  if (cfg.yearly_budgets && cfg.yearly_budgets.length > 0) {
+    return cfg.yearly_budgets;
+  }
+  if (!yData.yearly_budgets) yData.yearly_budgets = [];
+  return yData.yearly_budgets;
 }
 
 export function getBirthdays(year = appState.currentYear) {
@@ -541,6 +678,31 @@ export function getRecurringIncomes(year = appState.currentYear) {
   return yData.recurring_incomes;
 }
 
+export function isItemActiveInMonth(item, mName, year) {
+  if (!item) return false;
+  if (!item.start_date && !item.end_date) return true;
+  const mIdx = months.indexOf(mName);
+  if (mIdx === -1) return true;
+
+  if (item.start_date) {
+    const sParts = String(item.start_date).split('T')[0].split('-');
+    if (sParts.length >= 2) {
+      const sTotalM = parseInt(sParts[0], 10) * 12 + (parseInt(sParts[1], 10) - 1);
+      const curTotalM = parseInt(year, 10) * 12 + mIdx;
+      if (curTotalM < sTotalM) return false;
+    }
+  }
+  if (item.end_date) {
+    const eParts = String(item.end_date).split('T')[0].split('-');
+    if (eParts.length >= 2) {
+      const eTotalM = parseInt(eParts[0], 10) * 12 + (parseInt(eParts[1], 10) - 1);
+      const curTotalM = parseInt(year, 10) * 12 + mIdx;
+      if (curTotalM > eTotalM) return false;
+    }
+  }
+  return true;
+}
+
 export function getAllScheduledBills(mName, year = appState.currentYear) {
   const md = getMonthData(mName, year);
   const yData = getYearData(year);
@@ -550,6 +712,7 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
 
   // 1. Monthly Direct Debits for this month
   (md.direct_debits || []).forEach((dd, idx) => {
+    if (!isItemActiveInMonth(dd, mName, year)) return;
     list.push({
       ...dd,
       is_income: false,
@@ -564,6 +727,7 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
 
   // 2. Annual Recurring Bills
   (yData.yearly_recurring || []).forEach((yb, idx) => {
+    if (!isItemActiveInMonth(yb, mName, year)) return;
     list.push({
       ...yb,
       is_income: false,
@@ -578,6 +742,7 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
 
   // 3. Flexible Recurring Payments
   (yData.recurring_payments || []).forEach((r, idx) => {
+    if (!isItemActiveInMonth(r, mName, year)) return;
     list.push({
       ...r,
       is_income: false,
@@ -602,6 +767,7 @@ export function getAllScheduledIncomes(mName, year = appState.currentYear) {
 
   // 1. Monthly Payments In for this month
   (md.payments_in || []).forEach((pi, idx) => {
+    if (!isItemActiveInMonth(pi, mName, year)) return;
     list.push({
       ...pi,
       is_income: true,
@@ -615,6 +781,7 @@ export function getAllScheduledIncomes(mName, year = appState.currentYear) {
 
   // 2. Annual Recurring Income
   (yData.yearly_income || []).forEach((yi, idx) => {
+    if (!isItemActiveInMonth(yi, mName, year)) return;
     list.push({
       ...yi,
       is_income: true,
@@ -628,6 +795,7 @@ export function getAllScheduledIncomes(mName, year = appState.currentYear) {
 
   // 3. Multi-Cadence Recurring Incomes
   (yData.recurring_incomes || []).forEach((r, idx) => {
+    if (!isItemActiveInMonth(r, mName, year)) return;
     list.push({
       ...r,
       is_income: true,
@@ -648,10 +816,103 @@ export function getAllScheduledItems(mName, year = appState.currentYear) {
   return [...bills, ...incomes];
 }
 
+export function getMasterScheduledCommitments() {
+  const cfg = getSettings();
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: appState.currentYear, monthIdx: new Date().getMonth(), month: months[new Date().getMonth()] };
+  const yData = getYearData(curPeriod.year);
+  const curMD = (yData && yData.months && yData.months[curPeriod.month]) ? yData.months[curPeriod.month] : null;
+
+  // Sync fallback if settings arrays are empty
+  if ((!cfg.default_direct_debits || cfg.default_direct_debits.length === 0) && curMD && curMD.direct_debits && curMD.direct_debits.length > 0) {
+    cfg.default_direct_debits = JSON.parse(JSON.stringify(curMD.direct_debits));
+  }
+  if ((!cfg.default_payments_in || cfg.default_payments_in.length === 0) && curMD && curMD.payments_in && curMD.payments_in.length > 0) {
+    cfg.default_payments_in = JSON.parse(JSON.stringify(curMD.payments_in));
+  }
+
+  // 1. Ongoing Monthly Direct Debits
+  const directDebits = (cfg.default_direct_debits || curMD?.direct_debits || []).map((dd, idx) => ({
+    ...dd,
+    is_income: false,
+    source_type: 'direct_debit',
+    source_idx: idx,
+    frequency: dd.frequency || 'monthly',
+    account: dd.account || cfg.current_accounts[0],
+    transfer_to: dd.transfer_to || 'none',
+    holiday_rule: dd.holiday_rule || 'following'
+  }));
+
+  // 2. Flexible Multi-Cadence Recurring Payments
+  const recPayments = (yData.recurring_payments || cfg.recurring_payments || []).map((r, idx) => ({
+    ...r,
+    is_income: false,
+    source_type: 'recurring_payment',
+    source_idx: idx,
+    frequency: r.frequency || 'monthly',
+    account: r.account || cfg.current_accounts[0],
+    transfer_to: r.transfer_to || 'none',
+    holiday_rule: r.holiday_rule || 'following'
+  }));
+
+  // 3. Annual Recurring Bills
+  const yearlyRecurring = (yData.yearly_recurring || cfg.default_yearly_recurring || []).map((yb, idx) => ({
+    ...yb,
+    is_income: false,
+    source_type: 'yearly_recurring',
+    source_idx: idx,
+    frequency: 'yearly',
+    account: yb.account || cfg.current_accounts[0],
+    transfer_to: yb.transfer_to || 'none',
+    holiday_rule: yb.holiday_rule || 'following'
+  }));
+
+  // 4. Monthly Scheduled Incomes
+  const monthlyIncomes = (cfg.default_payments_in || curMD?.payments_in || []).map((pi, idx) => ({
+    ...pi,
+    is_income: true,
+    source_type: 'monthly_payment_in',
+    source_idx: idx,
+    frequency: pi.frequency || 'monthly',
+    account: pi.account || cfg.current_accounts[0],
+    holiday_rule: pi.holiday_rule || 'previous'
+  }));
+
+  // 5. Flexible Recurring Incomes
+  const recIncomes = (yData.recurring_incomes || cfg.recurring_incomes || []).map((r, idx) => ({
+    ...r,
+    is_income: true,
+    source_type: 'recurring_income',
+    source_idx: idx,
+    frequency: r.frequency || 'monthly',
+    account: r.account || cfg.current_accounts[0],
+    holiday_rule: r.holiday_rule || 'previous'
+  }));
+
+  // 6. Annual Recurring Incomes
+  const yearlyIncomes = (yData.yearly_income || cfg.default_yearly_income || []).map((yi, idx) => ({
+    ...yi,
+    is_income: true,
+    source_type: 'yearly_income',
+    source_idx: idx,
+    frequency: 'yearly',
+    account: yi.account || cfg.current_accounts[0],
+    holiday_rule: yi.holiday_rule || 'previous'
+  }));
+
+  const allBills = [...directDebits, ...recPayments, ...yearlyRecurring];
+  const allIncomes = [...monthlyIncomes, ...recIncomes, ...yearlyIncomes];
+  return { allBills, allIncomes, allItems: [...allBills, ...allIncomes], curPeriod };
+}
+
 if (typeof window !== 'undefined') {
   window.getRecurringIncomes = getRecurringIncomes;
+  window.isItemActiveInMonth = isItemActiveInMonth;
   window.getAllScheduledBills = getAllScheduledBills;
   window.getAllScheduledIncomes = getAllScheduledIncomes;
   window.getAllScheduledItems = getAllScheduledItems;
+  window.getMasterScheduledCommitments = getMasterScheduledCommitments;
+  window.getMasterYearlyBudgets = getMasterYearlyBudgets;
 }
 

@@ -5,6 +5,21 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.10] - 2026-09-04
+
+### Added & Enhanced
+- **🏖️ Holiday & Travel Windows ("Holiday Mode")**:
+  - Introduced date-bounded Holiday Windows in Settings and Spend Analytics (e.g. *Cornwall: Sep 7 to Sep 14 on Credit Card*).
+  - While active, transactions on the designated holiday card automatically categorize as **`✈️ Travel, Airlines, Hotels & Holidays`**, preserving clean regular monthly averages for dining, fuel, and groceries.
+  - Transactions auto-categorized by a holiday window receive a clear visual badge: `🏖️ Cornwall Holiday`.
+  - Internal debt payoffs, transfers, and salary remain fully protected and never miscategorize.
+  - Includes visual status badges (`🟢 Active Now`, `⏳ Upcoming`, `Passed`, `⏸️ Disabled`) with quick toggles and delete controls.
+- **⚡ Mass / Batch Recategorize Tool in Spend Analytics**:
+  - Added multi-select checkboxes to the table header and all transaction rows in Spend Analytics.
+  - Interactive Batch Toolbar displaying selected count, category dropdown, and one-click **Apply** button to update dozens of transactions in seconds.
+
+---
+
 ## [0.3.9] - 2026-09-03
 
 ### Added & Enhanced

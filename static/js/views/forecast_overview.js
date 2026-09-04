@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, months, isMultiUserEnabled, getActiveUser, isAccountIncludedInNet } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, months, isMultiUserEnabled, getActiveUser, isAccountIncludedInNet, getCurrentPeriodMonthAndYear } from '../state.js';
 import { calculateMonthSchedule, calculateLiveDailyPacing, detectCurrentMonthAndWeek, calculateMonthForecast } from '../calculations.js';
 import { showModal, closeModal } from './modals.js';
 import { saveBudget } from '../api.js';
@@ -344,15 +344,16 @@ let touchLastTargetTileId = null;
 export function renderForecastOverviewView(container) {
   const cfg = getSettings();
   const curr = cfg.currency || '£';
-  const currentYear = appState.currentYear || new Date().getFullYear();
+  const currentPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth(), month: months[new Date().getMonth()] };
+  const currentYear = currentPeriod.year;
+  const currentMonthName = currentPeriod.month;
+  appState.currentYear = currentYear;
   const isMulti = isMultiUserEnabled();
   const activeUser = isMulti ? getActiveUser() : 'Joint';
   const globalEditMode = Boolean(appState.globalEditMode);
 
-  // 1. Determine active month to anchor the forecast overview
-  const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(currentYear) : null;
-  const currentMonthName = (detected && detected.month) ? detected.month : 'Jan';
-  
   // Calculate full forecast for current month
   const forecast = (typeof calculateMonthForecast === 'function')
     ? calculateMonthForecast(currentMonthName, currentYear)
@@ -1311,9 +1312,11 @@ export function handleForecastTileClick(event, tileId, target) {
 }
 
 export function navigateForecastTile(tileId, target) {
-  const currentYear = appState.currentYear || new Date().getFullYear();
-  const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek(currentYear) : null;
-  const currentMonthName = (detected && detected.month) ? detected.month : 'Jan';
+  const currentPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), month: 'Jan' };
+  const currentYear = currentPeriod.year;
+  const currentMonthName = currentPeriod.month;
 
   if (target === 'bills') {
     if (window.budgetApp && typeof window.budgetApp.setTab === 'function') {

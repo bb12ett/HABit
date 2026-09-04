@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear } from '../state.js';
 import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -249,12 +249,17 @@ export function openAccountTrackingModal() {
   const mData = getMonthData(activeTab);
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
+  const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+  const curTotalM = cur.year * 12 + cur.monthIdx;
+  const isFutureMonth = (appState.currentYear * 12 + months.indexOf(activeTab)) > curTotalM;
 
   showModal({
     title: `⚙️ Accounts & Tracking Setup (${activeTab})`,
     body: `
       <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px; line-height:1.4;">
-        Manage baseline opening balances, weekly column simulation, and Net Position inclusion for <strong>${activeTab} ${appState.currentYear}</strong>:
+        Manage ${isFutureMonth ? 'tracking, ownership, and Net Position inclusion' : 'baseline opening balances, weekly column simulation, and Net Position inclusion'} for <strong>${activeTab} ${appState.currentYear}</strong>${isFutureMonth ? ' <em>(Opening balances in future months roll forward automatically from preceding cashflow)</em>' : ''}:
       </div>
 
       <div style="max-height:60vh; overflow-y:auto; display:flex; flex-direction:column; gap:14px; padding-right:4px;">
@@ -274,7 +279,11 @@ export function openAccountTrackingModal() {
                     <strong style="color:var(--heading); font-size:13px;">🏦 ${a}</strong>
                     <div style="display:flex; align-items:center; gap:6px;">
                       <label style="font-size:11px; color:var(--text-muted);">Opening Balance (${curr}):</label>
-                      <input type="number" step="0.01" id="m_open_c_${idx}" placeholder="Auto" value="${bal !== 0 || isEdited ? bal : ''}" style="width:105px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold;">
+                      ${isFutureMonth ? `
+                        <input type="text" disabled readonly value="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" style="width:130px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold; opacity:0.85; cursor:not-allowed; background:var(--panel-bg);" title="Future opening balances roll over automatically from previous month cashflow.">
+                      ` : `
+                        <input type="number" step="0.01" id="m_open_c_${idx}" placeholder="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? bal : ''}" style="width:125px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold;">
+                      `}
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
@@ -327,7 +336,11 @@ export function openAccountTrackingModal() {
                     </div>
                     <div style="display:flex; align-items:center; gap:6px;">
                       <label style="font-size:11px; color:var(--text-muted);">Opening Debt (${curr}):</label>
-                      <input type="number" step="0.01" id="m_open_cr_${idx}" placeholder="Auto" value="${spent !== 0 || isEdited ? spent : ''}" style="width:105px; padding:3px 6px; font-size:12px; text-align:right; color:var(--red); font-weight:bold;">
+                      ${isFutureMonth ? `
+                        <input type="text" disabled readonly value="${spent !== '' && spent !== null ? 'Auto (' + curr + Number(spent).toFixed(2) + ')' : 'Auto'}" style="width:130px; padding:3px 6px; font-size:12px; text-align:right; color:var(--red); font-weight:bold; opacity:0.85; cursor:not-allowed; background:var(--panel-bg);" title="Future opening debts roll over automatically from previous month cashflow.">
+                      ` : `
+                        <input type="number" step="0.01" id="m_open_cr_${idx}" placeholder="${spent !== '' && spent !== null ? 'Auto (' + curr + Number(spent).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? spent : ''}" style="width:125px; padding:3px 6px; font-size:12px; text-align:right; color:var(--red); font-weight:bold;">
+                      `}
                     </div>
                   </div>
                   <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
@@ -378,7 +391,11 @@ export function openAccountTrackingModal() {
                       <strong style="color:var(--purple); font-size:13px;">📈 ${s}</strong>
                       <div style="display:flex; align-items:center; gap:6px;">
                         <label style="font-size:11px; color:var(--text-muted);">Opening Balance (${curr}):</label>
-                        <input type="number" step="0.01" id="m_open_s_${idx}" placeholder="Auto" value="${bal !== 0 || isEdited ? bal : ''}" style="width:105px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold;">
+                        ${isFutureMonth ? `
+                          <input type="text" disabled readonly value="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" style="width:130px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold; opacity:0.85; cursor:not-allowed; background:var(--panel-bg);" title="Future opening balances roll over automatically from previous month cashflow.">
+                        ` : `
+                          <input type="number" step="0.01" id="m_open_s_${idx}" placeholder="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? bal : ''}" style="width:125px; padding:3px 6px; font-size:12px; text-align:right; font-weight:bold;">
+                        `}
                       </div>
                     </div>
                     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; border-top:1px dashed var(--border); padding-top:6px;">
@@ -447,6 +464,26 @@ export function openYearOverviewAccountFilterModal() {
       <button class="btn green" onclick="window.budgetApp.saveYearOverviewFilter()">Apply Filter</button>
     `
   });
+}
+
+export function saveYearOverviewFilter() {
+  const cfg = getSettings();
+  const yData = getYearData();
+  const sel = {
+    current: cfg.current_accounts.filter(a => document.getElementById(`yr_c_${a}`)?.checked),
+    credit: cfg.credit_accounts.map(c => c.name).filter(c => document.getElementById(`yr_cr_${c}`)?.checked),
+    savings: cfg.savings_accounts.filter(s => document.getElementById(`yr_s_${s}`)?.checked)
+  };
+  yData.yearly_overview_selection = sel;
+  if (appState.data && appState.data.years) {
+    Object.values(appState.data.years).forEach(y => {
+      y.yearly_overview_selection = sel;
+    });
+  }
+  closeModal();
+  if (typeof window !== 'undefined' && typeof window.updateTrajectoryViewData === 'function') {
+    window.updateTrajectoryViewData();
+  }
 }
 
 export function openYearlyRecurringView() {
@@ -524,55 +561,41 @@ export function openAddBudgetModal() {
 
 
 export function openArchiveManagerModal() {
-  const yData = getYearData();
   const years = appState.data.years || {};
-  const currentYear = appState.currentYear;
+  const sortedYears = Object.keys(years).sort();
 
   showModal({
     title: "📦 Archive & History Manager",
     body: `
       <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-        Archiving hides completed months or past years from the top navigation bar while keeping all transactions, starting balances, and rollovers permanently saved in the database.
+        Archiving hides completed months from the top navigation bar while keeping all transactions, starting balances, and rollovers permanently saved in the database.
       </p>
 
-      <div style="margin-bottom:18px;">
-        <h4 style="font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-          <span>Month Tabs (${currentYear})</span>
-          <span style="font-size:11px; font-weight:normal; color:var(--text-muted);">Toggle tab visibility</span>
-        </h4>
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px;">
-          ${months.map(m => {
-            const md = (yData.months && yData.months[m]) || {};
-            const isArchived = !!md.archived;
-            return `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); border:1px solid var(--border); padding:6px 8px; border-radius:6px;">
-                <span style="font-weight:600; font-size:12px; ${isArchived ? 'color:var(--text-muted); text-decoration:line-through;' : 'color:var(--heading);'}">${m}</span>
-                <button class="btn ${isArchived ? 'green' : 'secondary'}" style="padding:2px 8px; font-size:10px;" onclick="window.budgetApp.toggleArchiveMonth('${m}', true)">
-                  ${isArchived ? 'Restore' : 'Archive'}
-                </button>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-
-      <div style="border-top:1px solid var(--border); padding-top:14px;">
-        <h4 style="font-size:13px; margin-bottom:8px;">Year Archives</h4>
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap:6px;">
-          ${Object.keys(years).sort().map(y => {
-            const yd = years[y] || {};
-            const isArchived = !!yd.archived;
-            return `
-              <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); border:1px solid var(--border); padding:6px 8px; border-radius:6px;">
-                <span style="font-weight:600; font-size:12px; ${isArchived ? 'color:var(--text-muted);' : 'color:var(--heading);'}">${y} ${isArchived ? '(Archived)' : ''}</span>
-                <button class="btn ${isArchived ? 'green' : 'secondary'}" style="padding:2px 8px; font-size:10px;" onclick="window.budgetApp.toggleArchiveYear('${y}', true)">
-                  ${isArchived ? 'Restore' : 'Archive'}
-                </button>
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
+      ${sortedYears.map(y => {
+        const yData = years[y] || {};
+        return `
+          <div style="margin-bottom:18px; border-bottom:1px solid var(--border); padding-bottom:12px;">
+            <h4 style="font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+              <span style="color:var(--heading); font-weight:700;">📅 Year ${y}</span>
+              <span style="font-size:11px; font-weight:normal; color:var(--text-muted);">Toggle tab visibility</span>
+            </h4>
+            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px;">
+              ${months.map(m => {
+                const md = (yData.months && yData.months[m]) || {};
+                const isArchived = !!md.archived;
+                return `
+                  <div style="display:flex; justify-content:space-between; align-items:center; background:var(--card-bg); border:1px solid var(--border); padding:6px 8px; border-radius:6px;">
+                    <span style="font-weight:600; font-size:12px; ${isArchived ? 'color:var(--text-muted); text-decoration:line-through;' : 'color:var(--heading);'}">${m} '${String(y).slice(-2)}</span>
+                    <button class="btn ${isArchived ? 'green' : 'secondary'}" style="padding:2px 8px; font-size:10px;" onclick="window.budgetApp.toggleArchiveMonth('${m}', true, ${y})">
+                      ${isArchived ? 'Restore' : 'Archive'}
+                    </button>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }).join('')}
     `,
     actions: `<button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`
   });
@@ -2220,3 +2243,128 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
   });
 }
 
+
+
+export function openHolidayWindowsModal() {
+  const cfg = (typeof getSettings === 'function') ? getSettings() : {};
+  const windows = cfg.holiday_windows || [];
+  const nowStr = new Date().toISOString().slice(0, 10);
+
+  const bodyHtml = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+        Configure date ranges and cards for upcoming holidays. Any transaction on that card during your trip will automatically categorize as <strong>Travel</strong>, keeping your regular monthly dining, groceries, and fuel averages clean.
+      </p>
+
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-weight:700; font-size:12px; text-transform:uppercase; color:var(--heading);">Configured Holiday Windows (${windows.length})</span>
+        <button class="btn green" style="font-size:11.5px; padding:3px 10px;" onclick="window.budgetApp.openAddHolidayWindowModal()">+ Add Holiday</button>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:8px; max-height:280px; overflow-y:auto;">
+        ${windows.length === 0 ? `
+          <div style="font-size:12px; color:var(--text-muted); text-align:center; padding:20px; font-style:italic; background:rgba(0,0,0,0.1); border-radius:6px; border:1px dashed var(--border);">
+            No holiday windows configured yet. Click "+ Add Holiday" to set one up!
+          </div>
+        ` : windows.map(w => {
+          let statusBadge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted); font-size:10px;">Passed</span>';
+          if (!w.enabled) {
+            statusBadge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted); font-size:10px;">⏸️ Disabled</span>';
+          } else if (nowStr >= w.start_date && nowStr <= w.end_date) {
+            statusBadge = '<span class="badge" style="background:rgba(16,185,129,0.2); border:1px solid var(--green); color:var(--green); font-size:10px; font-weight:bold;">🟢 Active Now</span>';
+          } else if (nowStr < w.start_date) {
+            statusBadge = '<span class="badge" style="background:rgba(56,189,248,0.2); border:1px solid var(--primary, #38bdf8); color:var(--primary, #38bdf8); font-size:10px; font-weight:bold;">⏳ Upcoming</span>';
+          }
+
+          const catObj = (window.SPEND_CATEGORIES || []).find(c => c.id === (w.category || 'travel')) || { label: 'Travel', icon: '✈️' };
+
+          return `
+            <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div style="min-width:0; flex:1;">
+                <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                  <strong style="color:var(--heading); font-size:13px;">${w.name}</strong>
+                  ${statusBadge}
+                </div>
+                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                  📅 ${w.start_date} to ${w.end_date} • 💳 ${w.account || 'All Accounts'} • <span>${catObj.icon} ${catObj.label}</span>
+                </div>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <label class="switch" style="transform:scale(0.8); margin:0;" title="${w.enabled ? 'Disable' : 'Enable'} this window">
+                  <input type="checkbox" ${w.enabled ? 'checked' : ''} onchange="window.budgetApp.toggleHolidayWindow('${w.id}')">
+                  <span class="slider round"></span>
+                </label>
+                <button class="del-btn" style="width:24px; height:24px; font-size:13px;" onclick="window.budgetApp.deleteHolidayWindow('${w.id}')" title="Delete Holiday Window">&times;</button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: '🏖️ Holiday & Travel Windows',
+    body: bodyHtml,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>
+    `
+  });
+}
+
+export function openAddHolidayWindowModal() {
+  const cfg = (typeof getSettings === 'function') ? getSettings() : {};
+  const categories = (window.SPEND_CATEGORIES || []).filter(c => c.id !== 'general' && c.id !== 'transfers');
+  const accounts = [
+    'All Accounts',
+    ...(cfg.credit_accounts || []).map(c => typeof c === 'string' ? c : c.name),
+    ...(cfg.current_accounts || [])
+  ];
+
+  const today = new Date().toISOString().slice(0, 10);
+  const nextWeek = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+
+  const bodyHtml = `
+    <div style="display:flex; flex-direction:column; gap:12px;">
+      <div>
+        <label style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Holiday / Trip Name:</label>
+        <input type="text" id="hwNameInput" placeholder="e.g. Cornwall Holiday, Salou Trip" style="width:100%; font-size:12.5px; padding:6px 8px; border-radius:6px;" value="Cornwall Holiday">
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div>
+          <label style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Start Date:</label>
+          <input type="date" id="hwStartDateInput" value="${today}" style="width:100%; font-size:12px; padding:6px 8px; border-radius:6px;">
+        </div>
+        <div>
+          <label style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">End Date:</label>
+          <input type="date" id="hwEndDateInput" value="${nextWeek}" style="width:100%; font-size:12px; padding:6px 8px; border-radius:6px;">
+        </div>
+      </div>
+
+      <div>
+        <label style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Holiday Card / Account:</label>
+        <select id="hwAccountSelect" style="width:100%; font-size:12.5px; padding:6px 8px; border-radius:6px;">
+          ${accounts.map(a => `<option value="${a}" ${a.toLowerCase().includes('credit') ? 'selected' : ''}>${a}</option>`).join('')}
+        </select>
+        <div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">Select the card you plan to use for holiday spending.</div>
+      </div>
+
+      <div>
+        <label style="font-size:10.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; display:block; margin-bottom:4px;">Assign To Category:</label>
+        <select id="hwCategorySelect" style="width:100%; font-size:12.5px; font-weight:600; padding:6px 8px; border-radius:6px;">
+          ${categories.map(c => `<option value="${c.id}" ${c.id === 'travel' ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+  `;
+
+  showModal({
+    title: '➕ Add Holiday / Travel Window',
+    body: bodyHtml,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.openHolidayWindowsModal()">Back</button>
+      <button class="btn green" onclick="window.budgetApp.confirmSaveHolidayWindow()">Save Holiday Window</button>
+    `
+  });
+}

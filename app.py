@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.9")
+    return os.environ.get("APP_VERSION", "0.3.10")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -156,6 +156,8 @@ DEFAULT_SETTINGS = {
     "payday_first_day": 15,
     "payday_second_day": "last_day",
     "payday_is_last_working_day": False,
+    "months_in_advance": 12,
+    "months_in_arrears": 3,
     "track_savings": True,
     "enable_yearly_budgets": True,
     "enable_multi_user": False,
@@ -413,23 +415,45 @@ def load_data(year=None):
     settings = load_settings()
     avail_years = get_available_years()
     
+    today = datetime.date.today()
+    cur_y = today.year
+    cur_m = today.month  # 1-12
+    adv = int(settings.get("months_in_advance", 12))
+    arr = int(settings.get("months_in_arrears", 3))
+
+    start_year = (cur_y * 12 + (cur_m - 1) - arr) // 12
+    end_year = (cur_y * 12 + (cur_m - 1) + adv) // 12
+
     if year is None:
-        target_year = settings.get("current_year", 2026)
+        target_year = settings.get("current_year", cur_y)
     else:
         try:
             target_year = int(year)
         except Exception:
-            target_year = settings.get("current_year", 2026)
+            target_year = settings.get("current_year", cur_y)
 
-    year_data = load_year_data(target_year, settings)
-    txns = year_data.get("open_banking_transactions", [])
+    needed_years = set(range(start_year, end_year + 1))
+    for y in avail_years:
+        needed_years.add(y)
+    if target_year:
+        needed_years.add(target_year)
+
+    years_dict = {}
+    for y in sorted(needed_years):
+        y_data = load_year_data(y, settings)
+        y_path = os.path.join(DATA_DIR, f"budget_{y}.json")
+        if not os.path.exists(y_path):
+            save_year_data(y, y_data)
+        years_dict[str(y)] = y_data
+
+    avail_years = get_available_years()
+    primary_year_data = years_dict.get(str(target_year)) or load_year_data(target_year, settings)
+    txns = primary_year_data.get("open_banking_transactions", [])
     
     return {
         "settings": settings,
         "current_year": target_year,
-        "years": {
-            str(target_year): year_data
-        },
+        "years": years_dict,
         "available_years": avail_years,
         "open_banking_transactions": txns
     }
@@ -888,17 +912,12 @@ def save_data(data, year=None):
             target_year = 2026
             
         years_dict = data.get("years", {})
-        if str(target_year) in years_dict:
-            y_data = years_dict[str(target_year)]
-            if "open_banking_transactions" in data:
-                y_data["open_banking_transactions"] = data["open_banking_transactions"]
-            save_year_data(target_year, y_data)
-        elif years_dict:
-            for y_str, y_data in years_dict.items():
-                if y_str.isdigit():
-                    if "open_banking_transactions" in data and str(target_year) == y_str:
-                        y_data["open_banking_transactions"] = data["open_banking_transactions"]
-                    save_year_data(int(y_str), y_data)
+        for y_str, y_data in years_dict.items():
+            if str(y_str).isdigit():
+                y_num = int(y_str)
+                if "open_banking_transactions" in data and str(target_year) == str(y_str):
+                    y_data["open_banking_transactions"] = data["open_banking_transactions"]
+                save_year_data(y_num, y_data)
 
         # Trigger HA sensors sync
         try:
@@ -3631,6 +3650,8 @@ def budget_create_year_api():
         rec_payments = templates.get("recurring_payments", settings.get("recurring_payments", []))
         rec_incomes = templates.get("recurring_incomes", settings.get("recurring_incomes", []))
 
+        default_account_configs = settings.get("account_configs", {})
+
         if copy_from_year:
             try:
                 src_y = int(copy_from_year)
@@ -3653,6 +3674,8 @@ def budget_create_year_api():
                         rec_payments = copy.deepcopy(src_data["recurring_payments"])
                     if src_data.get("recurring_incomes"):
                         rec_incomes = copy.deepcopy(src_data["recurring_incomes"])
+                    if src_data.get("account_configs"):
+                        default_account_configs = copy.deepcopy(src_data["account_configs"])
             except Exception as ce:
                 print(f"[Storage] Note copying from year {copy_from_year}: {ce}")
 
@@ -3676,6 +3699,7 @@ def budget_create_year_api():
 
         new_year_data = {
             "archived": False,
+            "account_configs": copy.deepcopy(default_account_configs),
             "yearly_recurring": copy.deepcopy(default_yearly),
             "yearly_income": copy.deepcopy(default_yearly_inc),
             "recurring_payments": copy.deepcopy(rec_payments),
@@ -3687,8 +3711,9 @@ def budget_create_year_api():
 
         save_year_data(new_year, new_year_data)
         
-        # Update active year in settings
-        settings["current_year"] = new_year
+        # Preserve active current_year in settings (do not switch user to future year)
+        if "current_year" not in settings:
+            settings["current_year"] = datetime.date.today().year
         save_settings(settings)
         
         composite = load_data(year=new_year)

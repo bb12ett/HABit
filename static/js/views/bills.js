@@ -1,14 +1,19 @@
-import { formatScheduledBillDue } from '../calculations.js';
-import { appState, getSettings, getYearData, getMonthData, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months } from '../state.js';
+import { formatScheduledBillDue, getNextOccurrenceDate } from '../calculations.js';
+import { appState, getSettings, getYearData, getMonthData, getMasterScheduledCommitments, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, getCurrentPeriodMonthAndYear } from '../state.js';
 
 export function renderBillsView(container) {
   const cfg = getSettings();
   const curr = cfg.currency;
-  const activeTab = months.includes(appState.activeTab) ? appState.activeTab : 'Jan';
   const isOpenBankingEnabled = Boolean(cfg.open_banking?.enabled);
-  const allBills = getAllScheduledBills(activeTab, appState.currentYear);
-  const allIncomes = getAllScheduledIncomes(activeTab, appState.currentYear);
-  const allItems = getAllScheduledItems(activeTab, appState.currentYear);
+  const masterData = (typeof getMasterScheduledCommitments === 'function')
+    ? getMasterScheduledCommitments()
+    : { allBills: getAllScheduledBills('Jan'), allIncomes: getAllScheduledIncomes('Jan'), allItems: getAllScheduledItems('Jan'), curPeriod: { year: appState.currentYear, monthIdx: 0, month: 'Jan' } };
+
+  const allBills = masterData.allBills || [];
+  const allIncomes = masterData.allIncomes || [];
+  const allItems = masterData.allItems || [];
+  const curPeriod = masterData.curPeriod || { year: appState.currentYear, monthIdx: 0, month: 'Jan' };
+
   const globalEditMode = appState.globalEditMode;
   const activeFilter = appState.billsFilter || 'all';
 
@@ -56,7 +61,7 @@ export function renderBillsView(container) {
   const totalAnnualIncomes = (monthlyIncomesTotal * 12) + weeklyAnnualizedIncomes + annualIncomesTotal;
   const monthlyAverageIncomes = totalAnnualIncomes / 12;
 
-  const netMonthlyScheduled = monthlyIncomesTotal - monthlyDDTotal;
+  const netMonthlyScheduled = monthlyAverageIncomes - monthlyAverageBills;
   const netAnnualScheduled = totalAnnualIncomes - totalAnnualCommitments;
 
   // Filter items
@@ -71,21 +76,22 @@ export function renderBillsView(container) {
   });
 
   const now = new Date();
-  const todayIso = `${appState.currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const todayZero = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const todayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
   container.innerHTML = `
     <!-- TOP HEADER -->
     <div class="panel" style="margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <div>
-          <h2 style="margin:0; font-size:20px;">📅 Scheduled Bills & Payments In (${appState.currentYear})</h2>
+          <h2 style="margin:0; font-size:20px;">📅 Master Recurring Commitments</h2>
           <p style="color:var(--text-muted); font-size:12px; margin:4px 0 0 0;">
-            Manage all recurring outgoings (Direct Debits, bills) and recurring inflows (Salaries, side income, pensions, benefits) with custom weekend/holiday rules.
+            Manage ongoing Direct Debits, regular salaries, subscriptions, and recurring bills. Changes automatically synchronize across all active and future months.
           </p>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
-          <button class="btn" style="background:#0284c7; color:#fff;" onclick="window.budgetApp.propagateScheduledBills('${activeTab}')" title="Copy active Direct Debits and Payments In to all future months in ${appState.currentYear}">
-            🚀 Propagate to Future Months
+          <button class="btn" style="background:#0284c7; color:#fff;" onclick="window.budgetApp.syncMasterBillsAcrossHorizon()" title="Synchronize all master direct debits and recurring items across all active sliding window months">
+            🔄 Sync All Sliding Months
           </button>
           <button class="btn green" onclick="window.budgetApp.scrollToAddScheduledItem('income')">
             + Add Payment In
@@ -100,19 +106,19 @@ export function renderBillsView(container) {
     <!-- KPI METRICS SUMMARY -->
     <div class="kpi-grid" style="margin-bottom:16px;">
       <div class="kpi-card">
-        <div class="kpi-title">📅 Monthly Direct Debits</div>
-        <div class="kpi-val" style="color:var(--red);">${curr}${monthlyDDTotal.toFixed(2)} / mo</div>
-        <div class="kpi-sub">${monthlyBills.length} Active Direct Debits (${activeTab})</div>
+        <div class="kpi-title">📅 Monthly Fixed Commitments</div>
+        <div class="kpi-val" style="color:var(--red);">${curr}${monthlyAverageBills.toFixed(2)} / mo</div>
+        <div class="kpi-sub">${monthlyBills.length} Monthly DDs (${curr}${monthlyDDTotal.toFixed(2)}) + ${weeklyBills.length + annualBills.length} Periodic</div>
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-title">💰 Monthly Payments In</div>
-        <div class="kpi-val" style="color:var(--green);">${curr}${monthlyIncomesTotal.toFixed(2)} / mo</div>
-        <div class="kpi-sub">${monthlyIncomes.length} Scheduled Inflows (${activeTab})</div>
+        <div class="kpi-title">💰 Monthly Scheduled Inflow</div>
+        <div class="kpi-val" style="color:var(--green);">${curr}${monthlyAverageIncomes.toFixed(2)} / mo</div>
+        <div class="kpi-sub">${monthlyIncomes.length} Monthly Inflows (${curr}${monthlyIncomesTotal.toFixed(2)}) + ${weeklyIncomes.length + annualIncomes.length} Periodic</div>
       </div>
 
       <div class="kpi-card">
-        <div class="kpi-title">⚖️ Net Scheduled Cashflow</div>
+        <div class="kpi-title">⚖️ Net Regular Cashflow</div>
         <div class="kpi-val" style="color:${netMonthlyScheduled >= 0 ? 'var(--green)' : 'var(--red)'};">
           ${netMonthlyScheduled >= 0 ? '+' : ''}${curr}${netMonthlyScheduled.toFixed(2)} / mo
         </div>
@@ -152,7 +158,7 @@ export function renderBillsView(container) {
         </div>
 
         <div style="display:flex; align-items:center; gap:8px;">
-          <span style="font-size:12px; color:var(--text-muted);">Active Month Context: <strong>${activeTab} ${appState.currentYear}</strong></span>
+          <span style="font-size:12px; color:var(--text-muted);">Master Horizon Context: <strong>${curPeriod.month} ${curPeriod.year} onwards</strong></span>
         </div>
       </div>
 
@@ -163,7 +169,7 @@ export function renderBillsView(container) {
             <tr>
               <th style="min-width:200px;">Description</th>
               <th style="min-width:130px;">Flow & Cadence</th>
-              <th style="min-width:110px;">Due Date</th>
+              <th style="min-width:140px;">Next Due Date</th>
               <th class="text-right" style="min-width:110px;">Amount (${curr})</th>
               <th style="min-width:140px;">Account</th>
               <th style="min-width:140px;">Weekend / Holiday Rule</th>
@@ -194,13 +200,54 @@ export function renderBillsView(container) {
               else if (b.frequency === 'custom_weeks') cadenceBadge = `<span class="badge" style="background:#64748b; color:#fff; font-size:11px;">⚙️ Every ${b.interval_n} Wks</span>`;
               else if (b.frequency === 'custom_months') cadenceBadge = `<span class="badge" style="background:#64748b; color:#fff; font-size:11px;">⚙️ Every ${b.interval_n} Mos</span>`;
 
-              let dueStr = (typeof formatScheduledBillDue === 'function') ? formatScheduledBillDue(b, null, appState.currentYear) : (b.frequency === 'yearly' ? `${b.month || 'Jan'} ${b.due_day || 1}` : `Day ${b.due_day || 1}`);
-
               const holidayRule = b.holiday_rule || (isInc ? 'previous' : 'following');
               let holidayBadge = '';
               if (holidayRule === 'previous') holidayBadge = '<span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); border:1px solid rgba(16,185,129,0.3); font-size:10px;">⬅️ Prev Workday</span>';
               else if (holidayRule === 'following') holidayBadge = '<span class="badge" style="background:rgba(56,189,248,0.15); color:var(--curr-border); border:1px solid rgba(56,189,248,0.3); font-size:10px;">➡️ Next Workday</span>';
               else holidayBadge = '<span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); border:1px solid rgba(148,163,184,0.3); font-size:10px;">⏸️ Exact Date</span>';
+
+              // Next occurrence and countdown calculation
+              const nextDate = getNextOccurrenceDate(b, now, curPeriod.year);
+              let dueDisplay = '';
+              if (nextDate) {
+                const nextZero = new Date(nextDate.getFullYear(), nextDate.getMonth(), nextDate.getDate(), 0, 0, 0);
+                const diffDays = Math.round((nextZero - todayZero) / (1000 * 60 * 60 * 24));
+                const dayStr = nextDate.getDate();
+                const mStr = months[nextDate.getMonth()];
+                const yStr = nextDate.getFullYear() !== now.getFullYear() ? ` '${String(nextDate.getFullYear()).slice(2)}` : '';
+                const dateFormatted = `${dayStr} ${mStr}${yStr}`;
+
+                let countdownBadge = '';
+                if (diffDays === 0) {
+                  countdownBadge = '<span class="badge" style="background:#10b981; color:#fff; font-size:10px; margin-left:4px;">Today!</span>';
+                } else if (diffDays === 1) {
+                  countdownBadge = '<span class="badge" style="background:#0284c7; color:#fff; font-size:10px; margin-left:4px;">Tomorrow</span>';
+                } else if (diffDays > 1 && diffDays <= 7) {
+                  countdownBadge = `<span class="badge" style="background:rgba(2,132,199,0.15); color:var(--curr-border); font-size:10px; margin-left:4px;">in ${diffDays}d</span>`;
+                } else if (diffDays > 7 && diffDays <= 30) {
+                  countdownBadge = `<span class="badge" style="background:rgba(100,116,139,0.15); color:var(--text-muted); font-size:10px; margin-left:4px;">in ${diffDays}d</span>`;
+                } else {
+                  countdownBadge = `<span style="font-size:10px; color:var(--text-muted); margin-left:4px;">in ${diffDays}d</span>`;
+                }
+
+                let cadenceSub = '';
+                if (b.frequency === 'monthly') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Day ${b.due_day || 1} monthly)</span>`;
+                else if (b.frequency === 'yearly') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Annual: ${b.month || 'Jan'} ${b.due_day || 1})</span>`;
+                else if (b.frequency === 'weekly') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Weekly)</span>`;
+                else if (b.frequency === 'biweekly') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Bi-Weekly)</span>`;
+                else if (b.frequency === 'four_weekly') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(4-Weekly)</span>`;
+                else if (b.frequency === 'custom_weeks') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Every ${b.interval_n} wks)</span>`;
+                else if (b.frequency === 'custom_months') cadenceSub = `<span style="font-size:10px; color:var(--text-muted); display:block;">(Every ${b.interval_n} mos)</span>`;
+
+                dueDisplay = `<div><strong style="color:var(--heading); font-size:12px;">${dateFormatted}</strong>${countdownBadge}${cadenceSub}</div>`;
+              } else {
+                dueDisplay = `<span style="font-size:12px; color:var(--text-muted);">${formatScheduledBillDue(b, null, curPeriod.year)}</span>`;
+              }
+
+              let contractBadge = '';
+              if (b.start_date || b.end_date) {
+                contractBadge = `<div style="font-size:10px; color:#6366f1; margin-top:2px;">⏱️ ${b.start_date ? b.start_date.split('T')[0] : 'Ongoing'} → ${b.end_date ? b.end_date.split('T')[0] : 'Indefinite'}</div>`;
+              }
 
               return `
                 <tr style="${isInc ? 'background:rgba(16,185,129,0.02);' : ''}">
@@ -209,6 +256,7 @@ export function renderBillsView(container) {
                       <input class="table-input" type="text" value="${b.desc}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'desc', this.value)" style="font-weight:600;">
                     ` : `
                       <strong style="color:var(--heading); font-size:13px;">${isInc ? '📥 ' : ''}${b.desc}</strong>
+                      ${contractBadge}
                     `}
                   </td>
                   <td>
@@ -219,20 +267,39 @@ export function renderBillsView(container) {
                   <td>
                     ${globalEditMode ? (
                       b.frequency === 'monthly' ? `
-                        <input class="table-input" type="number" min="1" max="31" value="${b.due_day || 1}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'due_day', parseInt(this.value, 10))" style="width:70px;">
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                          <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:11px; color:var(--text-muted);">Day:</span>
+                            <input class="table-input" type="number" min="1" max="31" value="${b.due_day || 1}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'due_day', parseInt(this.value, 10))" style="width:55px;">
+                          </div>
+                          <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:var(--text-muted);">End:</span>
+                            <input class="table-input" type="date" value="${b.end_date || ''}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'end_date', this.value)" style="width:115px; font-size:10px;">
+                          </div>
+                        </div>
                       ` : b.frequency === 'yearly' ? `
-                        <div style="display:flex; gap:4px; align-items:center;">
-                          <select class="table-input" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'month', this.value)" style="width:65px;">
-                            ${months.map(m => `<option value="${m}" ${m === (b.month || 'Jan') ? 'selected' : ''}>${m}</option>`).join('')}
-                          </select>
-                          <input class="table-input" type="number" min="1" max="31" value="${b.due_day || 1}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'due_day', parseInt(this.value, 10))" style="width:50px;">
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                          <div style="display:flex; gap:4px; align-items:center;">
+                            <select class="table-input" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'month', this.value)" style="width:65px;">
+                              ${months.map(m => `<option value="${m}" ${m === (b.month || 'Jan') ? 'selected' : ''}>${m}</option>`).join('')}
+                            </select>
+                            <input class="table-input" type="number" min="1" max="31" value="${b.due_day || 1}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'due_day', parseInt(this.value, 10))" style="width:50px;">
+                          </div>
+                          <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:var(--text-muted);">End:</span>
+                            <input class="table-input" type="date" value="${b.end_date || ''}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'end_date', this.value)" style="width:115px; font-size:10px;">
+                          </div>
                         </div>
                       ` : (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') ? `
-                        <input class="table-input" type="date" value="${b.start_date || ''}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'start_date', this.value)" style="width:125px; font-size:11px;">
-                      ` : `<span style="font-size:12px; color:var(--text-muted);">${dueStr}</span>`
-                    ) : `
-                      <span style="font-size:12px; color:var(--text-muted); font-weight:500;">${dueStr}</span>
-                    `}
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                          <input class="table-input" type="date" value="${b.start_date || ''}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'start_date', this.value)" style="width:125px; font-size:11px;">
+                          <div style="display:flex; align-items:center; gap:4px;">
+                            <span style="font-size:10px; color:var(--text-muted);">End:</span>
+                            <input class="table-input" type="date" value="${b.end_date || ''}" onchange="window.budgetApp.editFullScheduledBill('${b.source_type}', ${b.source_idx}, 'end_date', this.value)" style="width:115px; font-size:10px;">
+                          </div>
+                        </div>
+                      ` : dueDisplay
+                    ) : dueDisplay}
                   </td>
                   <td class="text-right">
                     ${globalEditMode ? `
@@ -289,8 +356,8 @@ export function renderBillsView(container) {
     <!-- ADD NEW SCHEDULED ITEM PANEL -->
     <div id="add-bill-panel" class="panel">
       <div style="margin-bottom:12px;">
-        <h3 id="add-panel-title" style="margin:0; font-size:16px; color:var(--curr-border);">+ Add Scheduled Bill or Payment In</h3>
-        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Create recurring outgoings (Direct Debits, bills) or incoming payments (Salaries, side income, pensions) with automatic weekend and holiday adjustments.</p>
+        <h3 id="add-panel-title" style="margin:0; font-size:16px; color:var(--curr-border);">+ Add Master Scheduled Bill or Payment In</h3>
+        <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Create recurring commitments that automatically apply across all current and future sliding window months.</p>
       </div>
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px; margin-bottom:12px;">
@@ -334,19 +401,25 @@ export function renderBillsView(container) {
 
         <div id="new-sched-start-box" style="display:none;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Start From Date</label>
-          <input type="date" id="new-sched-start-date" value="${todayIso}" min="${appState.currentYear}-01-01" max="${Number(appState.currentYear) + 5}-12-31" style="width:100%; margin-top:3px;">
+          <input type="date" id="new-sched-start-date" value="${todayIso}" min="${now.getFullYear()}-01-01" max="${Number(now.getFullYear()) + 10}-12-31" style="width:100%; margin-top:3px;">
         </div>
 
         <div id="new-sched-month-box" style="display:none;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Target Month</label>
           <select id="new-sched-month" style="width:100%; margin-top:3px;">
-            ${months.map(m => `<option value="${m}" ${m === activeTab ? 'selected' : ''}>${m}</option>`).join('')}
+            ${months.map(m => `<option value="${m}" ${m === curPeriod.month ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
         </div>
 
         <div id="new-sched-interval-box" style="display:none;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Interval Step (N)</label>
           <input type="number" min="1" max="52" id="new-sched-interval" value="2" style="width:100%; margin-top:3px;">
+        </div>
+
+        <!-- OPTIONAL CONTRACT END DATE -->
+        <div id="new-sched-end-box">
+          <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Contract Expiry / End Date (Optional)</label>
+          <input type="date" id="new-sched-end-date" min="${now.getFullYear()}-01-01" max="${Number(now.getFullYear()) + 10}-12-31" style="width:100%; margin-top:3px;">
         </div>
 
         <div>
@@ -396,7 +469,7 @@ export function renderBillsView(container) {
       </div>
 
       <div style="display:flex; justify-content:flex-end; gap:8px;">
-        <button class="btn green" style="padding:6px 20px;" onclick="window.budgetApp.confirmAddFullScheduledBill()">Save Scheduled Item</button>
+        <button class="btn green" style="padding:6px 20px;" onclick="window.budgetApp.confirmAddFullScheduledBill()">Save Master Scheduled Item</button>
       </div>
     </div>
   `;

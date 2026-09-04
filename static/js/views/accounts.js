@@ -1,4 +1,4 @@
-import { appState, getSettings, getMonthData, getAccountConfig, isMultiUserEnabled, getAccountOwner, isAccountVisibleToActiveUser } from '../state.js';
+import { appState, getSettings, getMonthData, getAccountConfig, isMultiUserEnabled, getAccountOwner, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear, months } from '../state.js';
 
 export function renderAccountsView(container) {
   const cfg = getSettings();
@@ -7,6 +7,11 @@ export function renderAccountsView(container) {
   const globalEditMode = appState.globalEditMode;
   const mData = getMonthData(activeTab);
   const isMulti = isMultiUserEnabled();
+  const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+  const curTotalM = cur.year * 12 + cur.monthIdx;
+  const isFutureMonth = (appState.currentYear * 12 + months.indexOf(activeTab)) > curTotalM;
 
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
   const visibleCreditAccounts = isMulti ? cfg.credit_accounts.filter(c => isAccountVisibleToActiveUser('credit', c.name)) : cfg.credit_accounts;
@@ -16,13 +21,17 @@ export function renderAccountsView(container) {
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <div>
-          <h3 style="margin:0;">⚙️ Accounts & Opening Balances (${activeTab})</h3>
-          <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">Balances roll forward automatically unless an override is set (leave blank to auto-rollover):</p>
+          <h3 style="margin:0;">⚙️ Accounts & Opening Balances (${activeTab} ${appState.currentYear})</h3>
+          <p style="font-size:12px; color:var(--text-muted); margin:4px 0 0 0;">${isFutureMonth ? 'Opening balances in future months roll forward automatically from preceding cashflow.' : 'Balances roll forward automatically unless an override is set (leave blank to auto-rollover):'}</p>
         </div>
         <div>
-          <button class="btn secondary" style="font-size:12px;" onclick="window.budgetApp.toggleGlobalEditMode()">
-            ${globalEditMode ? '✓ Done Editing' : '✏️ Edit Opening Balances'}
-          </button>
+          ${!isFutureMonth ? `
+            <button class="btn secondary" style="font-size:12px;" onclick="window.budgetApp.toggleGlobalEditMode()">
+              ${globalEditMode ? '✓ Done Editing' : '✏️ Edit Opening Balances'}
+            </button>
+          ` : `
+            <span style="font-size:11px; color:var(--text-muted); background:rgba(255,255,255,0.05); padding:4px 8px; border-radius:4px;">🔄 Projected from previous month</span>
+          `}
         </div>
       </div>
       
@@ -43,8 +52,8 @@ export function renderAccountsView(container) {
               </div>
               <div class="account-row" style="margin-top:8px;">
                 <label style="font-size:12px;">Opening Balance:</label>
-                ${globalEditMode ? `
-                  <input type="number" step="0.01" placeholder="Auto" value="${bal !== 0 || isEdited ? bal : ''}" onchange="window.budgetApp.updateCurrentOpening('${acc}', this.value)" style="width:130px; text-align:right; font-weight:bold;">
+                ${globalEditMode && !isFutureMonth ? `
+                  <input type="number" step="0.01" placeholder="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? bal : ''}" onchange="window.budgetApp.updateCurrentOpening('${acc}', this.value)" style="width:145px; text-align:right; font-weight:bold;">
                 ` : `
                   <strong style="color:var(--heading); font-size:14px;">${curr}${Number(bal || 0).toFixed(2)}</strong>
                 `}
@@ -71,8 +80,8 @@ export function renderAccountsView(container) {
               </div>
               <div class="account-row" style="margin-top:8px;">
                 <label style="font-size:12px;">Opening Debt:</label>
-                ${globalEditMode ? `
-                  <input type="number" step="0.01" placeholder="Auto" value="${spent !== 0 || isEdited ? spent : ''}" onchange="window.budgetApp.updateCreditOpening('${c.name}', this.value)" style="width:130px; text-align:right; color:var(--red); font-weight:bold;">
+                ${globalEditMode && !isFutureMonth ? `
+                  <input type="number" step="0.01" placeholder="${spent !== '' && spent !== null ? 'Auto (' + curr + Number(spent).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? spent : ''}" onchange="window.budgetApp.updateCreditOpening('${c.name}', this.value)" style="width:145px; text-align:right; color:var(--red); font-weight:bold;">
                 ` : `
                   <strong style="color:var(--red); font-size:14px;">-${curr}${Number(spent || 0).toFixed(2)}</strong>
                 `}
@@ -101,8 +110,8 @@ export function renderAccountsView(container) {
                 </div>
                 <div class="account-row" style="margin:8px 0;">
                   <label style="font-size:12px;">Opening Balance:</label>
-                  ${globalEditMode ? `
-                    <input type="number" step="0.01" placeholder="Auto" value="${bal !== 0 || isEdited ? bal : ''}" onchange="window.budgetApp.updateAccountSaving('${accName}', this.value)" style="width:130px; text-align:right; font-weight:bold;">
+                  ${globalEditMode && !isFutureMonth ? `
+                    <input type="number" step="0.01" placeholder="${bal !== '' && bal !== null ? 'Auto (' + curr + Number(bal).toFixed(2) + ')' : 'Auto'}" value="${isEdited ? bal : ''}" onchange="window.budgetApp.updateAccountSaving('${accName}', this.value)" style="width:145px; text-align:right; font-weight:bold;">
                   ` : `
                     <strong style="color:var(--purple); font-size:14px;">${curr}${Number(bal || 0).toFixed(2)}</strong>
                   `}

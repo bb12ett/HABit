@@ -1,5 +1,5 @@
-import { appState, getSettings, isMultiUserEnabled } from '../state.js';
-import { SPEND_CATEGORIES, calculateCategoryBreakdown } from '../calculations.js';
+import { appState, getSettings, isMultiUserEnabled, months, getCurrentPeriodMonthAndYear } from '../state.js';
+import { SPEND_CATEGORIES, calculateCategoryBreakdown, calculateMonthSchedule, detectCurrentMonthAndWeek } from '../calculations.js';
 import { renderCategoryDonutChart } from '../charts.js';
 
 function matchesAmountFilter(amountNum, filterStr) {
@@ -38,9 +38,264 @@ function matchesAmountFilter(amountNum, filterStr) {
   return absAmt.toFixed(2).includes(cleanFilter) || String(amountNum).includes(cleanFilter);
 }
 
+function formatDateIso(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function formatShortDate(d) {
+  if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
+  const day = d.getDate();
+  const mNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const month = mNames[d.getMonth()] || '';
+  const yr = String(d.getFullYear()).slice(-2);
+  return `${day} ${month} '${yr}`;
+}
+
+export function getActiveSpendTimeframeRange() {
+  const timeframe = appState.spendFilterTimeframe || 'this_month';
+  const now = new Date();
+  const curYear = now.getFullYear();
+  const curMonth = now.getMonth();
+
+  let startIso = '';
+  let endIso = '';
+  let label = '';
+  let monthName = null;
+
+  if (timeframe === 'custom' && appState.spendCustomStartDate && appState.spendCustomEndDate) {
+    startIso = appState.spendCustomStartDate;
+    endIso = appState.spendCustomEndDate;
+    if (appState.spendMonthTotalM !== undefined && appState.spendMonthTotalM !== null) {
+      const targetY = Math.floor(appState.spendMonthTotalM / 12);
+      const targetM = ((appState.spendMonthTotalM % 12) + 12) % 12;
+      const sched = calculateMonthSchedule(targetY, targetM);
+      label = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+      monthName = months[targetM];
+    } else {
+      label = appState.spendCustomLabel || 'Custom Range';
+    }
+  } else if (timeframe === 'active_week') {
+    let weekFound = false;
+    try {
+      const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+        ? getCurrentPeriodMonthAndYear()
+        : { year: curYear, monthIdx: curMonth, month: months[curMonth] };
+      const detected = (typeof detectCurrentMonthAndWeek === 'function')
+        ? detectCurrentMonthAndWeek(curPeriod.year)
+        : null;
+      if (detected && detected.schedule && detected.schedule.weeks) {
+        const activeWeekObj = detected.schedule.weeks.find(w => w.name === detected.week) || detected.schedule.weeks[0];
+        if (activeWeekObj) {
+          startIso = formatDateIso(activeWeekObj.startDate);
+          endIso = formatDateIso(activeWeekObj.endDate);
+          label = `${detected.week} (${formatShortDate(activeWeekObj.startDate)} – ${formatShortDate(activeWeekObj.endDate)})`;
+          weekFound = true;
+          monthName = detected.month;
+        }
+      }
+    } catch (e) {}
+    if (!weekFound) {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const s = new Date(now.getFullYear(), now.getMonth(), diff);
+      const e = new Date(s.getFullYear(), s.getMonth(), s.getDate() + 6);
+      startIso = formatDateIso(s);
+      endIso = formatDateIso(e);
+      label = 'This Week';
+    }
+  } else if (timeframe === 'this_month') {
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: curYear, monthIdx: curMonth, month: months[curMonth] };
+    const sched = calculateMonthSchedule(curPeriod.year, curPeriod.monthIdx);
+    startIso = formatDateIso(sched.startDate);
+    endIso = formatDateIso(sched.endDate);
+    label = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+    monthName = curPeriod.month || months[curPeriod.monthIdx];
+  } else if (timeframe === 'last_month') {
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: curYear, monthIdx: curMonth, month: months[curMonth] };
+    const prevTotal = curPeriod.year * 12 + curPeriod.monthIdx - 1;
+    const prevY = Math.floor(prevTotal / 12);
+    const prevM = ((prevTotal % 12) + 12) % 12;
+    const sched = calculateMonthSchedule(prevY, prevM);
+    startIso = formatDateIso(sched.startDate);
+    endIso = formatDateIso(sched.endDate);
+    label = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+    monthName = months[prevM];
+  } else if (timeframe === 'last_7_days') {
+    const s = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+    startIso = formatDateIso(s);
+    endIso = formatDateIso(now);
+    label = 'Last 7 Days';
+  } else if (timeframe === 'last_30_days') {
+    const s = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    startIso = formatDateIso(s);
+    endIso = formatDateIso(now);
+    label = 'Last 30 Days';
+  } else if (timeframe === 'last_90_days') {
+    const s = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
+    startIso = formatDateIso(s);
+    endIso = formatDateIso(now);
+    label = 'Last 90 Days';
+  } else if (timeframe === 'rolling_12_months') {
+    const s = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+    startIso = formatDateIso(s);
+    endIso = formatDateIso(now);
+    label = 'Rolling 12 Months';
+  } else if (timeframe === 'year_to_date') {
+    const s = new Date(curYear, 0, 1);
+    startIso = formatDateIso(s);
+    endIso = formatDateIso(now);
+    label = `YTD ${curYear}`;
+  } else if (timeframe === 'all_time') {
+    startIso = '';
+    endIso = '';
+    label = 'All Time';
+  } else {
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: curYear, monthIdx: curMonth, month: months[curMonth] };
+    const sched = calculateMonthSchedule(curPeriod.year, curPeriod.monthIdx);
+    startIso = formatDateIso(sched.startDate);
+    endIso = formatDateIso(sched.endDate);
+    label = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+    monthName = curPeriod.month || months[curPeriod.monthIdx];
+  }
+
+  return { timeframe, startIso, endIso, label, monthName };
+}
+
+export function setSpendAnalyticsTimeframe(timeframe) {
+  appState.spendFilterTimeframe = timeframe;
+  appState.spendMonthTotalM = null;
+  appState.spendCustomLabel = null;
+  if (timeframe !== 'custom') {
+    appState.spendCustomStartDate = null;
+    appState.spendCustomEndDate = null;
+  }
+  if (typeof window !== 'undefined' && window.budgetApp && typeof window.budgetApp.renderContent === 'function') {
+    window.budgetApp.renderContent();
+  }
+}
+
+export function setSpendCustomDateRange(startDate, endDate) {
+  if (!startDate || !endDate) return;
+  appState.spendFilterTimeframe = 'custom';
+  appState.spendCustomStartDate = startDate;
+  appState.spendCustomEndDate = endDate;
+  appState.spendMonthTotalM = null;
+  appState.spendCustomLabel = null;
+  if (typeof window !== 'undefined' && window.budgetApp && typeof window.budgetApp.renderContent === 'function') {
+    window.budgetApp.renderContent();
+  }
+}
+
+export function shiftSpendTimeframe(direction) {
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  if (appState.spendMonthTotalM !== undefined && appState.spendMonthTotalM !== null) {
+    appState.spendMonthTotalM += direction;
+    const targetY = Math.floor(appState.spendMonthTotalM / 12);
+    const targetM = ((appState.spendMonthTotalM % 12) + 12) % 12;
+    const sched = calculateMonthSchedule(targetY, targetM);
+    appState.spendFilterTimeframe = 'custom';
+    appState.spendCustomStartDate = formatDateIso(sched.startDate);
+    appState.spendCustomEndDate = formatDateIso(sched.endDate);
+    appState.spendCustomLabel = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+  } else if (appState.spendFilterTimeframe === 'this_month' || !appState.spendFilterTimeframe) {
+    const baseTotalM = curPeriod.year * 12 + curPeriod.monthIdx;
+    appState.spendMonthTotalM = baseTotalM + direction;
+    const targetY = Math.floor(appState.spendMonthTotalM / 12);
+    const targetM = ((appState.spendMonthTotalM % 12) + 12) % 12;
+    const sched = calculateMonthSchedule(targetY, targetM);
+    appState.spendFilterTimeframe = 'custom';
+    appState.spendCustomStartDate = formatDateIso(sched.startDate);
+    appState.spendCustomEndDate = formatDateIso(sched.endDate);
+    appState.spendCustomLabel = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+  } else if (appState.spendFilterTimeframe === 'last_month') {
+    const baseTotalM = curPeriod.year * 12 + curPeriod.monthIdx - 1;
+    appState.spendMonthTotalM = baseTotalM + direction;
+    const targetY = Math.floor(appState.spendMonthTotalM / 12);
+    const targetM = ((appState.spendMonthTotalM % 12) + 12) % 12;
+    const sched = calculateMonthSchedule(targetY, targetM);
+    appState.spendFilterTimeframe = 'custom';
+    appState.spendCustomStartDate = formatDateIso(sched.startDate);
+    appState.spendCustomEndDate = formatDateIso(sched.endDate);
+    appState.spendCustomLabel = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
+  } else {
+    const currentRange = getActiveSpendTimeframeRange();
+    const parseParts = str => {
+      if (!str) return null;
+      const parts = str.split('-');
+      if (parts.length < 3) return null;
+      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    };
+
+    const sDate = parseParts(currentRange.startIso) || new Date();
+    const eDate = parseParts(currentRange.endIso) || new Date();
+
+    const spanMs = Math.max(24 * 60 * 60 * 1000, eDate.getTime() - sDate.getTime());
+    const shiftMs = spanMs * direction;
+    const newS = new Date(sDate.getTime() + shiftMs);
+    const newE = new Date(eDate.getTime() + shiftMs);
+    appState.spendFilterTimeframe = 'custom';
+    appState.spendCustomStartDate = formatDateIso(newS);
+    appState.spendCustomEndDate = formatDateIso(newE);
+    appState.spendMonthTotalM = null;
+    appState.spendCustomLabel = null;
+  }
+
+  if (typeof window !== 'undefined' && window.budgetApp && typeof window.budgetApp.renderContent === 'function') {
+    window.budgetApp.renderContent();
+  }
+}
+
+export function resetSpendTimeframe() {
+  appState.spendFilterTimeframe = 'this_month';
+  appState.spendCustomStartDate = null;
+  appState.spendCustomEndDate = null;
+  appState.spendMonthTotalM = null;
+  appState.spendCustomLabel = null;
+  if (typeof window !== 'undefined' && window.budgetApp && typeof window.budgetApp.renderContent === 'function') {
+    window.budgetApp.renderContent();
+  }
+}
+
+export function setSpendQuickOffset(offsetType) {
+  const currentRange = getActiveSpendTimeframeRange();
+  const parseParts = str => {
+    if (!str) return null;
+    const parts = str.split('-');
+    if (parts.length < 3) return null;
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  };
+
+  let endDate = parseParts(currentRange.endIso) || new Date();
+
+  if (offsetType === 'minus_12_months') {
+    const s = new Date(endDate.getFullYear() - 1, endDate.getMonth(), endDate.getDate());
+    appState.spendFilterTimeframe = 'custom';
+    appState.spendCustomStartDate = formatDateIso(s);
+    appState.spendCustomEndDate = formatDateIso(endDate);
+    appState.spendMonthTotalM = null;
+    appState.spendCustomLabel = null;
+    if (typeof window !== 'undefined' && window.budgetApp && typeof window.budgetApp.renderContent === 'function') {
+      window.budgetApp.renderContent();
+    }
+  }
+}
+
 export function renderSpendAnalyticsView(container) {
   const activeEl = document.activeElement;
-  const focusedId = (activeEl && (activeEl.id === 'spendFilterDate' || activeEl.id === 'spendFilterPayee' || activeEl.id === 'spendFilterAmount' || activeEl.id === 'spendSearchInputTop')) ? activeEl.id : null;
+  const focusedId = (activeEl && (activeEl.id === 'spendFilterDate' || activeEl.id === 'spendFilterPayee' || activeEl.id === 'spendFilterAmount' || activeEl.id === 'spendSearchInputTop' || activeEl.id === 'spendRangeStart' || activeEl.id === 'spendRangeEnd')) ? activeEl.id : null;
   const cursorStart = focusedId && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
   const cursorEnd = focusedId && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
 
@@ -51,6 +306,12 @@ export function renderSpendAnalyticsView(container) {
   const customRules = cfg.merchant_category_rules || {};
 
   const timeframe = appState.spendFilterTimeframe || 'this_month';
+  const rangeInfo = getActiveSpendTimeframeRange();
+  const customRange = (timeframe === 'custom' || rangeInfo.startIso) ? {
+    startDate: rangeInfo.startIso,
+    endDate: rangeInfo.endIso
+  } : null;
+
   const accountFilter = appState.spendFilterAccount || 'all';
   const categoryFilter = appState.spendFilterCategory || 'all';
   const searchQuery = (appState.spendSearchQuery || '').toLowerCase().trim();
@@ -68,7 +329,7 @@ export function renderSpendAnalyticsView(container) {
   const sortCol = appState.spendSortColumn || 'date';
   const sortDir = appState.spendSortDirection || 'desc';
 
-  const breakdown = calculateCategoryBreakdown(allTxns, timeframe, accountFilter, activeUser, customRules);
+  const breakdown = calculateCategoryBreakdown(allTxns, timeframe, accountFilter, activeUser, customRules, customRange);
   const { categoryList, topMerchants, grandTotal, transactionCount, startDate, endDate } = breakdown;
 
   const availableAccounts = Array.from(new Set(breakdown.filteredTransactions.map(t => t.account_name).filter(Boolean))).sort();
@@ -170,10 +431,36 @@ export function renderSpendAnalyticsView(container) {
   );
 
   const now = new Date();
-  const sDate = startDate || new Date(now.getFullYear(), now.getMonth(), 1);
-  const eDate = endDate || now;
-  const dayCount = Math.max(1, Math.round((Math.min(now.getTime(), eDate.getTime()) - sDate.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  const sDate = breakdown.startDate || (rangeInfo.startIso ? new Date(rangeInfo.startIso) : new Date(now.getFullYear(), now.getMonth(), 1));
+  const eDate = breakdown.endDate || (rangeInfo.endIso ? new Date(rangeInfo.endIso) : now);
+  const dayCount = Math.max(1, Math.round((Math.abs(eDate.getTime() - sDate.getTime())) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailySpend = grandTotal / dayCount;
+
+  let isPaydayCycle = false;
+  let rangeBadgeText = '';
+  if (rangeInfo.label && rangeInfo.label.startsWith('Payday:')) {
+    isPaydayCycle = true;
+    rangeBadgeText = rangeInfo.label;
+  } else if (timeframe === 'this_month' || timeframe === 'last_month') {
+    isPaydayCycle = true;
+    rangeBadgeText = rangeInfo.label;
+  } else if (timeframe === 'active_week') {
+    rangeBadgeText = rangeInfo.label || `This Week (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'last_7_days') {
+    rangeBadgeText = `Last 7 Days (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'last_30_days') {
+    rangeBadgeText = `Last 30 Days (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'last_90_days') {
+    rangeBadgeText = `Last 90 Days (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'rolling_12_months') {
+    rangeBadgeText = `Rolling 12 Mo (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'year_to_date') {
+    rangeBadgeText = `YTD (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else if (timeframe === 'all_time') {
+    rangeBadgeText = `All Time (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
+  } else {
+    rangeBadgeText = rangeInfo.label || `${formatShortDate(sDate)} – ${formatShortDate(eDate)}`;
+  }
 
   const topCat = categoryList.length > 0 ? categoryList[0] : null;
 
@@ -203,15 +490,6 @@ export function renderSpendAnalyticsView(container) {
           </p>
         </div>
         <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-          <!-- Timeframe selector -->
-          <div style="display:flex; align-items:center; background:var(--panel-bg); border:1px solid var(--border); border-radius:6px; padding:2px;">
-            <button class="btn ${timeframe === 'active_week' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('active_week')">This Week</button>
-            <button class="btn ${timeframe === 'this_month' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('this_month')">This Month</button>
-            <button class="btn ${timeframe === 'last_month' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('last_month')">Last Month</button>
-            <button class="btn ${timeframe === 'last_30_days' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('last_30_days')">Last 30 Days</button>
-            <button class="btn ${timeframe === 'year_to_date' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 9px; border:none;" onclick="window.budgetApp.setSpendAnalyticsTimeframe('year_to_date')">Full Year</button>
-          </div>
-
           <!-- Account selector -->
           <select onchange="window.budgetApp.setSpendAnalyticsAccount(this.value)" style="font-size:11.5px; padding:5px 8px; border-radius:6px; font-weight:600;">
             <option value="all" ${accountFilter === 'all' ? 'selected' : ''}>💳 All Accounts Combined</option>
@@ -227,12 +505,58 @@ export function renderSpendAnalyticsView(container) {
           </button>
         </div>
       </div>
+
+      <!-- TIMESPAN CONTROL TOOLBAR -->
+      <div class="spend-timespan-bar" style="margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; background:var(--bg-card, rgba(30, 41, 59, 0.5)); border:1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius:12px; padding:8px 12px; box-sizing:border-box;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button class="btn secondary sm" onclick="window.budgetApp.shiftSpendTimeframe(-1)" title="Step 1 Period Earlier in History" style="height:32px; padding:0 12px; font-weight:700;">
+            ◀
+          </button>
+          <div class="spend-range-badge" ${isPaydayCycle && rangeInfo.monthName ? `onclick="window.budgetApp.openDateOverrideModal('${rangeInfo.monthName}')" title="Click to override payday period for ${rangeInfo.monthName}" style="cursor:pointer; background:var(--card-bg, #1e293b); border:1px solid var(--border, #334155); border-radius:9999px; padding:4px 14px; font-size:12.5px; font-weight:700; color:var(--heading, #f8fafc); display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,0.15); user-select:none;"` : `style="background:var(--card-bg, #1e293b); border:1px solid var(--border, #334155); border-radius:9999px; padding:4px 14px; font-size:12.5px; font-weight:700; color:var(--heading, #f8fafc); display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,0.15); user-select:none;"`}>
+            <span>📅 ${rangeBadgeText} ${isPaydayCycle && rangeInfo.monthName ? '✏️' : ''}</span>
+            <span style="font-size:11px; opacity:0.75; font-weight:500;">(${dayCount} ${dayCount === 1 ? 'day' : 'days'})</span>
+          </div>
+          <button class="btn secondary sm" onclick="window.budgetApp.shiftSpendTimeframe(1)" title="Step 1 Period Later in History" style="height:32px; padding:0 12px; font-weight:700;">
+            ▶
+          </button>
+          <button class="btn secondary sm" onclick="window.budgetApp.resetSpendTimeframe()" title="Reset to This Month" style="height:32px; font-size:11.5px; font-weight:600;">
+            This Month
+          </button>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Preset:</label>
+          <select id="spendPresetSelect" onchange="window.budgetApp.setSpendAnalyticsTimeframe(this.value)" style="height:32px; font-size:12px; padding:0 8px; border-radius:6px; font-weight:600;">
+            <option value="this_month" ${timeframe === 'this_month' ? 'selected' : ''}>📅 This Month</option>
+            <option value="last_month" ${timeframe === 'last_month' ? 'selected' : ''}>📅 Last Month</option>
+            <option value="active_week" ${timeframe === 'active_week' ? 'selected' : ''}>⚡ This Week</option>
+            <option value="last_7_days" ${timeframe === 'last_7_days' ? 'selected' : ''}>⚡ Last 7 Days</option>
+            <option value="last_30_days" ${timeframe === 'last_30_days' ? 'selected' : ''}>⚡ Last 30 Days</option>
+            <option value="last_90_days" ${timeframe === 'last_90_days' ? 'selected' : ''}>⚡ Last 90 Days</option>
+            <option value="rolling_12_months" ${timeframe === 'rolling_12_months' ? 'selected' : ''}>📈 Rolling 12 Months</option>
+            <option value="year_to_date" ${timeframe === 'year_to_date' ? 'selected' : ''}>📈 Year to Date</option>
+            <option value="all_time" ${timeframe === 'all_time' ? 'selected' : ''}>🌐 All Time</option>
+            <option value="custom" ${timeframe === 'custom' ? 'selected' : ''}>🗓️ Custom Range</option>
+          </select>
+
+          <div style="display:inline-flex; align-items:center; gap:6px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:2px 8px;">
+            <span style="font-size:11px; color:var(--text-muted); font-weight:600;">From:</span>
+            <input type="date" id="spendRangeStart" value="${rangeInfo.startIso}" style="height:28px; font-size:11.5px; padding:0 4px; border:none; background:transparent; color:var(--heading);" onchange="window.budgetApp.setSpendCustomDateRange(this.value, document.getElementById('spendRangeEnd').value)">
+            <span style="font-size:11px; color:var(--text-muted); font-weight:600;">To:</span>
+            <input type="date" id="spendRangeEnd" value="${rangeInfo.endIso}" style="height:28px; font-size:11.5px; padding:0 4px; border:none; background:transparent; color:var(--heading);" onchange="window.budgetApp.setSpendCustomDateRange(document.getElementById('spendRangeStart').value, this.value)">
+          </div>
+
+          <button class="btn secondary sm" onclick="window.budgetApp.setSpendQuickOffset('minus_12_months')" title="Set Start Date to End Date minus 12 Months" style="height:32px; font-size:11px; font-weight:600; padding:0 10px;">
+            ⚡ -12 Mo
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- KPI METRICS SUMMARY -->
     <div class="kpi-grid" style="margin-bottom:16px;">
       <div class="kpi-card">
-        <div class="kpi-label">Total Outgoings (${timeframe === 'active_week' ? 'Week' : timeframe === 'last_30_days' ? '30 Days' : 'Month'})</div>
+        <div class="kpi-label">Total Outgoings (${dayCount} ${dayCount === 1 ? 'Day' : 'Days'})</div>
         <div class="kpi-value" style="color:var(--curr-border);">${curr}${grandTotal.toFixed(2)}</div>
         <div class="kpi-sub">${transactionCount} transactions analyzed</div>
       </div>
@@ -353,10 +677,50 @@ export function renderSpendAnalyticsView(container) {
             ${appState.spendSearchQuery ? `<button style="position:absolute; right:4px; top:4px; background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:11px;" onclick="window.budgetApp.setSpendSearchQuery('')">&times;</button>` : ''}
           </div>
 
+          <!-- Holiday Mode Button -->
+          <button class="btn secondary" style="font-size:11.5px; padding:4px 10px; display:inline-flex; align-items:center; gap:5px;" onclick="window.budgetApp.openHolidayWindowsModal()" title="Configure Holiday / Travel Windows for automatic card categorization">
+            <span>🏖️</span> Holiday Mode
+          </button>
+
           <!-- Export CSV Button -->
           <button class="btn secondary" style="font-size:11.5px; padding:4px 10px; display:inline-flex; align-items:center; gap:5px;" onclick="window.budgetApp.exportCategorizedTransactionsCsv()" title="Export ${displayTxns.length} categorized transactions to CSV">
             <span>📥</span> Export CSV
           </button>
+        </div>
+      </div>
+
+      ${(() => {
+        const nowIso = new Date().toISOString().slice(0, 10);
+        const activeWindows = (cfg.holiday_windows || []).filter(w => w.enabled && nowIso >= w.start_date && nowIso <= w.end_date);
+        if (activeWindows.length === 0) return '';
+        return activeWindows.map(w => `
+          <div style="background:rgba(56,189,248,0.12); border:1px solid rgba(56,189,248,0.3); border-radius:6px; padding:8px 12px; margin-bottom:12px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px;">🏖️</span>
+              <div>
+                <strong style="color:var(--heading); font-size:12.5px;">Holiday Mode Active: ${w.name}</strong>
+                <div style="font-size:11px; color:var(--text-muted);">
+                  Transactions on <strong>${w.account || 'All Accounts'}</strong> between ${w.start_date} and ${w.end_date} automatically route to <strong>Travel</strong>.
+                </div>
+              </div>
+            </div>
+            <button class="btn secondary" style="font-size:11px; padding:3px 8px;" onclick="window.budgetApp.openHolidayWindowsModal()">Manage</button>
+          </div>
+        `).join('');
+      })()}
+
+      <!-- BATCH ACTIONS TOOLBAR -->
+      <div id="spendBatchBar" style="background:var(--panel-bg, #1e293b); border:1px solid var(--primary, #38bdf8); border-radius:6px; padding:8px 12px; margin-bottom:10px; display:none; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; box-shadow:0 4px 12px rgba(0,0,0,0.25);">
+        <div style="font-weight:600; font-size:12.5px; color:var(--heading);">
+          <span id="spendBatchCount">0</span> transactions selected
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span style="font-size:11.5px; color:var(--text-muted);">Set Category to:</span>
+          <select id="spendBatchCatSelect" style="font-size:11.5px; padding:3px 6px; border-radius:4px;">
+            ${SPEND_CATEGORIES.map(c => `<option value="${c.id}" ${c.id === 'travel' ? 'selected' : ''}>${c.icon} ${c.label}</option>`).join('')}
+          </select>
+          <button class="btn green" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.applyBatchRecategorize()">Apply</button>
+          <button class="btn secondary" style="font-size:11px; padding:3px 8px;" onclick="window.budgetApp.clearSpendSelection()">Clear</button>
         </div>
       </div>
 
@@ -365,6 +729,9 @@ export function renderSpendAnalyticsView(container) {
           <thead>
             <!-- SORTABLE HEADERS -->
             <tr style="border-bottom:1px solid var(--border);">
+              <th style="width:30px; text-align:center; padding:8px 4px;">
+                <input type="checkbox" id="spendSelectAll" onchange="window.budgetApp.toggleSpendSelectAll(this.checked)" title="Select all filtered transactions">
+              </th>
               <th onclick="window.budgetApp.toggleSpendSort('date')" style="width:100px; cursor:pointer; user-select:none; padding:8px;" title="Click to sort by Date">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:4px;">
                   <span style="${sortCol === 'date' ? 'color:var(--heading); font-weight:700;' : ''}">Date</span>
@@ -424,6 +791,7 @@ export function renderSpendAnalyticsView(container) {
 
             <!-- INLINE COLUMN FILTER ROW -->
             <tr style="background:rgba(0,0,0,0.12); border-bottom:1px solid var(--border);">
+              <th style="padding:4px 4px; text-align:center;"></th>
               <th style="padding:4px 6px;">
                 <input type="text" id="spendFilterDate" placeholder="📅 YYYY-MM..." value="${colFilters.date || ''}" oninput="window.budgetApp.setSpendColFilter('date', this.value)" style="width:100%; font-size:11px; padding:3px 6px; border-radius:4px; border:1px solid var(--border); background:var(--panel-bg); color:var(--text); box-sizing:border-box;">
               </th>
@@ -468,9 +836,13 @@ export function renderSpendAnalyticsView(container) {
               const cleanAttr = merchantDisp.replace(/"/g, '&quot;');
               return `
                 <tr>
+                  <td style="text-align:center; padding:8px 4px;">
+                    <input type="checkbox" class="spend-row-select" data-txnid="${t.transaction_id}" onchange="window.budgetApp.toggleSpendRowSelect('${t.transaction_id}', this.checked)">
+                  </td>
                   <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px; padding:8px;">${t.booking_date}</td>
                   <td style="padding:8px;">
                     <strong style="color:var(--heading); font-size:12.5px;">${merchantDisp}</strong>
+                    ${t.holiday_window_name ? `<span class="badge" style="background:rgba(56,189,248,0.15); color:var(--primary, #38bdf8); font-size:9.5px; padding:1px 5px; margin-left:4px; font-weight:600;" title="Auto-categorized by Holiday Window">🏖️ ${t.holiday_window_name}</span>` : ''}
                     ${t.raw_info && t.raw_info !== merchantDisp ? `<div style="font-size:10px; color:var(--text-muted); opacity:0.8;">${t.raw_info}</div>` : ''}
                   </td>
                   <td style="color:var(--text-muted); font-size:11.5px; padding:8px;">${t.account_name || 'Account'}</td>
@@ -490,7 +862,7 @@ export function renderSpendAnalyticsView(container) {
               `;
             }).join('') : `
               <tr>
-                <td colspan="${isMulti ? 6 : 5}" style="text-align:center; padding:35px 20px; color:var(--text-muted);">
+                <td colspan="${isMulti ? 7 : 6}" style="text-align:center; padding:35px 20px; color:var(--text-muted);">
                   <div style="font-size:22px; margin-bottom:6px;">🧾</div>
                   <div style="font-size:13px; font-weight:600; color:var(--heading); margin-bottom:4px;">No transactions match the selected filters.</div>
                   ${hasActiveFilters ? `
@@ -529,5 +901,10 @@ export function renderSpendAnalyticsView(container) {
 
 if (typeof window !== 'undefined') {
   window.renderSpendAnalyticsView = renderSpendAnalyticsView;
+  window.setSpendAnalyticsTimeframe = setSpendAnalyticsTimeframe;
+  window.setSpendCustomDateRange = setSpendCustomDateRange;
+  window.shiftSpendTimeframe = shiftSpendTimeframe;
+  window.resetSpendTimeframe = resetSpendTimeframe;
+  window.setSpendQuickOffset = setSpendQuickOffset;
 }
 

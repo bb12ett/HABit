@@ -1,36 +1,44 @@
 import { detectBudgetCategory } from '../calculations.js';
-import { appState, getSettings, getYearData, getBirthdays, months } from '../state.js';
+import { appState, getSettings, getYearData, getBirthdays, getMasterYearlyBudgets, months, getCurrentPeriodMonthAndYear } from '../state.js';
 
 export function renderBudgetsView(container) {
   const yData = getYearData();
   const cfg = getSettings();
   const curr = cfg.currency;
-  const budgets = yData.yearly_budgets || [];
+  const budgets = (typeof getMasterYearlyBudgets === 'function') ? getMasterYearlyBudgets() : (yData.yearly_budgets || []);
   const birthdays = getBirthdays(appState.currentYear);
   const globalEditMode = appState.globalEditMode;
   const now = new Date();
-  const todayIso = `${appState.currentYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const todayZero = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  const curYear = now.getFullYear();
+  const todayIso = `${curYear}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  // Calculate Birthday Stats & Counts
+  // Calculate Birthday Stats & Counts across 365-day rolling horizon
   let totalBirthdayBudget = 0;
   let totalBirthdaySpent = 0;
   let soonBirthdaysCount = 0;
-  let upcomingBirthdaysCount = 0;
-  let pastBirthdaysCount = 0;
-
-  const nowTime = now.getTime();
-  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+  let next90Count = 0;
+  let next365Count = 0;
+  let recentlyPassedCount = 0;
 
   const enrichedBirthdays = birthdays.map((b, idx) => {
     let mIdx = months.indexOf(b.month);
     if (mIdx === -1) mIdx = 0;
-    const bDate = new Date(appState.currentYear, mIdx, parseInt(b.day || 1, 10));
-    const bTime = bDate.getTime();
-    const diffDays = Math.ceil((bTime - nowTime) / (1000 * 60 * 60 * 24));
-    
+    const dayNum = parseInt(b.day || 1, 10);
+
+    // Next occurrence within next 365 days
+    const thisYearDate = new Date(curYear, mIdx, dayNum, 0, 0, 0);
+    const nextDate = (thisYearDate >= todayZero) ? thisYearDate : new Date(curYear + 1, mIdx, dayNum, 0, 0, 0);
+    const diffDays = Math.round((nextDate - todayZero) / (1000 * 60 * 60 * 24));
+
+    // Previous occurrence for recently passed filter
+    const prevDate = (thisYearDate < todayZero) ? thisYearDate : new Date(curYear - 1, mIdx, dayNum, 0, 0, 0);
+    const daysAgo = Math.round((todayZero - prevDate) / (1000 * 60 * 60 * 24));
+
     if (diffDays >= 0 && diffDays <= 30) soonBirthdaysCount++;
-    if (diffDays >= 0) upcomingBirthdaysCount++;
-    if (diffDays < 0) pastBirthdaysCount++;
+    if (diffDays >= 0 && diffDays <= 90) next90Count++;
+    if (diffDays >= 0 && diffDays <= 365) next365Count++;
+    if (daysAgo >= 0 && daysAgo <= 30) recentlyPassedCount++;
 
     const bSpent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const bBudget = Number(b.budget_amount) || 0;
@@ -40,26 +48,29 @@ export function renderBudgetsView(container) {
     return {
       ...b,
       originalIdx: idx,
-      dateObj: bDate,
+      nextDate,
       diffDays,
+      daysAgo,
       spent: bSpent,
       remaining: bBudget - bSpent,
       pct: Math.min(100, Math.round((bSpent / (bBudget || 1)) * 100))
     };
   });
 
-  // Sort birthdays chronologically by date in year
-  enrichedBirthdays.sort((a, b) => a.dateObj.getTime() - b.dateObj.getTime());
+  // Sort birthdays chronologically by diffDays (next occurrence first)
+  enrichedBirthdays.sort((a, b) => a.diffDays - b.diffDays);
 
-  // Filter birthdays by active filter (all, soon, upcoming, past)
-  const activeBirthdayFilter = appState.birthdayFilter || 'soon';
+  // Filter birthdays by active filter (all, soon, 90days, 365days, past)
+  const activeBirthdayFilter = appState.birthdayFilter || 'all';
   let filteredBirthdays = enrichedBirthdays;
   if (activeBirthdayFilter === 'soon') {
     filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0 && b.diffDays <= 30);
-  } else if (activeBirthdayFilter === 'upcoming') {
-    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0);
+  } else if (activeBirthdayFilter === '90days') {
+    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0 && b.diffDays <= 90);
+  } else if (activeBirthdayFilter === '365days') {
+    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays >= 0 && b.diffDays <= 365);
   } else if (activeBirthdayFilter === 'past') {
-    filteredBirthdays = enrichedBirthdays.filter(b => b.diffDays < 0);
+    filteredBirthdays = enrichedBirthdays.filter(b => b.daysAgo >= 0 && b.daysAgo <= 30);
   }
 
   let html = `
@@ -67,12 +78,12 @@ export function renderBudgetsView(container) {
     <div class="panel" style="margin-bottom:16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <div>
-          <h2 style="margin:0; font-size:20px;">🎯 Annual Budgets & Occasions (${appState.currentYear})</h2>
-          <p style="color:var(--text-muted); font-size:12px; margin:4px 0 0 0;">Track major annual budget goals and recurring birthday & occasion gift funds with simulated cashflow.</p>
+          <h2 style="margin:0; font-size:20px;">🎯 Budgets & Occasions</h2>
+          <p style="color:var(--text-muted); font-size:12px; margin:4px 0 0 0;">Track recurring birthdays and celebrations across a rolling 365-day horizon, plus cross-year sinking funds and milestone project budgets.</p>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap;">
           <button class="btn green" onclick="window.budgetApp.openAddBirthdayModal()">🎂 Add Birthday or Occasion</button>
-          <button class="btn" style="background:#3b82f6;" onclick="window.budgetApp.openAddBudgetModal()">🎯 Create Annual Budget</button>
+          <button class="btn" style="background:#3b82f6;" onclick="window.budgetApp.openAddBudgetModal()">🎯 Create Milestone Budget</button>
         </div>
       </div>
     </div>
@@ -82,7 +93,7 @@ export function renderBudgetsView(container) {
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <div>
           <h3 style="margin:0; font-size:16px; color:#f472b6;">🎂 Birthdays & Annual Occasions</h3>
-          <span style="font-size:11px; color:var(--text-muted);">Gift allocations automatically appear in their scheduled payday week.</span>
+          <span style="font-size:11px; color:var(--text-muted);">Occasions count down chronologically across a 365-day rolling timeline. Gift allocations automatically appear in their scheduled payday week.</span>
         </div>
         <button class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.openAddBirthdayModal()">+ Add Birthday or Occasion</button>
       </div>
@@ -121,13 +132,16 @@ export function renderBudgetsView(container) {
             All (${enrichedBirthdays.length})
           </button>
           <button class="btn ${activeBirthdayFilter === 'soon' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('soon')" title="Show occasions occurring within the next 30 days">
-            ⏳ Soon (${soonBirthdaysCount})
+            ⏳ Next 30 Days (${soonBirthdaysCount})
           </button>
-          <button class="btn ${activeBirthdayFilter === 'upcoming' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('upcoming')" title="Show all future occasions for this year">
-            📅 Upcoming (${upcomingBirthdaysCount})
+          <button class="btn ${activeBirthdayFilter === '90days' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('90days')" title="Show occasions occurring within the next 90 days">
+            📅 Next 90 Days (${next90Count})
           </button>
-          <button class="btn ${activeBirthdayFilter === 'past' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('past')" title="Show occasions that have already occurred this year">
-            ⏪ Past (${pastBirthdaysCount})
+          <button class="btn ${activeBirthdayFilter === '365days' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('365days')" title="Show all occasions across next 365 days">
+            🗓️ Next 365 Days (${next365Count})
+          </button>
+          <button class="btn ${activeBirthdayFilter === 'past' ? 'green' : 'secondary'}" style="font-size:11px; padding:4px 10px; border:none;" onclick="window.budgetApp.setBirthdayFilter('past')" title="Show occasions that passed recently (last 30 days)">
+            ⏪ Passed Recently (${recentlyPassedCount})
           </button>
         </div>
         ${activeBirthdayFilter !== 'all' ? `
@@ -143,16 +157,17 @@ export function renderBudgetsView(container) {
           <div style="grid-column:1/-1; padding:30px 20px; text-align:center; color:var(--text-muted); background:rgba(0,0,0,0.1); border-radius:8px; border:1px dashed var(--border);">
             <div style="font-size:24px; margin-bottom:6px;">🎂</div>
             <div style="font-size:13px; font-weight:600; color:var(--heading);">No occasions found for filter: "${activeBirthdayFilter.charAt(0).toUpperCase() + activeBirthdayFilter.slice(1)}"</div>
-            <p style="font-size:11px; margin:4px 0 10px 0;">${activeBirthdayFilter === 'past' ? 'No occasions have passed yet this year.' : activeBirthdayFilter === 'soon' ? 'No birthdays or occasions coming up in the next 30 days.' : 'No birthdays or occasions found.'}</p>
+            <p style="font-size:11px; margin:4px 0 10px 0;">${activeBirthdayFilter === 'past' ? 'No occasions have passed in the last 30 days.' : activeBirthdayFilter === 'soon' ? 'No birthdays or occasions coming up in the next 30 days.' : 'No birthdays or occasions found.'}</p>
             <button class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.setBirthdayFilter('all')">Show All Occasions</button>
           </div>
         ` : filteredBirthdays.map(b => {
           let countdownBadge = '';
           if (b.diffDays === 0) countdownBadge = `<span class="badge" style="background:#ec4899; color:#fff; font-size:10px;">🎉 Today!</span>`;
-          else if (b.diffDays > 0 && b.diffDays <= 7) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">⏳ In ${b.diffDays} days!</span>`;
+          else if (b.diffDays === 1) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">🎂 Tomorrow!</span>`;
+          else if (b.diffDays > 1 && b.diffDays <= 7) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">⏳ In ${b.diffDays} days!</span>`;
           else if (b.diffDays > 7 && b.diffDays <= 30) countdownBadge = `<span class="badge" style="background:#eab308; color:#000; font-size:10px;">📅 In ${b.diffDays} days</span>`;
-          else if (b.diffDays > 30) countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days</span>`;
-          else countdownBadge = `<span style="font-size:10px; color:var(--text-muted);">Passed this year</span>`;
+          else if (b.diffDays > 30 && b.diffDays <= 90) countdownBadge = `<span class="badge" style="background:rgba(2,132,199,0.15); color:var(--curr-border); font-size:10px;">In ${b.diffDays} days</span>`;
+          else countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days (${b.month} '${String(b.nextDate.getFullYear()).slice(2)})</span>`;
 
           return `
             <div class="account-card" style="display:flex; flex-direction:column; justify-content:space-between; border-left:3px solid #ec4899;">
@@ -160,7 +175,9 @@ export function renderBudgetsView(container) {
                 <div class="account-card-header" style="margin-bottom:6px;">
                   <div>
                     <strong style="color:var(--heading); font-size:14px;">🎂 ${b.name}</strong>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">📅 <strong>${b.day} ${b.month}</strong> &bull; Paid From: ${b.account || cfg.current_accounts[0]}</div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                      📅 <strong>${b.day} ${b.month}</strong> &bull; Next: <strong>${b.day} ${b.month} ${b.nextDate.getFullYear()}</strong> &bull; Paid: ${b.account || cfg.current_accounts[0]}
+                    </div>
                   </div>
                   <div>${countdownBadge}</div>
                 </div>
@@ -217,14 +234,14 @@ export function renderBudgetsView(container) {
     <div class="panel">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
         <div>
-          <h3 style="margin:0; font-size:16px; color:#38bdf8;">🎯 Major Annual Budgets & Goals</h3>
-          <span style="font-size:11px; color:var(--text-muted);">Holidays, renovations, and large discretionary projects.</span>
+          <h3 style="margin:0; font-size:16px; color:#38bdf8;">🎯 Milestone Budgets & Sinking Funds</h3>
+          <span style="font-size:11px; color:var(--text-muted);">Holidays, renovations, and large discretionary projects with cross-year target dates and automated monthly pacing.</span>
         </div>
-        <button class="btn green" onclick="window.budgetApp.openAddBudgetModal()">+ Create Annual Budget</button>
+        <button class="btn green" onclick="window.budgetApp.openAddBudgetModal()">+ Create Milestone Budget</button>
       </div>
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap:14px;">
-        ${budgets.length === 0 ? '<p style="font-size:12px; color:var(--text-muted); font-style:italic;">No annual budgets created yet. Click "+ Create Annual Budget" above to get started.</p>' : budgets.map((b, bIdx) => {
+        ${budgets.length === 0 ? '<p style="font-size:12px; color:var(--text-muted); font-style:italic;">No milestone budgets created yet. Click "+ Create Milestone Budget" above to get started.</p>' : budgets.map((b, bIdx) => {
           const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
           const remaining = (Number(b.total_budget) || 0) - spent;
           const pct = Math.min(100, Math.round((spent / (Number(b.total_budget) || 1)) * 100));
@@ -232,6 +249,14 @@ export function renderBudgetsView(container) {
           const bCatId = b.category || (typeof detectBudgetCategory === 'function' ? detectBudgetCategory(b.name) : null) || 'shopping';
           const spendCats = (window.SPEND_CATEGORIES || []);
           const catObj = spendCats.find(c => c.id === bCatId) || { label: 'Shopping', icon: '🛍️', color: '#ec4899' };
+
+          // Cross-year monthly pacing calculation
+          const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function') ? getCurrentPeriodMonthAndYear() : { year: now.getFullYear(), monthIdx: now.getMonth() };
+          const curTotalM = Number(curPeriod.year) * 12 + curPeriod.monthIdx;
+          const targetDate = b.end_date ? new Date(b.end_date.includes('T') ? b.end_date : b.end_date + 'T00:00:00') : new Date(Number(curPeriod.year), 11, 31);
+          const targetTotalM = targetDate.getFullYear() * 12 + targetDate.getMonth();
+          const totalRemainingMonths = Math.max(1, targetTotalM - curTotalM + 1);
+          const monthlyPace = (remaining > 0) ? (remaining / totalRemainingMonths) : 0;
 
           return `
             <div class="account-card" style="display:flex; flex-direction:column; justify-content:space-between;">
@@ -277,9 +302,26 @@ export function renderBudgetsView(container) {
                   ${globalEditMode ? `
                     <input type="date" value="${b.end_date || `${appState.currentYear}-12-31`}" min="${appState.currentYear}-01-01" max="${Number(appState.currentYear) + 5}-12-31" onchange="window.budgetApp.editYearlyBudgetField(${bIdx}, 'end_date', this.value)" style="font-size:11px; padding:2px 4px; width:130px;">
                   ` : `
-                    <span style="font-size:12px; color:var(--text-muted);">${b.end_date || 'Year-End'}</span>
+                    <span style="font-size:12px; color:var(--text-muted); font-weight:600;">${b.end_date || 'Year-End'}</span>
                   `}
                 </div>
+
+                <!-- DYNAMIC PACING BADGE -->
+                ${strategy === 'monthly_spread' ? `
+                  <div class="account-row" style="margin-bottom:6px;">
+                    <span>Monthly Pacing:</span>
+                    <span class="badge" style="background:rgba(56,189,248,0.15); color:var(--curr-border); border:1px solid rgba(56,189,248,0.3); font-size:11px; font-weight:600;">
+                      📊 ${curr}${monthlyPace.toFixed(2)} / mo (${totalRemainingMonths} mos remaining)
+                    </span>
+                  </div>
+                ` : (strategy === 'target_date' ? `
+                  <div class="account-row" style="margin-bottom:6px;">
+                    <span>Lump-Sum Target:</span>
+                    <span class="badge" style="background:rgba(168,85,247,0.15); color:var(--purple); border:1px solid rgba(168,85,247,0.3); font-size:11px;">
+                      🎯 Deducted on ${b.end_date || 'Target Date'}
+                    </span>
+                  </div>
+                ` : '')}
 
                 <!-- PROGRESS BAR -->
                 <div style="margin:10px 0;">
@@ -307,7 +349,7 @@ export function renderBudgetsView(container) {
                   <label style="color:var(--text-muted);">Deduction Strategy:</label>
                   <select onchange="window.budgetApp.updateBudgetStrategy(${bIdx}, this.value)" style="font-size:11px; padding:2px 4px;">
                     <option value="none" ${strategy === 'none' ? 'selected' : ''}>Transactions Only</option>
-                    <option value="monthly_spread" ${strategy === 'monthly_spread' ? 'selected' : ''}>Spread Monthly</option>
+                    <option value="monthly_spread" ${strategy === 'monthly_spread' ? 'selected' : ''}>Spread Monthly (Sinking Fund)</option>
                     <option value="target_date" ${strategy === 'target_date' ? 'selected' : ''}>Deduct on Target Date</option>
                   </select>
                 </div>

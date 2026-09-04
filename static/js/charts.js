@@ -11,18 +11,10 @@ export function destroyYearChart() {
     }
     yearChartInstance = null;
   }
+  destroySavingsAccountChart();
 }
 
-export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
-  if (!canvasEl) return;
-  destroyYearChart();
-
-  if (typeof Chart === 'undefined') {
-    canvasEl.parentElement.innerHTML = '<div style="padding:20px; color:var(--amber); text-align:center;">⚠️ Chart engine blocked by browser tracking prevention. Unblock jsdelivr.net to view charts.</div>';
-    return;
-  }
-
-  const ctx = canvasEl.getContext('2d');
+function buildYearDatasets(monthData, curr, sel, cfg) {
   const datasets = [];
 
   if (sel.current && sel.current.length > 0) {
@@ -51,7 +43,7 @@ export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
   }
 
   if (cfg.track_savings && sel.savings && sel.savings.length > 0) {
-    // 1. Planned Savings Curve (Dashed line across all 12 months)
+    // 1. Planned Savings Curve (Dashed line across all months)
     datasets.push({
       label: '📈 Planned Savings',
       data: monthData.map(d => d.savings),
@@ -91,9 +83,38 @@ export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
     fill: false
   });
 
+  return datasets;
+}
+
+export function updateYearBalancesChart(monthData, curr, sel, cfg) {
+  if (!yearChartInstance) return false;
+  try {
+    yearChartInstance.data.labels = monthData.map(d => d.label || d.month);
+    yearChartInstance.data.datasets = buildYearDatasets(monthData, curr, sel, cfg);
+    yearChartInstance.update();
+    return true;
+  } catch (e) {
+    console.warn("Error updating year chart in place:", e);
+    return false;
+  }
+}
+
+export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
+  if (!canvasEl) return;
+  destroyYearChart();
+
+  if (typeof Chart === 'undefined') {
+    canvasEl.parentElement.innerHTML = '<div style="padding:20px; color:var(--amber); text-align:center;">⚠️ Chart engine blocked by browser tracking prevention. Unblock jsdelivr.net to view charts.</div>';
+    return;
+  }
+
+  const ctx = canvasEl.getContext('2d');
+  const labels = monthData.map(d => d.label || d.month);
+  const datasets = buildYearDatasets(monthData, curr, sel, cfg);
+
   yearChartInstance = new Chart(ctx, {
     type: 'line',
-    data: { labels: months, datasets },
+    data: { labels, datasets },
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -119,6 +140,142 @@ export function renderYearBalancesChart(canvasEl, monthData, curr, sel, cfg) {
           grid: { color: '#334155' },
           ticks: {
             color: '#94a3b8',
+            callback: v => curr + Number(v).toLocaleString()
+          }
+        }
+      }
+    }
+  });
+}
+
+let savingsDetailChartInstance = null;
+
+export function destroySavingsAccountChart() {
+  if (savingsDetailChartInstance) {
+    try {
+      savingsDetailChartInstance.destroy();
+    } catch (e) {
+      console.warn("Savings detail chart destroy error:", e);
+    }
+    savingsDetailChartInstance = null;
+  }
+}
+
+function buildSavingsDetailDatasets(chartData) {
+  const datasets = [];
+
+  // 1. Planned Target Curve
+  datasets.push({
+    label: '🎯 Planned Target',
+    data: chartData.planned,
+    borderColor: '#c084fc',
+    backgroundColor: 'rgba(192, 132, 252, 0.1)',
+    borderWidth: 2,
+    borderDash: [5, 4],
+    pointRadius: 3,
+    pointHoverRadius: 6,
+    tension: 0.25,
+    fill: false
+  });
+
+  // 2. Actual Check-Ins Curve (points up to latest actual)
+  const hasActuals = (chartData.actual || []).some(v => v !== null && v !== undefined);
+  if (hasActuals) {
+    datasets.push({
+      label: '📊 Actual Check-Ins',
+      data: chartData.actual,
+      borderColor: '#38bdf8',
+      backgroundColor: '#38bdf8',
+      borderWidth: 3,
+      pointRadius: 5,
+      pointHoverRadius: 8,
+      tension: 0.2,
+      fill: false
+    });
+  }
+
+  // 3. Trend Forecast (Dotted line extrapolated forward from latest actual)
+  const hasForecast = (chartData.forecast || []).some(v => v !== null && v !== undefined);
+  if (hasForecast) {
+    datasets.push({
+      label: '🔮 Trend Forecast (Based on Actuals)',
+      data: chartData.forecast,
+      borderColor: '#fbbf24',
+      backgroundColor: '#fbbf24',
+      borderWidth: 2.5,
+      borderDash: [6, 4],
+      pointRadius: 4,
+      pointHoverRadius: 7,
+      tension: 0.2,
+      fill: false
+    });
+  }
+
+  return datasets;
+}
+
+export function updateSavingsAccountChart(chartData, curr) {
+  if (!savingsDetailChartInstance) return false;
+  try {
+    savingsDetailChartInstance.data.labels = chartData.labels;
+    savingsDetailChartInstance.data.datasets = buildSavingsDetailDatasets(chartData);
+    savingsDetailChartInstance.update();
+    return true;
+  } catch (e) {
+    console.warn("Error updating savings detail chart:", e);
+    return false;
+  }
+}
+
+export function renderSavingsAccountChart(canvasEl, chartData, curr) {
+  if (!canvasEl) return;
+  destroySavingsAccountChart();
+
+  if (typeof Chart === 'undefined') {
+    canvasEl.parentElement.innerHTML = '<div style="padding:20px; color:var(--amber); text-align:center;">⚠️ Chart engine blocked by browser tracking prevention.</div>';
+    return;
+  }
+
+  try {
+    const existing = Chart.getChart(canvasEl);
+    if (existing) existing.destroy();
+  } catch (e) {}
+
+  const ctx = canvasEl.getContext('2d');
+  const labels = chartData.labels;
+  const datasets = buildSavingsDetailDatasets(chartData);
+
+  savingsDetailChartInstance = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          labels: { color: '#cbd5e1', boxWidth: 12, font: { size: 11.5, weight: '600' } }
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              let label = context.dataset.label || '';
+              if (label) label += ': ';
+              if (context.parsed.y !== null) {
+                label += curr + Number(context.parsed.y).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              }
+              return label;
+            }
+          }
+        }
+      },
+      scales: {
+        x: { grid: { color: 'rgba(255,255,255,0.06)' }, ticks: { color: '#94a3b8', font: { size: 11 } } },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.06)' },
+          ticks: {
+            color: '#94a3b8',
+            font: { size: 11 },
             callback: v => curr + Number(v).toLocaleString()
           }
         }

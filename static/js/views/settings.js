@@ -144,6 +144,35 @@ export function renderSettingsView(container) {
         </div>
       </div>
 
+      <!-- SLIDING MONTH WINDOW & AUTO-ARCHIVING -->
+      <div style="margin:20px 0 14px 0; padding:16px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:6px;">
+          <h4 style="margin:0; color:var(--curr-border); font-size:14px; display:flex; align-items:center; gap:6px;">
+            <span>🗓️</span> Month Navigation Window & Auto-Archiving
+          </h4>
+          <button type="button" class="btn secondary" style="font-size:11px; padding:3px 10px;" onclick="window.budgetApp.openArchiveManagerModal()">
+            📦 Archive & History Manager
+          </button>
+        </div>
+        <p style="font-size:12px; color:var(--text-muted); margin:0 0 14px 0;">
+          HABit automatically displays a rolling sliding window of month tabs based on your current budget period. Months older than your arrears threshold are automatically archived and hidden from tabs. You can also archive a month early from its overview.
+        </p>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap:14px; width:100%; box-sizing:border-box;">
+          <div class="form-group">
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Months in Advance (Future Tabs)</label>
+            <input type="number" id="cfg-months-advance" value="${cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12}" min="1" max="36" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted); display:block; margin-top:2px;">How many upcoming months to display ahead of today.</span>
+          </div>
+
+          <div class="form-group">
+            <label style="font-size:11px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Months in Arrears (Past Tabs Before Archive)</label>
+            <input type="number" id="cfg-months-arrears" value="${cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3}" min="0" max="36" style="width:100%;">
+            <span style="font-size:10px; color:var(--text-muted); display:block; margin-top:2px;">Past months kept visible before auto-archiving.</span>
+          </div>
+        </div>
+      </div>
+
       <!-- MULTI-USER & HOUSEHOLD TOGGLE -->
       <div style="margin:20px 0 14px 0; padding:14px; background:var(--panel-bg); border:1px solid var(--border); border-radius:var(--radius-card); width:100%; box-sizing:border-box;">
         <label style="font-size:13px; cursor:pointer; font-weight:700; display:flex; align-items:center; gap:8px; color:var(--curr-border);">
@@ -698,6 +727,73 @@ export function renderSettingsView(container) {
                 `).join('')}
               </div>
             `}
+          </div>
+        </div>
+
+        <!-- HOLIDAY & TRAVEL WINDOWS PANEL -->
+        <div class="panel" style="margin-top:20px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>🏖️</span> Holiday & Travel Windows
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Set date ranges and designated cards (e.g. Cornwall on Credit Card) so holiday spending automatically routes to Travel without distorting regular monthly living averages.
+              </p>
+            </div>
+            <button type="button" class="btn green" style="font-size:11px; padding:4px 12px;" onclick="window.budgetApp.openAddHolidayWindowModal()">
+              ➕ Add Holiday Window
+            </button>
+          </div>
+
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+            ${(() => {
+              const windows = cfg.holiday_windows || [];
+              const nowIso = new Date().toISOString().slice(0, 10);
+              if (windows.length === 0) {
+                return `
+                  <div style="font-size:11px; color:var(--text-muted); font-style:italic; padding:6px 0;">
+                    No holiday windows configured. Click "+ Add Holiday Window" above to set up trip dates.
+                  </div>
+                `;
+              }
+              return `
+                <div style="display:flex; flex-direction:column; gap:8px;">
+                  ${windows.map(w => {
+                    let statusBadge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted); font-size:10px;">Passed</span>';
+                    if (!w.enabled) {
+                      statusBadge = '<span class="badge" style="background:rgba(255,255,255,0.06); color:var(--text-muted); font-size:10px;">⏸️ Disabled</span>';
+                    } else if (nowIso >= w.start_date && nowIso <= w.end_date) {
+                      statusBadge = '<span class="badge" style="background:rgba(16,185,129,0.2); border:1px solid var(--green); color:var(--green); font-size:10px; font-weight:bold;">🟢 Active Now</span>';
+                    } else if (nowIso < w.start_date) {
+                      statusBadge = '<span class="badge" style="background:rgba(56,189,248,0.2); border:1px solid var(--primary, #38bdf8); color:var(--primary, #38bdf8); font-size:10px; font-weight:bold;">⏳ Upcoming</span>';
+                    }
+                    const catObj = (window.SPEND_CATEGORIES || []).find(c => c.id === (w.category || 'travel')) || { label: 'Travel', icon: '✈️' };
+
+                    return `
+                      <div style="background:var(--card-bg); border:1px solid var(--border); border-radius:6px; padding:8px 12px; display:flex; justify-content:space-between; align-items:center; gap:8px;">
+                        <div style="min-width:0; flex:1;">
+                          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            <strong style="color:var(--heading); font-size:13px;">${w.name}</strong>
+                            ${statusBadge}
+                          </div>
+                          <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                            📅 ${w.start_date} to ${w.end_date} • 💳 ${w.account || 'All Accounts'} • <span>${catObj.icon} ${catObj.label}</span>
+                          </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                          <label class="switch" style="transform:scale(0.8); margin:0;" title="${w.enabled ? 'Disable' : 'Enable'} this window">
+                            <input type="checkbox" ${w.enabled ? 'checked' : ''} onchange="window.budgetApp.toggleHolidayWindow('${w.id}')">
+                            <span class="slider round"></span>
+                          </label>
+                          <button type="button" class="del-btn" style="width:24px; height:24px; font-size:13px;" onclick="window.budgetApp.deleteHolidayWindow('${w.id}')" title="Delete Holiday Window">&times;</button>
+                        </div>
+                      </div>
+                    `;
+                  }).join('')}
+                </div>
+              `;
+            })()}
           </div>
         </div>
 

@@ -374,18 +374,62 @@ h1, h2, h3, h4, h5, h6 {
   margin-bottom: 0;
   height: 36px;
   min-height: 36px;
-  overflow-x: auto;
+  overflow: hidden;
   padding-bottom: 0;
-  -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
-  scrollbar-width: none;
-  scroll-snap-type: x proximity;
-  scroll-behavior: smooth;
   box-sizing: border-box;
+  width: 100%;
 }
 
 .nav-tabs::-webkit-scrollbar {
   display: none;
+}
+
+.desktop-nav-arrow {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: var(--card-bg, #1e293b);
+  border: 1px solid var(--border, #334155);
+  color: var(--text-muted, #94a3b8);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  box-sizing: border-box;
+  z-index: 2;
+  user-select: none;
+}
+
+.desktop-nav-arrow:hover:not(:disabled) {
+  color: var(--heading, #f8fafc);
+  border-color: var(--primary, #6366f1);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.08));
+  transform: scale(1.08);
+}
+
+.desktop-nav-arrow:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.desktop-nav-arrow:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.desktop-nav-arrow svg {
+  display: block;
+  pointer-events: none;
+}
+
+@media (min-width: 681px) {
+  .desktop-nav-arrow {
+    display: inline-flex;
+  }
 }
 
 .tab-btn {
@@ -429,11 +473,15 @@ h1, h2, h3, h4, h5, h6 {
   align-items: center;
   gap: 6px;
   height: 36px;
+  flex: 1 1 auto;
+  min-width: 0;
   overflow-x: auto;
   padding: 0;
   scrollbar-width: none;
+  scroll-snap-type: x proximity;
   scroll-behavior: smooth;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
   box-sizing: border-box;
 }
 
@@ -448,6 +496,12 @@ h1, h2, h3, h4, h5, h6 {
   font-size: 12.5px;
   border-radius: 9999px;
   box-sizing: border-box;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+
+.tab-btn.month-pill.active {
+  transform: scale(1.04);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* =========================================================
@@ -1565,6 +1619,102 @@ h1, h2, h3, h4, h5, h6 {
   height: 350px;
   margin-top: 12px;
   margin-bottom: 16px;
+}
+
+.trajectory-window-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  background: var(--bg-card, rgba(30, 41, 59, 0.5));
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  border-radius: 12px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+}
+
+.trajectory-range-badge {
+  background: var(--card-bg, #1e293b);
+  border: 1px solid var(--border, #334155);
+  border-radius: 9999px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--heading, #f8fafc);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  user-select: none;
+}
+
+.trajectory-slider-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+  max-width: 380px;
+}
+
+.trajectory-slider-container input[type="range"] {
+  flex: 1;
+  accent-color: var(--primary, #6366f1);
+  cursor: pointer;
+  height: 6px;
+  border-radius: 3px;
+}
+
+.savings-chart-pill-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  height: 32px;
+}
+
+.savings-pill {
+  font-size: 11.5px;
+  padding: 0 12px;
+  height: 26px;
+  line-height: 26px;
+}
+
+.spend-timespan-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.spend-range-badge {
+  background: var(--card-bg, #1e293b);
+  border: 1px solid var(--border, #334155);
+  border-radius: 9999px;
+  padding: 4px 14px;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--heading, #f8fafc);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  user-select: none;
+}
+
+@media (max-width: 680px) {
+  .spend-timespan-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .spend-timespan-bar > div {
+    justify-content: space-between;
+  }
 }
 
 .modal-overlay {
@@ -3591,35 +3741,83 @@ body.val-picker-mode {
    MOBILE GESTURES, PULL-TO-REFRESH & SLIDE TRANSITIONS
    ========================================================================== */
 
-/* Month Transition Slides */
-@keyframes monthSlideInFromRight {
+/* ==========================================================================
+   SMOOTH TWO-PHASE TAB EXIT & ENTER TRANSITIONS
+   ========================================================================== */
+
+@keyframes tabExitForward {
   0% {
-    opacity: 0.5;
-    transform: translateX(24px);
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
   100% {
-    opacity: 1;
-    transform: translateX(0);
+    opacity: 0;
+    transform: translate3d(-20px, 0, 0);
   }
 }
 
-@keyframes monthSlideInFromLeft {
+@keyframes tabExitBackward {
   0% {
-    opacity: 0.5;
-    transform: translateX(-24px);
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
   100% {
-    opacity: 1;
-    transform: translateX(0);
+    opacity: 0;
+    transform: translate3d(20px, 0, 0);
   }
 }
 
+@keyframes tabEnterForward {
+  0% {
+    opacity: 0;
+    transform: translate3d(22px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes tabEnterBackward {
+  0% {
+    opacity: 0;
+    transform: translate3d(-22px, 0, 0);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.tab-exit-forward {
+  animation: tabExitForward 0.22s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.tab-exit-backward {
+  animation: tabExitBackward 0.22s cubic-bezier(0.4, 0, 0.6, 1) forwards;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.tab-enter-forward {
+  animation: tabEnterForward 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+.tab-enter-backward {
+  animation: tabEnterBackward 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
+  will-change: transform, opacity;
+}
+
+/* Backward compatibility aliases */
 .month-slide-right {
-  animation: monthSlideInFromRight 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+  animation: tabEnterForward 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .month-slide-left {
-  animation: monthSlideInFromLeft 0.22s cubic-bezier(0.25, 1, 0.5, 1);
+  animation: tabEnterBackward 0.38s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Pull to Refresh Indicator */
@@ -5006,4 +5204,4 @@ body.global-edit-mode-active #pullToRefreshContainer {
   .forecast-spotlight-value {
     font-size: 14.5px;
   }
-}
+}

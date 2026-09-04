@@ -1,4 +1,4 @@
-import { appState, months } from './state.js';
+import { appState, months, getPrimarySection, getSlidingWindowMonths, getYearData, getCurrentPeriodMonthAndYear } from './state.js';
 
 let startX = 0;
 let startY = 0;
@@ -34,7 +34,7 @@ export function initMobileGestures() {
 
     // Exclude touches starting inside interactive or horizontally scrollable elements
     const target = e.target;
-    if (target.closest('.month-pills-bar, pre, table, .data-table, canvas, input, textarea, select, .calc-widget, #genericModal, #sideDrawer, .dropdown-content, .tile-drag-handle, .forecast-tile-wrapper, .widget-reorder-card, [draggable="true"]')) {
+    if (target.closest('.month-pills-bar, pre, table, .data-table, canvas, input, textarea, select, .calc-widget, #genericModal, #sideDrawer, .dropdown-content, .tile-drag-handle, .widget-reorder-card')) {
       return;
     }
     isSwiping = true;
@@ -140,30 +140,12 @@ export function initMobileGestures() {
       return;
     }
 
-    // C. Month-to-Month Swiping
-    const isMonthView = months.includes(appState.activeTab);
-    if (isMonthView && Math.abs(diffX) >= 55 && Math.abs(diffX) > Math.abs(diffY) * 1.7 && elapsed < 450) {
-      const curIdx = months.indexOf(appState.activeTab);
-      if (curIdx !== -1) {
-        if (diffX < 0) {
-          // Swipe Left -> Next Month
-          const nextIdx = (curIdx + 1) % 12;
-          appBody.classList.remove('month-slide-left', 'month-slide-right');
-          void appBody.offsetWidth;
-          appBody.classList.add('month-slide-right');
-          if (window.budgetApp && typeof window.budgetApp.setTab === 'function') {
-            window.budgetApp.setTab(months[nextIdx]);
-          }
-        } else {
-          // Swipe Right -> Prev Month
-          const prevIdx = (curIdx - 1 + 12) % 12;
-          appBody.classList.remove('month-slide-left', 'month-slide-right');
-          void appBody.offsetWidth;
-          appBody.classList.add('month-slide-left');
-          if (window.budgetApp && typeof window.budgetApp.setTab === 'function') {
-            window.budgetApp.setTab(months[prevIdx]);
-          }
-        }
+    // C. Tab-to-Tab Swiping within current active section (e.g. Dec 26 -> Jan 27, Overview -> Month 1)
+    if (Math.abs(diffX) >= 40 && Math.abs(diffX) > Math.abs(diffY) * 1.25 && elapsed < 650) {
+      if (diffX < 0) {
+        navigateTab('next');
+      } else if (diffX > 0) {
+        navigateTab('prev');
       }
     }
   }, { passive: true });
@@ -239,4 +221,179 @@ export function initMobileGestures() {
 
 if (typeof window !== 'undefined') {
   window.initMobileGestures = initMobileGestures;
+}
+
+export function getNavigableTabs() {
+  const activeSec = (typeof getPrimarySection === 'function')
+    ? getPrimarySection(appState.activeTab)
+    : (months.includes(appState.activeTab) ? 'monthly' : 'other');
+
+  let tabs = [];
+  if (activeSec === 'monthly') {
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: new Date().getFullYear() };
+    tabs.push({ tab: 'Overview', year: curPeriod.year });
+    const windowMonths = (typeof getSlidingWindowMonths === 'function')
+      ? getSlidingWindowMonths()
+      : [];
+    windowMonths.forEach(mObj => {
+      const yData = (typeof getYearData === 'function') ? getYearData(mObj.year) : null;
+      const md = (yData && yData.months && yData.months[mObj.month]) || {};
+      if (!md.archived) {
+        tabs.push({ tab: mObj.month, year: mObj.year });
+      }
+    });
+  } else if (activeSec === 'budgets') {
+    tabs = [
+      { tab: 'Budgets', year: appState.currentYear },
+      { tab: 'Bills', year: appState.currentYear }
+    ];
+  } else if (activeSec === 'analytics') {
+    tabs = [
+      { tab: 'Spend', year: appState.currentYear },
+      { tab: 'Year', year: appState.currentYear }
+    ];
+  }
+  return tabs;
+}
+
+export function navigateTab(direction) {
+  if (appState.globalEditMode) return false;
+
+  const tabs = getNavigableTabs();
+  if (!tabs || tabs.length <= 1) return false;
+
+  const curIdx = tabs.findIndex(t => {
+    if (t.tab === 'Overview') return appState.activeTab === 'Overview';
+    return t.tab === appState.activeTab && t.year === appState.currentYear;
+  });
+
+  if (curIdx === -1) return false;
+
+  if (direction === 'next' || direction === 1) {
+    if (curIdx < tabs.length - 1) {
+      const nextTab = tabs[curIdx + 1];
+      if (window.budgetApp && typeof window.budgetApp.setTab === 'function') {
+        window.budgetApp.setTab(nextTab.tab, nextTab.year);
+        return true;
+      }
+    }
+  } else if (direction === 'prev' || direction === -1) {
+    if (curIdx > 0) {
+      const prevTab = tabs[curIdx - 1];
+      if (window.budgetApp && typeof window.budgetApp.setTab === 'function') {
+        window.budgetApp.setTab(prevTab.tab, prevTab.year);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function updateDesktopNavArrows() {
+  if (typeof document === 'undefined') return;
+  const prevBtn = document.getElementById('desktopPrevTabBtn');
+  const nextBtn = document.getElementById('desktopNextTabBtn');
+  if (!prevBtn && !nextBtn) return;
+
+  const tabs = getNavigableTabs();
+  if (!tabs || tabs.length <= 1) {
+    if (prevBtn) {
+      prevBtn.disabled = true;
+      prevBtn.style.opacity = '0.35';
+      prevBtn.style.pointerEvents = 'none';
+      prevBtn.title = 'No previous tab';
+    }
+    if (nextBtn) {
+      nextBtn.disabled = true;
+      nextBtn.style.opacity = '0.35';
+      nextBtn.style.pointerEvents = 'none';
+      nextBtn.title = 'No next tab';
+    }
+    return;
+  }
+
+  const curIdx = tabs.findIndex(t => {
+    if (t.tab === 'Overview') return appState.activeTab === 'Overview';
+    return t.tab === appState.activeTab && t.year === appState.currentYear;
+  });
+
+  if (prevBtn) {
+    const hasPrev = curIdx > 0;
+    prevBtn.disabled = !hasPrev;
+    prevBtn.style.opacity = hasPrev ? '1' : '0.35';
+    prevBtn.style.pointerEvents = hasPrev ? 'auto' : 'none';
+    if (hasPrev) {
+      const prevT = tabs[curIdx - 1];
+      const prevLabel = prevT.tab === 'Overview' ? 'Overview' : (prevT.tab + (prevT.year ? ' ' + String(prevT.year).slice(2) : ''));
+      prevBtn.title = `Previous: ${prevLabel} (Left Arrow)`;
+    } else {
+      prevBtn.title = 'No previous tab';
+    }
+  }
+
+  if (nextBtn) {
+    const hasNext = curIdx !== -1 && curIdx < tabs.length - 1;
+    nextBtn.disabled = !hasNext;
+    nextBtn.style.opacity = hasNext ? '1' : '0.35';
+    nextBtn.style.pointerEvents = hasNext ? 'auto' : 'none';
+    if (hasNext) {
+      const nextT = tabs[curIdx + 1];
+      const nextLabel = nextT.tab === 'Overview' ? 'Overview' : (nextT.tab + (nextT.year ? ' ' + String(nextT.year).slice(2) : ''));
+      nextBtn.title = `Next: ${nextLabel} (Right Arrow)`;
+    } else {
+      nextBtn.title = 'No next tab';
+    }
+  }
+}
+
+export function initDesktopArrowNavigation() {
+  if (typeof window === 'undefined') return;
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+
+    // Do not trigger if typing in an input, textarea, select, or contenteditable
+    const activeEl = document.activeElement;
+    if (activeEl) {
+      const tag = activeEl.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || activeEl.isContentEditable) {
+        return;
+      }
+      if (activeEl.closest && (activeEl.closest('#budgetCalculatorWidget') || activeEl.closest('.calc-widget'))) {
+        return;
+      }
+    }
+
+    // Do not trigger if a modal or drawer is open
+    const modal = document.getElementById('genericModal');
+    if (modal && (modal.style.display === 'flex' || modal.classList.contains('visible'))) {
+      return;
+    }
+    const drawer = document.getElementById('sideDrawer');
+    if (drawer && drawer.classList.contains('open')) {
+      return;
+    }
+    const pinModal = document.getElementById('pinModal');
+    if (pinModal && pinModal.style.display === 'flex') {
+      return;
+    }
+
+    if (e.key === 'ArrowLeft') {
+      const handled = navigateTab('prev');
+      if (handled) e.preventDefault();
+    } else if (e.key === 'ArrowRight') {
+      const handled = navigateTab('next');
+      if (handled) e.preventDefault();
+    }
+  });
+}
+
+if (typeof window !== 'undefined') {
+  window.getNavigableTabs = getNavigableTabs;
+  window.navigateTab = navigateTab;
+  window.updateDesktopNavArrows = updateDesktopNavArrows;
+  window.initDesktopArrowNavigation = initDesktopArrowNavigation;
 }

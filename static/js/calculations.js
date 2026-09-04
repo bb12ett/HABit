@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, getAccountConfig, months, isAccountTrackedWeekly, isAccountIncludedInNet } from './state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, getAccountConfig, months, isAccountTrackedWeekly, isAccountIncludedInNet, getCurrentPeriodMonthAndYear, getMasterYearlyBudgets } from './state.js';
 
 export function getEaster(year) {
   const f = Math.floor,
@@ -568,7 +568,7 @@ export function getNextOccurrenceDate(r, fromDate = new Date(), year = appState.
 
   if (freq === 'monthly' || freq === 'quarterly' || freq === 'custom_months') {
     const stepMonths = freq === 'monthly' ? 1 : (freq === 'quarterly' ? 3 : intervalN);
-    const dueDay = parseInt(r.day_of_month || start.getDate() || 1, 10);
+    const dueDay = parseInt(r.due_day || r.day_of_month || (start ? start.getDate() : 1) || 1, 10);
     let curYear = start.getFullYear();
     let curMonth = start.getMonth();
 
@@ -654,31 +654,31 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   const savingsInflowFromSalary = {};
   const savingsInflowFromDD = {};
-  cfg.savings_accounts.forEach(acc => {
+  (cfg.savings_accounts || []).forEach(acc => {
     savingsInflowFromSalary[acc] = 0;
     savingsInflowFromDD[acc] = 0;
   });
 
   (md.deductions_list || []).forEach(d => {
-    if (cfg.savings_accounts.includes(d.target_account)) {
-      cfg.people.forEach(p => {
+    if ((cfg.savings_accounts || []).includes(d.target_account)) {
+      (cfg.people || []).forEach(p => {
         const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
         savingsInflowFromSalary[d.target_account] += amt || 0;
       });
     }
   });
   (md.direct_debits || []).forEach(dd => {
-    if (dd.transfer_to && cfg.savings_accounts.includes(dd.transfer_to)) {
+    if (dd.transfer_to && (cfg.savings_accounts || []).includes(dd.transfer_to)) {
       savingsInflowFromDD[dd.transfer_to] += Number(dd.amount) || 0;
     }
   });
 
   const cardAutoPayments = {};
-  cfg.credit_accounts.forEach(c => {
+  (cfg.credit_accounts || []).forEach(c => {
     if (c.autopay_enabled) {
       const openingDebt = Number(md.credit_data && md.credit_data[c.name] && md.credit_data[c.name].opening_spent) || 0;
       let payAmt = c.autopay_type === 'full' ? openingDebt : Math.min(openingDebt, Number(c.autopay_fixed_amt) || 0);
-      cardAutoPayments[c.name] = { payAmt, from: c.autopay_from || cfg.current_accounts[0] };
+      cardAutoPayments[c.name] = { payAmt, from: c.autopay_from || (cfg.current_accounts || [])[0] };
     }
   });
 
@@ -768,7 +768,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
       recurringIncomesThisMonth.forEach(r => {
         if (r.account === acc) bal += Number(r.amount) || 0;
       });
-      cfg.credit_accounts.forEach(c => {
+      (cfg.credit_accounts || []).forEach(c => {
         if (cardAutoPayments[c.name] && cardAutoPayments[c.name].from === acc) bal -= cardAutoPayments[c.name].payAmt;
       });
       schedule.weeks.forEach(wObj => {
@@ -786,7 +786,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     }
   });
 
-  cfg.credit_accounts.forEach(c => {
+  (cfg.credit_accounts || []).forEach(c => {
     let actAvail = lastActuals[`c_avail_${c.name}`];
     let actSpent = lastActuals[`c_spent_${c.name}`];
     if (actAvail !== "" && actAvail !== null && actAvail !== undefined) {
@@ -835,7 +835,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     }
   });
 
-  cfg.savings_accounts.forEach(acc => {
+  (cfg.savings_accounts || []).forEach(acc => {
     const s = (md.savings_data && md.savings_data[acc]) ? md.savings_data[acc] : { opening: 0 };
     const autoInflow = (savingsInflowFromSalary[acc] || 0) + (savingsInflowFromDD[acc] || 0);
     let directDebitOutflow = 0;
@@ -904,73 +904,138 @@ export function calculateAndSyncRollovers(year = appState.currentYear) {
   const creditAccounts = cfg.credit_accounts || [];
   const savingsAccounts = cfg.savings_accounts || [];
 
-  for (let i = 0; i < months.length - 1; i++) {
-    const curMonthName = months[i];
-    const nextMonthName = months[i + 1];
-    const closing = computeMonthClosing(curMonthName, i, year);
-    const nextMonthData = getMonthData(nextMonthName, year);
-
-    if (!nextMonthData.current_data) nextMonthData.current_data = {};
-    if (!nextMonthData.credit_data) nextMonthData.credit_data = {};
-    if (!nextMonthData.savings_data) nextMonthData.savings_data = {};
-
-    currentAccounts.forEach(acc => {
-      if (!nextMonthData.current_data[acc]) nextMonthData.current_data[acc] = {};
-      if (!nextMonthData.current_data[acc].user_edited) {
-        nextMonthData.current_data[acc].opening = (closing.current && closing.current[acc] !== undefined) ? closing.current[acc] : 0;
-      }
-    });
-
-    creditAccounts.forEach(c => {
-      const cName = c && c.name ? c.name : c;
-      if (!cName) return;
-      if (!nextMonthData.credit_data[cName]) nextMonthData.credit_data[cName] = {};
-      if (!nextMonthData.credit_data[cName].user_edited) {
-        nextMonthData.credit_data[cName].opening_spent = (closing.credit && closing.credit[cName] !== undefined) ? closing.credit[cName] : 0;
-      }
-    });
-
-    savingsAccounts.forEach(acc => {
-      if (!nextMonthData.savings_data[acc]) nextMonthData.savings_data[acc] = {};
-      if (!nextMonthData.savings_data[acc].user_edited) {
-        nextMonthData.savings_data[acc].opening = (closing.savings && closing.savings[acc] !== undefined) ? closing.savings[acc] : 0;
-      }
-    });
+  const yearsToSync = [];
+  if (appState.data && appState.data.years && typeof appState.data.years === 'object') {
+    const allNums = Object.keys(appState.data.years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
+    if (allNums.length > 0) {
+      yearsToSync.push(...Array.from(new Set(allNums)).sort((a, b) => a - b));
+    }
+  }
+  const targetY = parseInt(year, 10);
+  if (!isNaN(targetY) && !yearsToSync.includes(targetY)) {
+    yearsToSync.push(targetY);
+    yearsToSync.sort((a, b) => a - b);
+  }
+  if (yearsToSync.length === 0) {
+    yearsToSync.push(2026);
   }
 
-  // December -> Next Year January Rollover (if next year exists)
-  const nextYearNum = parseInt(year, 10) + 1;
-  const nextYearStr = String(nextYearNum);
-  if (appState.data && appState.data.years && appState.data.years[nextYearStr]) {
-    const decClosing = computeMonthClosing('Dec', 11, year);
-    const janNextData = getMonthData('Jan', nextYearNum);
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
 
-    if (!janNextData.current_data) janNextData.current_data = {};
-    if (!janNextData.credit_data) janNextData.credit_data = {};
-    if (!janNextData.savings_data) janNextData.savings_data = {};
+  for (const y of yearsToSync) {
+    for (let i = 0; i < months.length - 1; i++) {
+      const curMonthName = months[i];
+      const nextMonthName = months[i + 1];
+      const closing = computeMonthClosing(curMonthName, i, y);
+      const nextMonthData = getMonthData(nextMonthName, y);
 
-    currentAccounts.forEach(acc => {
-      if (!janNextData.current_data[acc]) janNextData.current_data[acc] = {};
-      if (!janNextData.current_data[acc].user_edited) {
-        janNextData.current_data[acc].opening = (decClosing.current && decClosing.current[acc] !== undefined) ? decClosing.current[acc] : 0;
+      if (!nextMonthData.current_data) nextMonthData.current_data = {};
+      if (!nextMonthData.credit_data) nextMonthData.credit_data = {};
+      if (!nextMonthData.savings_data) nextMonthData.savings_data = {};
+
+      // In all future projection periods, opening balances MUST always roll over
+      // continuously from the preceding month's closing cashflow.
+      // Clear any stale, cloned, or accidental user_edited flags on future months.
+      const isFuturePeriod = (y > curPeriod.year) || (y === curPeriod.year && (i + 1) > curPeriod.monthIdx);
+      if (isFuturePeriod) {
+        currentAccounts.forEach(acc => {
+          if (nextMonthData.current_data && nextMonthData.current_data[acc]) {
+            delete nextMonthData.current_data[acc].user_edited;
+          }
+        });
+        creditAccounts.forEach(c => {
+          const cName = c && c.name ? c.name : c;
+          if (cName && nextMonthData.credit_data && nextMonthData.credit_data[cName]) {
+            delete nextMonthData.credit_data[cName].user_edited;
+          }
+        });
+        savingsAccounts.forEach(acc => {
+          if (nextMonthData.savings_data && nextMonthData.savings_data[acc]) {
+            delete nextMonthData.savings_data[acc].user_edited;
+          }
+        });
       }
-    });
 
-    creditAccounts.forEach(c => {
-      const cName = c && c.name ? c.name : c;
-      if (!cName) return;
-      if (!janNextData.credit_data[cName]) janNextData.credit_data[cName] = {};
-      if (!janNextData.credit_data[cName].user_edited) {
-        janNextData.credit_data[cName].opening_spent = (decClosing.credit && decClosing.credit[cName] !== undefined) ? decClosing.credit[cName] : 0;
-      }
-    });
+      currentAccounts.forEach(acc => {
+        if (!nextMonthData.current_data[acc]) nextMonthData.current_data[acc] = {};
+        if (!nextMonthData.current_data[acc].user_edited) {
+          nextMonthData.current_data[acc].opening = (closing.current && closing.current[acc] !== undefined) ? closing.current[acc] : 0;
+        }
+      });
 
-    savingsAccounts.forEach(acc => {
-      if (!janNextData.savings_data[acc]) janNextData.savings_data[acc] = {};
-      if (!janNextData.savings_data[acc].user_edited) {
-        janNextData.savings_data[acc].opening = (decClosing.savings && decClosing.savings[acc] !== undefined) ? decClosing.savings[acc] : 0;
+      creditAccounts.forEach(c => {
+        const cName = c && c.name ? c.name : c;
+        if (!cName) return;
+        if (!nextMonthData.credit_data[cName]) nextMonthData.credit_data[cName] = {};
+        if (!nextMonthData.credit_data[cName].user_edited) {
+          nextMonthData.credit_data[cName].opening_spent = (closing.credit && closing.credit[cName] !== undefined) ? closing.credit[cName] : 0;
+        }
+      });
+
+      savingsAccounts.forEach(acc => {
+        if (!nextMonthData.savings_data[acc]) nextMonthData.savings_data[acc] = {};
+        if (!nextMonthData.savings_data[acc].user_edited) {
+          nextMonthData.savings_data[acc].opening = (closing.savings && closing.savings[acc] !== undefined) ? closing.savings[acc] : 0;
+        }
+      });
+    }
+
+    // December -> Next Year January Rollover (if next year exists)
+    const nextYearNum = y + 1;
+    const nextYearStr = String(nextYearNum);
+    if (appState.data && appState.data.years && appState.data.years[nextYearStr]) {
+      const decClosing = computeMonthClosing('Dec', 11, y);
+      const janNextData = getMonthData('Jan', nextYearNum);
+
+      if (!janNextData.current_data) janNextData.current_data = {};
+      if (!janNextData.credit_data) janNextData.credit_data = {};
+      if (!janNextData.savings_data) janNextData.savings_data = {};
+
+      const isJanFuture = nextYearNum > curPeriod.year;
+      if (isJanFuture) {
+        currentAccounts.forEach(acc => {
+          if (janNextData.current_data && janNextData.current_data[acc]) {
+            delete janNextData.current_data[acc].user_edited;
+          }
+        });
+        creditAccounts.forEach(c => {
+          const cName = c && c.name ? c.name : c;
+          if (cName && janNextData.credit_data && janNextData.credit_data[cName]) {
+            delete janNextData.credit_data[cName].user_edited;
+          }
+        });
+        savingsAccounts.forEach(acc => {
+          if (janNextData.savings_data && janNextData.savings_data[acc]) {
+            delete janNextData.savings_data[acc].user_edited;
+          }
+        });
       }
-    });
+
+      currentAccounts.forEach(acc => {
+        if (!janNextData.current_data[acc]) janNextData.current_data[acc] = {};
+        if (!janNextData.current_data[acc].user_edited) {
+          janNextData.current_data[acc].opening = (decClosing.current && decClosing.current[acc] !== undefined) ? decClosing.current[acc] : 0;
+        }
+      });
+
+      creditAccounts.forEach(c => {
+        const cName = c && c.name ? c.name : c;
+        if (!cName) return;
+        if (!janNextData.credit_data[cName]) janNextData.credit_data[cName] = {};
+        if (!janNextData.credit_data[cName].user_edited) {
+          janNextData.credit_data[cName].opening_spent = (decClosing.credit && decClosing.credit[cName] !== undefined) ? decClosing.credit[cName] : 0;
+        }
+      });
+
+      savingsAccounts.forEach(acc => {
+        if (!janNextData.savings_data[acc]) janNextData.savings_data[acc] = {};
+        if (!janNextData.savings_data[acc].user_edited) {
+          janNextData.savings_data[acc].opening = (decClosing.savings && decClosing.savings[acc] !== undefined) ? decClosing.savings[acc] : 0;
+        }
+      });
+    }
   }
 }
 
@@ -994,7 +1059,9 @@ if (typeof window !== 'undefined') {
 
 export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) {
   const yData = getYearData(year);
-  const budgets = yData.yearly_budgets || [];
+  const budgets = (typeof getMasterYearlyBudgets === 'function')
+    ? getMasterYearlyBudgets()
+    : ((yData && yData.yearly_budgets) || getSettings().yearly_budgets || []);
   const schedule = calculateMonthSchedule(year, mIdx);
   const items = [];
   const startMs = new Date(schedule.startDate.getFullYear(), schedule.startDate.getMonth(), schedule.startDate.getDate(), 0, 0, 0).getTime();
@@ -1039,10 +1106,25 @@ export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.curren
 
     // 2. Planned remaining deductions
     if (strategy === 'monthly_spread' && remaining > 0) {
-      const endMIdx = b.end_date ? new Date(b.end_date.includes('T') ? b.end_date : b.end_date + 'T12:00:00').getMonth() : 11;
-      if (mIdx <= endMIdx) {
-        const numMonths = Math.max(1, endMIdx + 1);
-        const spreadAmt = remaining / numMonths;
+      let targetYear = parseInt(year, 10);
+      let targetMIdx = 11;
+      if (b.end_date) {
+        const eParts = String(b.end_date).split('T')[0].split('-');
+        if (eParts.length >= 2) {
+          targetYear = parseInt(eParts[0], 10);
+          targetMIdx = parseInt(eParts[1], 10) - 1;
+        }
+      }
+      const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+        ? getCurrentPeriodMonthAndYear()
+        : { year: parseInt(year, 10), monthIdx: mIdx };
+      const curTotalM = curPeriod.year * 12 + curPeriod.monthIdx;
+      const targetTotalM = targetYear * 12 + targetMIdx;
+      const thisMonthTotalM = parseInt(year, 10) * 12 + mIdx;
+
+      if (thisMonthTotalM >= curTotalM && thisMonthTotalM <= targetTotalM) {
+        const totalRemainingMonths = Math.max(1, targetTotalM - curTotalM + 1);
+        const spreadAmt = remaining / totalRemainingMonths;
         const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
         items.push({
           desc: `🎯 ${b.name} (Monthly Spread)`,
@@ -1097,15 +1179,17 @@ export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.curren
 }
 
 
-export function detectCurrentMonthAndWeek(year = appState.currentYear) {
+export function detectCurrentMonthAndWeek(year = null) {
   const now = new Date();
+  const realCurrentYear = now.getFullYear();
+  const y = (year !== null && year !== undefined) ? parseInt(year, 10) : realCurrentYear;
   const nowMs = now.getTime();
   const cfg = getSettings();
   const pDay = cfg.payday_day || 26;
   const country = cfg.bank_holiday_country || 'uk_ew';
 
   for (let m = 0; m < 12; m++) {
-    const sched = calculateMonthSchedule(year, m, pDay, country);
+    const sched = calculateMonthSchedule(y, m, pDay, country);
     const sTime = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0).getTime();
     const eTime = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59).getTime();
 
@@ -1124,7 +1208,7 @@ export function detectCurrentMonthAndWeek(year = appState.currentYear) {
   }
 
   const curMonthIdx = now.getMonth();
-  const sched = calculateMonthSchedule(year, curMonthIdx, pDay, country);
+  const sched = calculateMonthSchedule(y, curMonthIdx, pDay, country);
   return { month: months[curMonthIdx], monthIdx: curMonthIdx, week: 'Week 1', schedule: sched };
 }
 
@@ -1852,6 +1936,28 @@ export function categorizeTransaction(t, customRules = {}) {
   const merchant = (t.merchant_name || '').toLowerCase();
   const fullText = `${payee} ${rawInfo} ${creditor} ${merchant}`;
 
+  // 0. Holiday & Travel Window auto-classification
+  const cfg = (typeof getSettings === 'function') ? getSettings() : {};
+  const holidayWindows = (customRules && customRules.holiday_windows) || cfg.holiday_windows || [];
+  if (t.booking_date && Array.isArray(holidayWindows) && holidayWindows.length > 0) {
+    const tIso = String(t.booking_date).slice(0, 10);
+    const tAcc = (t.account_name || '').toLowerCase();
+    const isPayoff = fullText.includes('halifax clarity cr') || fullText.includes('credit card pymt') || fullText.includes('credit card payment') || fullText.includes('payment received') || fullText.includes('pmnt-icdt') || fullText.includes('salary');
+
+    if (!isPayoff) {
+      for (const hw of holidayWindows) {
+        if (!hw.enabled) continue;
+        if (hw.start_date && hw.end_date && tIso >= hw.start_date && tIso <= hw.end_date) {
+          const hwAcc = (hw.account || '').toLowerCase();
+          if (!hwAcc || hwAcc === 'all' || hwAcc === 'all accounts' || tAcc.includes(hwAcc) || hwAcc.includes(tAcc)) {
+            t.holiday_window_name = hw.name || 'Holiday Window';
+            return getCategoryById(hw.category || 'travel');
+          }
+        }
+      }
+    }
+  }
+
   // 1. User custom merchant rules (highest priority after manual assignment)
   for (const [pattern, catId] of Object.entries(customRules || {})) {
     if (pattern && fullText.includes(pattern.toLowerCase())) {
@@ -1937,7 +2043,6 @@ export function categorizeTransaction(t, customRules = {}) {
 
   // 7. Household Members & Self-Transfers:
   // Detects payments between household members, account owners, and family surnames
-  const cfg = (typeof getSettings === 'function') ? getSettings() : {};
   const householdMembers = Array.isArray(cfg.people) ? cfg.people : [];
   const recognizedNames = new Set();
 
@@ -1984,39 +2089,92 @@ export function categorizeTransaction(t, customRules = {}) {
   return getCategoryById('general');
 }
 
-export function calculateCategoryBreakdown(transactions, timeframe = 'this_month', accountFilter = 'all', activeUser = 'all', customRules = {}) {
+export function calculateCategoryBreakdown(transactions, timeframe = 'this_month', accountFilter = 'all', activeUser = 'all', customRules = {}, customRange = null) {
   const now = new Date();
   const curYear = now.getFullYear();
   const curMonth = now.getMonth();
 
   let startDate = null;
-  let endDate = new Date(curYear, curMonth, now.getDate(), 23, 59, 59);
+  let endDate = new Date(curYear, curMonth, now.getDate(), 23, 59, 59, 999);
 
-  if (timeframe === 'active_week') {
-    const day = now.getDay();
-    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
-    startDate = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0);
+  if (timeframe === 'custom' && customRange && customRange.startDate && customRange.endDate) {
+    const sParts = String(customRange.startDate).split('T')[0].split('-');
+    const eParts = String(customRange.endDate).split('T')[0].split('-');
+    startDate = new Date(parseInt(sParts[0], 10), parseInt(sParts[1], 10) - 1, parseInt(sParts[2], 10), 0, 0, 0, 0);
+    endDate = new Date(parseInt(eParts[0], 10), parseInt(eParts[1], 10) - 1, parseInt(eParts[2], 10), 23, 59, 59, 999);
+  } else if (timeframe === 'active_week') {
+    let weekFound = false;
+    try {
+      const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+        ? getCurrentPeriodMonthAndYear()
+        : { year: curYear, monthIdx: curMonth };
+      const detected = (typeof detectCurrentMonthAndWeek === 'function')
+        ? detectCurrentMonthAndWeek(cur.year)
+        : null;
+      if (detected && detected.schedule && detected.schedule.weeks) {
+        const activeWeekObj = detected.schedule.weeks.find(w => w.name === detected.week) || detected.schedule.weeks[0];
+        if (activeWeekObj) {
+          startDate = new Date(activeWeekObj.startDate.getFullYear(), activeWeekObj.startDate.getMonth(), activeWeekObj.startDate.getDate(), 0, 0, 0, 0);
+          endDate = new Date(activeWeekObj.endDate.getFullYear(), activeWeekObj.endDate.getMonth(), activeWeekObj.endDate.getDate(), 23, 59, 59, 999);
+          weekFound = true;
+        }
+      }
+    } catch (e) {}
+    if (!weekFound) {
+      const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      startDate = new Date(now.getFullYear(), now.getMonth(), diff, 0, 0, 0, 0);
+      endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6, 23, 59, 59, 999);
+    }
   } else if (timeframe === 'this_month') {
-    startDate = new Date(curYear, curMonth, 1, 0, 0, 0);
+    const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: curYear, monthIdx: curMonth };
+    const sched = calculateMonthSchedule(cur.year, cur.monthIdx);
+    startDate = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0, 0);
+    endDate = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59, 999);
   } else if (timeframe === 'last_month') {
-    startDate = new Date(curYear, curMonth - 1, 1, 0, 0, 0);
-    endDate = new Date(curYear, curMonth, 0, 23, 59, 59);
+    const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: curYear, monthIdx: curMonth };
+    const prevTotal = cur.year * 12 + cur.monthIdx - 1;
+    const prevY = Math.floor(prevTotal / 12);
+    const prevM = ((prevTotal % 12) + 12) % 12;
+    const sched = calculateMonthSchedule(prevY, prevM);
+    startDate = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0, 0);
+    endDate = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59, 999);
+  } else if (timeframe === 'last_7_days') {
+    startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+    startDate.setHours(0, 0, 0, 0);
   } else if (timeframe === 'last_30_days') {
     startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    startDate.setHours(0, 0, 0, 0);
+  } else if (timeframe === 'last_90_days') {
+    startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
+    startDate.setHours(0, 0, 0, 0);
+  } else if (timeframe === 'rolling_12_months') {
+    startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
   } else if (timeframe === 'year_to_date') {
-    startDate = new Date(curYear, 0, 1, 0, 0, 0);
+    startDate = new Date(curYear, 0, 1, 0, 0, 0, 0);
+  } else if (timeframe === 'all_time') {
+    startDate = null;
+    endDate = null;
   } else {
-    startDate = new Date(curYear, curMonth, 1, 0, 0, 0);
+    startDate = new Date(curYear, curMonth, 1, 0, 0, 0, 0);
+    endDate = new Date(curYear, curMonth + 1, 0, 23, 59, 59, 999);
   }
+
+  const sStr = startDate ? `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')}` : null;
+  const eStr = endDate ? `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}` : null;
 
   const filtered = (transactions || []).filter(t => {
     const rawAmt = Number(t.amount || 0);
     if (Math.abs(rawAmt) < 0.001) return false;
 
     if (t.booking_date) {
-      const tDate = new Date(t.booking_date);
-      if (startDate && tDate < startDate) return false;
-      if (endDate && tDate > endDate) return false;
+      const tDateStr = String(t.booking_date).slice(0, 10);
+      if (sStr && tDateStr < sStr) return false;
+      if (eStr && tDateStr > eStr) return false;
     }
 
     if (accountFilter && accountFilter !== 'all') {
@@ -2098,6 +2256,16 @@ export function calculateCategoryBreakdown(transactions, timeframe = 'this_month
     .map(([name, amount]) => ({ name, amount }))
     .sort((a, b) => b.amount - a.amount)
     .slice(0, 8);
+
+  if (!startDate && filtered.length > 0) {
+    const sortedDates = filtered.map(t => t.booking_date ? t.booking_date.slice(0, 10) : '').filter(Boolean).sort();
+    if (sortedDates.length > 0) {
+      const minParts = sortedDates[0].split('-');
+      startDate = new Date(parseInt(minParts[0], 10), parseInt(minParts[1], 10) - 1, parseInt(minParts[2], 10), 0, 0, 0, 0);
+      const maxParts = sortedDates[sortedDates.length - 1].split('-');
+      endDate = new Date(parseInt(maxParts[0], 10), parseInt(maxParts[1], 10) - 1, parseInt(maxParts[2], 10), 23, 59, 59, 999);
+    }
+  }
 
   return {
     filteredTransactions: filtered.map(t => ({ ...t, assignedCategory: categorizeTransaction(t, customRules), is_offset: Number(t.amount || 0) > 0 })),

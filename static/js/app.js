@@ -21,7 +21,11 @@ import {
   unlockUser,
   lockAllUsers,
   getActiveUser,
-  setActiveUser
+  setActiveUser,
+  getSlidingWindowMonths,
+  getCurrentPeriodMonthAndYear,
+  isItemActiveInMonth,
+  getRecurringIncomes
 } from './state.js';
 
 import {
@@ -98,16 +102,34 @@ import {
   openDebugLogModal,
   openDisclaimerModal,
   openRecategorizeModal,
-  openManualBillMatchModal
+  openHolidayWindowsModal,
+  openAddHolidayWindowModal,
+  openManualBillMatchModal,
+  openYearOverviewAccountFilterModal,
+  saveYearOverviewFilter
 } from './views/modals.js';
 
 import { renderOverviewView } from './views/overview.js';
 import { renderAccountsView } from './views/accounts.js';
 import { renderBudgetsView } from './views/budgets.js';
 import { renderBillsView } from './views/bills.js';
-import { renderYearOverviewView } from './views/year_overview.js';
+import {
+  renderYearOverviewView,
+  shiftTrajectoryWindow,
+  setTrajectoryWindowStart,
+  resetTrajectoryWindow,
+  updateTrajectoryViewData,
+  selectSavingsChartAccount
+} from './views/year_overview.js';
 import { renderSettingsView } from './views/settings.js';
-import { renderSpendAnalyticsView } from './views/spend_analytics.js';
+import {
+  renderSpendAnalyticsView,
+  setSpendAnalyticsTimeframe,
+  setSpendCustomDateRange,
+  shiftSpendTimeframe,
+  resetSpendTimeframe,
+  setSpendQuickOffset
+} from './views/spend_analytics.js';
 import {
   renderForecastOverviewView,
   flipForecastTile,
@@ -161,7 +183,7 @@ import {
   initCalculator
 } from './views/calculator.js';
 
-import { initMobileGestures } from './gestures.js';
+import { initMobileGestures, initDesktopArrowNavigation, navigateTab, updateDesktopNavArrows } from './gestures.js';
 
 ﻿
 
@@ -213,17 +235,17 @@ export function updateTopBarTitle() {
     desktopTitle = `${fullMonth} ${yr}`;
     mobileTitle = `${appState.activeTab} ${shortYr}`;
   } else if (appState.activeTab === 'Year') {
-    desktopTitle = `Annual Trajectory ${yr}`;
-    mobileTitle = `Annual ${shortYr}`;
+    desktopTitle = 'Annual Trajectory';
+    mobileTitle = 'Annual Trajectory';
   } else if (appState.activeTab === 'Budgets') {
-    desktopTitle = `Budgets & Occasions ${yr}`;
-    mobileTitle = `Budgets ${shortYr}`;
+    desktopTitle = 'Budgets & Occasions';
+    mobileTitle = 'Budgets';
   } else if (appState.activeTab === 'Bills') {
-    desktopTitle = `Scheduled Bills ${yr}`;
-    mobileTitle = `Bills ${shortYr}`;
+    desktopTitle = 'Scheduled Bills';
+    mobileTitle = 'Bills';
   } else if (appState.activeTab === 'Spend') {
-    desktopTitle = `Live Spend & Categories ${yr}`;
-    mobileTitle = `Live Spend ${shortYr}`;
+    desktopTitle = 'Live Spend & Categories';
+    mobileTitle = 'Live Spend';
   } else if (appState.activeTab === 'Settings') {
     desktopTitle = 'Settings & Tools';
     mobileTitle = 'Settings';
@@ -237,26 +259,56 @@ export function updateTopBarTitle() {
 
 export function renderYearMenu() {
   updateTopBarTitle();
-  const disp = document.getElementById('currentYearDisplay');
-  if (disp) {
-    const fullYr = String(appState.currentYear);
-    const shortYr = `'${fullYr.slice(-2)}`;
-    disp.innerHTML = `<span class="year-full">${fullYr}</span><span class="year-short">${shortYr}</span>`;
+}
+
+export function syncSlidingWindowAutoArchive() {
+  if (!appState.data || !appState.data.years) return;
+  const cfg = getSettings();
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const current = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  const currentTotalM = current.year * 12 + current.monthIdx;
+  const cutoffM = currentTotalM - arr;
+
+  // 1. Auto-archive any month strictly older than cutoffM
+  Object.keys(appState.data.years).forEach(yStr => {
+    const yNum = parseInt(yStr, 10);
+    if (isNaN(yNum)) return;
+    const yData = appState.data.years[yStr];
+    if (!yData.months) yData.months = {};
+
+    months.forEach((mName, mIdx) => {
+      const monthTotalM = yNum * 12 + mIdx;
+      if (monthTotalM < cutoffM) {
+        if (!yData.months[mName]) {
+          yData.months[mName] = {};
+        }
+        if (!yData.months[mName].manually_unarchived) {
+          yData.months[mName].archived = true;
+        }
+      }
+    });
+  });
+
+  // 2. Ensure all months in the active window [currentTotalM - arr ... currentTotalM + adv] exist
+  for (let k = -arr; k <= adv; k++) {
+    const t = currentTotalM + k;
+    const y = Math.floor(t / 12);
+    const mIdx = ((t % 12) + 12) % 12;
+    const mName = months[mIdx];
+    getMonthData(mName, y);
   }
-  const yData = getYearData();
-  const archiveBtn = document.getElementById('archiveYearActionBtn');
-  if (archiveBtn) {
-    archiveBtn.innerText = yData.archived ? '📦 Unarchive Year' : '📦 Archive Year';
-  }
-  
-  const unarchivedYears = Object.keys(appState.data.years || {}).filter(y => !appState.data.years[y].archived).sort((a, b) => a - b);
-  if (!unarchivedYears.includes(String(appState.currentYear))) unarchivedYears.push(String(appState.currentYear));
-  
-  const yearListEl = document.getElementById('yearListOptions');
-  if (yearListEl) {
-    yearListEl.innerHTML = unarchivedYears.map(y => `
-      <button onclick="window.budgetApp.switchYear(${y})">${y == appState.currentYear ? '✓ ' : ''}${y}</button>
-    `).join('');
+
+  // 3. If currently viewed month was auto-archived, switch to Overview
+  if (months.includes(appState.activeTab)) {
+    const yData = appState.data?.years?.[String(appState.currentYear)];
+    const md = yData?.months?.[appState.activeTab];
+    if (md && md.archived) {
+      appState.activeTab = 'Overview';
+    }
   }
 }
 
@@ -439,42 +491,119 @@ export function renderNav() {
   const navTabsEl = document.getElementById('navTabs');
   if (!navTabsEl) return;
 
+  const prevArrowHtml = `
+    <button class="desktop-nav-arrow prev" id="desktopPrevTabBtn" onclick="window.budgetApp.navigateTab('prev')" title="Previous Tab (Left Arrow)" aria-label="Previous tab">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="15 18 9 12 15 6"></polyline>
+      </svg>
+    </button>
+  `;
+  const nextArrowHtml = `
+    <button class="desktop-nav-arrow next" id="desktopNextTabBtn" onclick="window.budgetApp.navigateTab('next')" title="Next Tab (Right Arrow)" aria-label="Next tab">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 18 15 12 9 6"></polyline>
+      </svg>
+    </button>
+  `;
+
   if (activeSec === 'monthly') {
-    const yData = getYearData();
-    let html = `<div class="month-pills-bar">`;
-    html += `<button class="tab-btn month-pill ${appState.activeTab === 'Overview' ? 'active' : ''}" onclick="window.budgetApp.setTab('Overview')">⚡ Overview</button>`;
-    months.forEach(m => {
-      const md = yData.months[m] || {};
-      if (md.archived) return;
-      html += `<button class="tab-btn month-pill ${m === appState.activeTab ? 'active' : ''}" onclick="window.budgetApp.setTab('${m}')">${m}</button>`;
+    const existingBar = navTabsEl.querySelector('.month-pills-bar[data-section="monthly"]');
+    const windowMonths = typeof getSlidingWindowMonths === 'function' ? getSlidingWindowMonths() : [];
+    const visibleMonths = windowMonths.filter(mObj => {
+      const yData = getYearData(mObj.year);
+      const md = (yData && yData.months && yData.months[mObj.month]) || {};
+      return !md.archived;
     });
-    html += `</div>`;
-    navTabsEl.innerHTML = html;
-    scrollToActiveMonthPill(true);
+
+    let canReuse = false;
+    if (existingBar && navTabsEl.querySelector('#desktopPrevTabBtn') && navTabsEl.querySelector('#desktopNextTabBtn')) {
+      const pills = existingBar.querySelectorAll('.tab-btn.month-pill');
+      if (pills.length === visibleMonths.length + 1) {
+        canReuse = true;
+        for (let i = 0; i < visibleMonths.length; i++) {
+          const p = pills[i + 1];
+          if (p.getAttribute('data-month') !== visibleMonths[i].month ||
+              p.getAttribute('data-year') !== String(visibleMonths[i].year)) {
+            canReuse = false;
+            break;
+          }
+        }
+      }
+    }
+
+    if (canReuse) {
+      const pills = existingBar.querySelectorAll('.tab-btn.month-pill');
+      pills.forEach(p => {
+        const m = p.getAttribute('data-month');
+        const y = p.getAttribute('data-year');
+        const isActive = (m === 'Overview' && appState.activeTab === 'Overview') ||
+                         (m === appState.activeTab && String(y) === String(appState.currentYear));
+        p.classList.toggle('active', isActive);
+      });
+      scrollToActiveMonthPill(true);
+      updateDesktopNavArrows();
+    } else {
+      let html = prevArrowHtml;
+      html += `<div class="month-pills-bar" data-section="monthly">`;
+      html += `<button class="tab-btn month-pill ${appState.activeTab === 'Overview' ? 'active' : ''}" data-month="Overview" onclick="window.budgetApp.setTab('Overview')">⚡ Overview</button>`;
+      visibleMonths.forEach(mObj => {
+        const isActive = (appState.activeTab === mObj.month && appState.currentYear === mObj.year);
+        html += `<button class="tab-btn month-pill ${isActive ? 'active' : ''}" data-month="${mObj.month}" data-year="${mObj.year}" onclick="window.budgetApp.setTab('${mObj.month}', ${mObj.year})">${mObj.label}</button>`;
+      });
+      html += `</div>`;
+      html += nextArrowHtml;
+      navTabsEl.innerHTML = html;
+      scrollToActiveMonthPill(false);
+      updateDesktopNavArrows();
+    }
   } else if (activeSec === 'budgets') {
-    let html = `
-      <div class="month-pills-bar">
-        <button class="tab-btn month-pill ${appState.activeTab === 'Budgets' ? 'active' : ''}" onclick="window.budgetApp.setTab('Budgets')">
-          🎯 Budgets & Occasions
-        </button>
-        <button class="tab-btn month-pill ${appState.activeTab === 'Bills' ? 'active' : ''}" onclick="window.budgetApp.setTab('Bills')">
-          📅 Scheduled & Recurring Bills
-        </button>
-      </div>
-    `;
-    navTabsEl.innerHTML = html;
+    const existingBar = navTabsEl.querySelector('.month-pills-bar[data-section="budgets"]');
+    if (existingBar && navTabsEl.querySelector('#desktopPrevTabBtn') && navTabsEl.querySelector('#desktopNextTabBtn')) {
+      const pBudgets = existingBar.querySelector('[data-tab="Budgets"]');
+      const pBills = existingBar.querySelector('[data-tab="Bills"]');
+      if (pBudgets) pBudgets.classList.toggle('active', appState.activeTab === 'Budgets');
+      if (pBills) pBills.classList.toggle('active', appState.activeTab === 'Bills');
+      updateDesktopNavArrows();
+    } else {
+      let html = prevArrowHtml;
+      html += `
+        <div class="month-pills-bar" data-section="budgets">
+          <button class="tab-btn month-pill ${appState.activeTab === 'Budgets' ? 'active' : ''}" data-tab="Budgets" onclick="window.budgetApp.setTab('Budgets')">
+            🎯 Budgets & Occasions
+          </button>
+          <button class="tab-btn month-pill ${appState.activeTab === 'Bills' ? 'active' : ''}" data-tab="Bills" onclick="window.budgetApp.setTab('Bills')">
+            📅 Scheduled & Recurring Bills
+          </button>
+        </div>
+      `;
+      html += nextArrowHtml;
+      navTabsEl.innerHTML = html;
+      updateDesktopNavArrows();
+    }
   } else if (activeSec === 'analytics') {
-    let html = `
-      <div class="month-pills-bar">
-        <button class="tab-btn month-pill ${appState.activeTab === 'Spend' ? 'active' : ''}" onclick="window.budgetApp.setTab('Spend')">
-          🛒 Live Spend & Categories
-        </button>
-        <button class="tab-btn month-pill ${appState.activeTab === 'Year' ? 'active' : ''}" onclick="window.budgetApp.setTab('Year')">
-          📊 Annual Trajectory
-        </button>
-      </div>
-    `;
-    navTabsEl.innerHTML = html;
+    const existingBar = navTabsEl.querySelector('.month-pills-bar[data-section="analytics"]');
+    if (existingBar && navTabsEl.querySelector('#desktopPrevTabBtn') && navTabsEl.querySelector('#desktopNextTabBtn')) {
+      const pSpend = existingBar.querySelector('[data-tab="Spend"]');
+      const pYear = existingBar.querySelector('[data-tab="Year"]');
+      if (pSpend) pSpend.classList.toggle('active', appState.activeTab === 'Spend');
+      if (pYear) pYear.classList.toggle('active', appState.activeTab === 'Year');
+      updateDesktopNavArrows();
+    } else {
+      let html = prevArrowHtml;
+      html += `
+        <div class="month-pills-bar" data-section="analytics">
+          <button class="tab-btn month-pill ${appState.activeTab === 'Spend' ? 'active' : ''}" data-tab="Spend" onclick="window.budgetApp.setTab('Spend')">
+            🛒 Live Spend & Categories
+          </button>
+          <button class="tab-btn month-pill ${appState.activeTab === 'Year' ? 'active' : ''}" data-tab="Year" onclick="window.budgetApp.setTab('Year')">
+            📊 Annual Trajectory
+          </button>
+        </div>
+      `;
+      html += nextArrowHtml;
+      navTabsEl.innerHTML = html;
+      updateDesktopNavArrows();
+    }
   } else if (activeSec === 'settings') {
     navTabsEl.innerHTML = `
       <div class="settings-subnav-title">
@@ -729,16 +858,34 @@ export function scrollToCurrentWeek(smooth = true) {
 }
 
 export function scrollToActiveMonthPill(smooth = true) {
-  setTimeout(() => {
-    const activePill = document.querySelector('.month-pills-bar .tab-btn.month-pill.active');
-    if (activePill) {
-      activePill.scrollIntoView({
-        behavior: smooth ? 'smooth' : 'auto',
-        block: 'nearest',
-        inline: 'center'
-      });
+  const doScroll = () => {
+    const bar = document.querySelector('.month-pills-bar');
+    if (!bar) return;
+    const activePill = bar.querySelector('.tab-btn.month-pill.active');
+    if (!activePill) return;
+
+    const pillLeft = activePill.offsetLeft;
+    const pillWidth = activePill.offsetWidth;
+    const barWidth = bar.clientWidth;
+    const targetScrollLeft = Math.max(0, pillLeft - (barWidth / 2) + (pillWidth / 2));
+
+    if (Math.abs(bar.scrollLeft - targetScrollLeft) > 2) {
+      if (typeof bar.scrollTo === 'function') {
+        bar.scrollTo({
+          left: targetScrollLeft,
+          behavior: smooth ? 'smooth' : 'auto'
+        });
+      } else {
+        bar.scrollLeft = targetScrollLeft;
+      }
     }
-  }, 80);
+  };
+
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(doScroll);
+  } else {
+    setTimeout(doScroll, 20);
+  }
 }
 
 export function toggleDesktopRail(e) {
@@ -854,6 +1001,7 @@ export async function init() {
     bindGlobalEvents();
     initCalculator();
     initMobileGestures();
+    initDesktopArrowNavigation();
 
     // Fetch and initialize dynamic categories from API/cache
     try {
@@ -880,6 +1028,7 @@ export async function init() {
         window.budgetApp.applyOpenBankingToCheckins();
       }
 
+      syncSlidingWindowAutoArchive();
       calculateAndSyncRollovers();
       renderYearMenu();
       renderNav();
@@ -917,6 +1066,7 @@ export async function init() {
 }
 
 // Attach all functions to window.budgetApp
+let tabTransitionTimer = null;
 window.budgetApp = {
   init,
   renderContent,
@@ -985,34 +1135,111 @@ window.budgetApp = {
   copyCalcResult,
   initCalculator,
 
-  setTab(tabName, shouldScrollToWeek = false) {
-    const isSwitching = appState.activeTab !== tabName;
-    appState.activeTab = tabName;
-    if (months.includes(tabName) || tabName === 'Overview') {
-      appState.lastActiveMonth = tabName;
-    } else if (tabName === 'Budgets' || tabName === 'Bills') {
-      appState.lastBudgetsTab = tabName;
-    } else if (tabName === 'Spend' || tabName === 'Year') {
-      appState.lastAnalyticsTab = tabName;
+  setTab(tabName, year = null, shouldScrollToWeek = false) {
+    if (typeof year === 'boolean') {
+      shouldScrollToWeek = year;
+      year = null;
     }
-    renderNav();
-    renderContent();
+    let targetY = year ? parseInt(year, 10) : null;
+    if (tabName === 'Overview' && !targetY) {
+      const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+        ? getCurrentPeriodMonthAndYear()
+        : { year: new Date().getFullYear() };
+      targetY = curPeriod.year;
+    }
+    const isSwitching = (appState.activeTab !== tabName) || (targetY && targetY !== appState.currentYear);
+    const prevM = appState.lastActiveMonth || appState.activeTab;
+    const prevY = appState.lastActiveYear || appState.currentYear;
+    const container = (typeof document !== 'undefined') ? document.getElementById('appBody') : null;
 
-    if (isSwitching) {
-      const container = document.getElementById('appBody');
-      if (container) container.scrollTop = 0;
+    if (tabTransitionTimer) {
+      clearTimeout(tabTransitionTimer);
+      tabTransitionTimer = null;
+    }
+
+    if (!isSwitching || !container) {
+      if (targetY && !isNaN(targetY)) {
+        appState.currentYear = targetY;
+      }
+      appState.activeTab = tabName;
+      if (months.includes(tabName) || tabName === 'Overview') {
+        appState.lastActiveMonth = tabName;
+        if (targetY) appState.lastActiveYear = targetY;
+      } else if (tabName === 'Budgets' || tabName === 'Bills') {
+        appState.lastBudgetsTab = tabName;
+      } else if (tabName === 'Spend' || tabName === 'Year') {
+        appState.lastAnalyticsTab = tabName;
+      }
+      renderNav();
+      renderContent();
+      if (shouldScrollToWeek) scrollToCurrentWeek(true);
+      return;
+    }
+
+    // Calculate forward vs backward
+    const newY = targetY || appState.currentYear;
+    const prevMIdx = months.indexOf(prevM);
+    const newMIdx = months.indexOf(tabName);
+    const prevRank = prevY * 12 + (prevMIdx >= 0 ? prevMIdx : -1);
+    const newRank = newY * 12 + (newMIdx >= 0 ? newMIdx : -1);
+    let isForward = newRank > prevRank;
+    if (prevRank === newRank) {
+      const sectionTabsOrder = ['Budgets', 'Bills', 'Spend', 'Year'];
+      const pOrder = sectionTabsOrder.indexOf(prevM);
+      const nOrder = sectionTabsOrder.indexOf(tabName);
+      if (pOrder !== -1 && nOrder !== -1) {
+        isForward = nOrder > pOrder;
+      }
+    }
+
+    const exitClass = isForward ? 'tab-exit-forward' : 'tab-exit-backward';
+    const enterClass = isForward ? 'tab-enter-forward' : 'tab-enter-backward';
+
+    // Phase 1: Smooth Exit of current screen
+    container.classList.remove('tab-exit-forward', 'tab-exit-backward', 'tab-enter-forward', 'tab-enter-backward', 'month-slide-left', 'month-slide-right');
+    void container.offsetWidth;
+    container.classList.add(exitClass);
+
+    tabTransitionTimer = setTimeout(() => {
+      // Phase 2: Update state, render new content & Smooth Enter
+      if (targetY && !isNaN(targetY)) {
+        appState.currentYear = targetY;
+      }
+      appState.activeTab = tabName;
+      if (months.includes(tabName) || tabName === 'Overview') {
+        appState.lastActiveMonth = tabName;
+        if (targetY) appState.lastActiveYear = targetY;
+      } else if (tabName === 'Budgets' || tabName === 'Bills') {
+        appState.lastBudgetsTab = tabName;
+      } else if (tabName === 'Spend' || tabName === 'Year') {
+        appState.lastAnalyticsTab = tabName;
+      }
+
+      renderNav();
+      renderContent();
+      container.scrollTop = 0;
       window.scrollTo(0, 0);
-    }
 
-    if (shouldScrollToWeek) {
-      scrollToCurrentWeek(true);
-    }
+      container.classList.remove(exitClass);
+      void container.offsetWidth;
+      container.classList.add(enterClass);
+
+      if (shouldScrollToWeek) {
+        scrollToCurrentWeek(true);
+      }
+
+      tabTransitionTimer = setTimeout(() => {
+        container.classList.remove(enterClass);
+        tabTransitionTimer = null;
+      }, 400);
+    }, 200);
   },
 
   setPrimarySection(section) {
     if (section === 'monthly') {
       const targetMonth = appState.lastActiveMonth || 'Overview';
-      this.setTab(targetMonth);
+      const targetYear = appState.lastActiveYear || appState.currentYear;
+      this.setTab(targetMonth, targetYear);
     } else if (section === 'budgets') {
       const target = appState.lastBudgetsTab || 'Budgets';
       this.setTab(target);
@@ -1025,6 +1252,15 @@ window.budgetApp = {
   },
 
   scrollToCurrentWeek,
+  navigateTab: (direction) => navigateTab(direction),
+  updateDesktopNavArrows: () => updateDesktopNavArrows(),
+  shiftTrajectoryWindow: (delta) => shiftTrajectoryWindow(delta),
+  setTrajectoryWindowStart: (idx) => setTrajectoryWindowStart(idx),
+  resetTrajectoryWindow: () => resetTrajectoryWindow(),
+  updateTrajectoryViewData: () => updateTrajectoryViewData(),
+  selectSavingsChartAccount: (acc) => selectSavingsChartAccount(acc),
+  openYearOverviewAccountFilterModal: () => openYearOverviewAccountFilterModal(),
+  saveYearOverviewFilter: () => saveYearOverviewFilter(),
 
   handleLogoClick(e) {
     if (e && typeof e.stopPropagation === 'function') {
@@ -1370,10 +1606,11 @@ window.budgetApp = {
     this.updateOpenBankingBalanceType(balanceType);
   },
 
-  setSpendAnalyticsTimeframe(timeframe) {
-    appState.spendFilterTimeframe = timeframe;
-    renderContent();
-  },
+  setSpendAnalyticsTimeframe: (timeframe) => setSpendAnalyticsTimeframe(timeframe),
+  setSpendCustomDateRange: (startDate, endDate) => setSpendCustomDateRange(startDate, endDate),
+  shiftSpendTimeframe: (direction) => shiftSpendTimeframe(direction),
+  resetSpendTimeframe: () => resetSpendTimeframe(),
+  setSpendQuickOffset: (offsetType) => setSpendQuickOffset(offsetType),
 
   setSpendAnalyticsAccount(account) {
     appState.spendFilterAccount = account;
@@ -1434,6 +1671,166 @@ window.budgetApp = {
 
   openRecategorizeModal(txnId, merchantName, currentCatId) {
     openRecategorizeModal(txnId, merchantName, currentCatId);
+  },
+
+  openHolidayWindowsModal() {
+    openHolidayWindowsModal();
+  },
+
+  openAddHolidayWindowModal() {
+    openAddHolidayWindowModal();
+  },
+
+  async confirmSaveHolidayWindow() {
+    const nameEl = document.getElementById('hwNameInput');
+    const startEl = document.getElementById('hwStartDateInput');
+    const endEl = document.getElementById('hwEndDateInput');
+    const accEl = document.getElementById('hwAccountSelect');
+    const catEl = document.getElementById('hwCategorySelect');
+
+    const name = nameEl ? nameEl.value.trim() : 'Holiday';
+    const startDate = startEl ? startEl.value : '';
+    const endDate = endEl ? endEl.value : '';
+    const account = accEl ? accEl.value : 'Credit Card';
+    const category = catEl ? catEl.value : 'travel';
+
+    if (!name || !startDate || !endDate) {
+      alert('Please fill in Holiday Name, Start Date, and End Date.');
+      return;
+    }
+
+    if (startDate > endDate) {
+      alert('Start Date cannot be after End Date.');
+      return;
+    }
+
+    const cfg = getSettings();
+    if (!Array.isArray(cfg.holiday_windows)) {
+      cfg.holiday_windows = [];
+    }
+
+    cfg.holiday_windows.push({
+      id: 'hw_' + Date.now(),
+      name,
+      start_date: startDate,
+      end_date: endDate,
+      account,
+      category,
+      enabled: true
+    });
+
+    if (cfg.onboarding_complete) {
+      await saveBudget(appState.data);
+    }
+
+    renderContent();
+    openHolidayWindowsModal();
+  },
+
+  async toggleHolidayWindow(id) {
+    const cfg = getSettings();
+    const hw = (cfg.holiday_windows || []).find(w => w.id === id);
+    if (hw) {
+      hw.enabled = !hw.enabled;
+      if (cfg.onboarding_complete) {
+        await saveBudget(appState.data);
+      }
+      renderContent();
+      openHolidayWindowsModal();
+    }
+  },
+
+  async deleteHolidayWindow(id) {
+    if (!confirm('Are you sure you want to remove this Holiday Window?')) return;
+    const cfg = getSettings();
+    if (Array.isArray(cfg.holiday_windows)) {
+      cfg.holiday_windows = cfg.holiday_windows.filter(w => w.id !== id);
+      if (cfg.onboarding_complete) {
+        await saveBudget(appState.data);
+      }
+      renderContent();
+      openHolidayWindowsModal();
+    }
+  },
+
+  // Batch / Mass Recategorize handlers
+  toggleSpendSelectAll(checked) {
+    if (!this._selectedSpendTxnIds) {
+      this._selectedSpendTxnIds = new Set();
+    }
+    const checkboxes = document.querySelectorAll('.spend-row-select');
+    checkboxes.forEach(cb => {
+      cb.checked = checked;
+      const tid = cb.dataset.txnid;
+      if (tid) {
+        if (checked) this._selectedSpendTxnIds.add(tid);
+        else this._selectedSpendTxnIds.delete(tid);
+      }
+    });
+    this.updateSpendBatchBar();
+  },
+
+  toggleSpendRowSelect(txnId, checked) {
+    if (!this._selectedSpendTxnIds) {
+      this._selectedSpendTxnIds = new Set();
+    }
+    if (checked) {
+      this._selectedSpendTxnIds.add(txnId);
+    } else {
+      this._selectedSpendTxnIds.delete(txnId);
+    }
+    const selectAll = document.getElementById('spendSelectAll');
+    const checkboxes = document.querySelectorAll('.spend-row-select');
+    if (selectAll) {
+      selectAll.checked = checkboxes.length > 0 && Array.from(checkboxes).every(c => c.checked);
+    }
+    this.updateSpendBatchBar();
+  },
+
+  clearSpendSelection() {
+    if (this._selectedSpendTxnIds) {
+      this._selectedSpendTxnIds.clear();
+    }
+    const selectAll = document.getElementById('spendSelectAll');
+    if (selectAll) selectAll.checked = false;
+    document.querySelectorAll('.spend-row-select').forEach(cb => cb.checked = false);
+    this.updateSpendBatchBar();
+  },
+
+  updateSpendBatchBar() {
+    const bar = document.getElementById('spendBatchBar');
+    const countEl = document.getElementById('spendBatchCount');
+    const count = (this._selectedSpendTxnIds && this._selectedSpendTxnIds.size) || 0;
+    if (bar && countEl) {
+      countEl.innerText = count;
+      bar.style.display = count > 0 ? 'flex' : 'none';
+    }
+  },
+
+  async applyBatchRecategorize() {
+    const catSelect = document.getElementById('spendBatchCatSelect');
+    if (!catSelect) return;
+    const newCat = catSelect.value;
+    const selectedIds = this._selectedSpendTxnIds || new Set();
+    if (selectedIds.size === 0) return;
+
+    const allTxns = (appState.data && appState.data.open_banking_transactions) || [];
+    let updatedCount = 0;
+    for (const t of allTxns) {
+      if (selectedIds.has(String(t.transaction_id))) {
+        t.category = newCat;
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount > 0) {
+      if (getSettings().onboarding_complete) {
+        await saveBudget(appState.data);
+      }
+    }
+
+    this.clearSpendSelection();
+    renderContent();
   },
 
   exportCategorizedTransactionsCsv() {
@@ -2083,10 +2480,7 @@ window.budgetApp = {
   },
 
   promptCreateNewYear() {
-    document.querySelector('.dropdown')?.classList.remove('open');
-    const nextYear = appState.currentYear + 1;
-    const yr = prompt(`Enter new 4-digit Year to initialize:`, String(nextYear));
-    if (yr) this.createNewBudgetYear(yr);
+    // Deprecated: new years are automatically initialized and windowed by the application
   },
 
   startOnboarding() {
@@ -2270,8 +2664,7 @@ window.budgetApp = {
       return;
     }
 
-    const birthdays = getBirthdays(appState.currentYear);
-    birthdays.push({
+    const newBday = {
       name,
       month,
       day,
@@ -2279,7 +2672,21 @@ window.budgetApp = {
       account: acc,
       category: cat,
       transactions: []
-    });
+    };
+
+    const cfg = getSettings();
+    if (!cfg.birthdays) cfg.birthdays = [];
+    cfg.birthdays.push(newBday);
+
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(y => {
+        const yData = appState.data.years[y];
+        if (!yData.birthdays) yData.birthdays = [];
+        if (!yData.birthdays.some(b => b.name === name)) {
+          yData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+        }
+      });
+    }
 
     closeModal();
     calculateAndSyncRollovers();
@@ -2298,11 +2705,39 @@ window.budgetApp = {
     const birthdays = getBirthdays(appState.currentYear);
     const b = birthdays[bIdx];
     if (b) {
+      const oldName = b.name;
       b.name = nameEl.value.trim() || b.name;
       if (monthEl) b.month = monthEl.value;
       if (dayEl) b.day = parseInt(dayEl.value, 10) || 1;
       if (budgetEl) b.budget_amount = parseFloat(budgetEl.value) || 0;
       if (accEl) b.account = accEl.value;
+
+      const cfg = getSettings();
+      if (cfg.birthdays) {
+        const mb = cfg.birthdays.find(item => item.name === oldName) || cfg.birthdays[bIdx];
+        if (mb) {
+          mb.name = b.name;
+          mb.month = b.month;
+          mb.day = b.day;
+          mb.budget_amount = b.budget_amount;
+          mb.account = b.account;
+        }
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(y => {
+          const yData = appState.data.years[y];
+          if (yData.birthdays) {
+            const yB = yData.birthdays.find(item => item.name === oldName);
+            if (yB) {
+              yB.name = b.name;
+              yB.month = b.month;
+              yB.day = b.day;
+              yB.budget_amount = b.budget_amount;
+              yB.account = b.account;
+            }
+          }
+        });
+      }
 
       closeModal();
       calculateAndSyncRollovers();
@@ -2314,7 +2749,25 @@ window.budgetApp = {
   async deleteBirthday(bIdx) {
     if (!confirm("Are you sure you want to delete this birthday?")) return;
     const birthdays = getBirthdays(appState.currentYear);
+    const b = birthdays[bIdx];
+    const delName = b ? b.name : null;
     birthdays.splice(bIdx, 1);
+
+    const cfg = getSettings();
+    if (cfg.birthdays && delName) {
+      const cIdx = cfg.birthdays.findIndex(item => item.name === delName);
+      if (cIdx >= 0) cfg.birthdays.splice(cIdx, 1);
+    }
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(y => {
+        const yData = appState.data.years[y];
+        if (yData.birthdays && delName) {
+          const yIdx = yData.birthdays.findIndex(item => item.name === delName);
+          if (yIdx >= 0) yData.birthdays.splice(yIdx, 1);
+        }
+      });
+    }
+
     calculateAndSyncRollovers();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -2574,6 +3027,43 @@ window.budgetApp = {
     if (intBox) intBox.style.display = (freqVal === 'custom_weeks' || freqVal === 'custom_months') ? 'block' : 'none';
   },
 
+  async syncMasterBillsAcrossHorizon() {
+    const cfg = getSettings();
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: appState.currentYear, monthIdx: new Date().getMonth() };
+    const curTotalM = Number(curPeriod.year) * 12 + curPeriod.monthIdx;
+
+    const masterDDs = cfg.default_direct_debits || [];
+    const masterPIs = cfg.default_payments_in || [];
+
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(yStr => {
+        const y = parseInt(yStr, 10);
+        const yData = appState.data.years[yStr];
+        if (!yData.months) return;
+
+        months.forEach((mName, mIdx) => {
+          const targetTotalM = y * 12 + mIdx;
+          if (targetTotalM >= curTotalM) {
+            if (!yData.months[mName]) yData.months[mName] = {};
+            const md = yData.months[mName];
+
+            const activeMasterDDs = masterDDs.filter(dd => isItemActiveInMonth(dd, mName, y));
+            md.direct_debits = JSON.parse(JSON.stringify(activeMasterDDs));
+
+            const activeMasterPIs = masterPIs.filter(pi => isItemActiveInMonth(pi, mName, y));
+            md.payments_in = JSON.parse(JSON.stringify(activeMasterPIs));
+          }
+        });
+      });
+    }
+
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
   async confirmAddFullScheduledBill() {
     const typeEl = document.getElementById('new-sched-type');
     const descEl = document.getElementById('new-sched-desc');
@@ -2581,6 +3071,7 @@ window.budgetApp = {
     const freqEl = document.getElementById('new-sched-freq');
     const dayEl = document.getElementById('new-sched-due-day');
     const startDateEl = document.getElementById('new-sched-start-date');
+    const endDateEl = document.getElementById('new-sched-end-date');
     const monthEl = document.getElementById('new-sched-month');
     const intEl = document.getElementById('new-sched-interval');
     const accEl = document.getElementById('new-sched-acc');
@@ -2593,143 +3084,264 @@ window.budgetApp = {
     const amt = parseFloat(amtEl.value);
     const freq = freqEl ? freqEl.value : 'monthly';
     const dueDay = dayEl ? parseInt(dayEl.value, 10) || 1 : 1;
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
-    const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
-    const month = monthEl ? monthEl.value : currentActiveMonth;
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: appState.currentYear, monthIdx: new Date().getMonth(), month: months[new Date().getMonth()] };
+    const month = monthEl ? monthEl.value : curPeriod.month;
     const interval = intEl ? parseInt(intEl.value, 10) || 1 : 1;
     const acc = accEl ? accEl.value : getSettings().current_accounts[0];
     const transferTo = (transEl && !isIncome) ? transEl.value : 'none';
     const holidayRule = holidayRuleEl ? holidayRuleEl.value : (isIncome ? 'previous' : 'following');
     const catEl = document.getElementById('new-sched-cat');
     const schedCat = (!isIncome && catEl) ? catEl.value : (isIncome ? null : 'bills');
+    const startDateVal = (startDateEl && startDateEl.value) ? startDateEl.value : null;
+    const endDateVal = (endDateEl && endDateEl.value) ? endDateEl.value : null;
 
     if (!desc || isNaN(amt) || amt <= 0) {
       alert("Please enter a description and valid positive amount.");
       return;
     }
 
-    const yData = getYearData(appState.currentYear);
     const cfg = getSettings();
-    const mIdx = months.indexOf(currentActiveMonth);
+    const curTotalM = Number(curPeriod.year) * 12 + curPeriod.monthIdx;
 
     if (isIncome) {
       if (freq === 'monthly') {
-        const newPI = { desc, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule };
+        const newPI = { desc, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal, end_date: endDateVal };
         if (!cfg.default_payments_in) cfg.default_payments_in = [];
         cfg.default_payments_in.push(newPI);
 
-        for (let i = Math.max(0, mIdx); i < 12; i++) {
-          const mName = months[i];
-          if (yData.months && yData.months[mName]) {
-            if (!yData.months[mName].payments_in) yData.months[mName].payments_in = [];
-            yData.months[mName].payments_in.push({ ...newPI });
-          }
-        }
-        const mData = getMonthData(currentActiveMonth);
-        if (!mData.payments_in.some(p => p.desc === desc && p.due_day === dueDay && p.amount === amt)) {
-          mData.payments_in.push({ ...newPI });
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const y = parseInt(yStr, 10);
+            const yData = appState.data.years[yStr];
+            if (!yData.months) return;
+            months.forEach((mName, mIdx) => {
+              const targetTotalM = y * 12 + mIdx;
+              if (targetTotalM >= curTotalM && isItemActiveInMonth(newPI, mName, y)) {
+                if (!yData.months[mName]) yData.months[mName] = {};
+                if (!yData.months[mName].payments_in) yData.months[mName].payments_in = [];
+                if (!yData.months[mName].payments_in.some(p => p.desc === desc && p.due_day === dueDay)) {
+                  yData.months[mName].payments_in.push({ ...newPI });
+                }
+              }
+            });
+          });
         }
       } else if (freq === 'yearly') {
-        if (!yData.yearly_income) yData.yearly_income = [];
-        yData.yearly_income.push({ desc, month, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule });
-      } else {
-        const startDateVal = (startDateEl && startDateEl.value) ? startDateEl.value : `${appState.currentYear}-01-01`;
-        const parsedStartDate = new Date(startDateVal.includes('T') ? startDateVal : startDateVal + 'T00:00:00');
-        const startDay = !isNaN(parsedStartDate.getDate()) ? parsedStartDate.getDate() : dueDay;
+        const newYI = { desc, month, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal, end_date: endDateVal };
+        if (!cfg.default_yearly_income) cfg.default_yearly_income = [];
+        cfg.default_yearly_income.push(newYI);
 
-        const recurringIncomes = (typeof getRecurringIncomes === 'function') ? getRecurringIncomes(appState.currentYear) : (getYearData().recurring_incomes || []);
-        recurringIncomes.push({
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yData = appState.data.years[yStr];
+            if (!yData.yearly_income) yData.yearly_income = [];
+            if (!yData.yearly_income.some(yi => yi.desc === desc && yi.month === month)) {
+              yData.yearly_income.push({ ...newYI });
+            }
+          });
+        }
+      } else {
+        const startDay = startDateVal ? (new Date(startDateVal.includes('T') ? startDateVal : startDateVal + 'T00:00:00').getDate() || dueDay) : dueDay;
+        const newRI = {
           desc,
           amount: amt,
           frequency: freq,
           interval_n: interval,
           day_of_month: startDay,
-          start_date: startDateVal,
+          start_date: startDateVal || `${curPeriod.year}-01-01`,
+          end_date: endDateVal,
           account: acc,
           is_income: true,
           holiday_rule: holidayRule,
           category: schedCat
-        });
+        };
+        if (!cfg.recurring_incomes) cfg.recurring_incomes = [];
+        cfg.recurring_incomes.push(newRI);
+
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yData = appState.data.years[yStr];
+            if (!yData.recurring_incomes) yData.recurring_incomes = [];
+            if (!yData.recurring_incomes.some(ri => ri.desc === desc)) {
+              yData.recurring_incomes.push({ ...newRI });
+            }
+          });
+        }
       }
     } else {
       if (freq === 'monthly') {
-        const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat };
+        const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat, start_date: startDateVal, end_date: endDateVal };
         if (!cfg.default_direct_debits) cfg.default_direct_debits = [];
         cfg.default_direct_debits.push(newDD);
 
-        for (let i = Math.max(0, mIdx); i < 12; i++) {
-          const mName = months[i];
-          if (yData.months && yData.months[mName]) {
-            if (!yData.months[mName].direct_debits) yData.months[mName].direct_debits = [];
-            yData.months[mName].direct_debits.push({ ...newDD });
-          }
-        }
-        const mData = getMonthData(currentActiveMonth);
-        if (!mData.direct_debits.some(d => d.desc === desc && d.due_day === dueDay && d.amount === amt)) {
-          mData.direct_debits.push({ ...newDD });
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const y = parseInt(yStr, 10);
+            const yData = appState.data.years[yStr];
+            if (!yData.months) return;
+            months.forEach((mName, mIdx) => {
+              const targetTotalM = y * 12 + mIdx;
+              if (targetTotalM >= curTotalM && isItemActiveInMonth(newDD, mName, y)) {
+                if (!yData.months[mName]) yData.months[mName] = {};
+                if (!yData.months[mName].direct_debits) yData.months[mName].direct_debits = [];
+                if (!yData.months[mName].direct_debits.some(d => d.desc === desc && d.due_day === dueDay)) {
+                  yData.months[mName].direct_debits.push({ ...newDD });
+                }
+              }
+            });
+          });
         }
       } else if (freq === 'yearly') {
-        if (!yData.yearly_recurring) yData.yearly_recurring = [];
-        yData.yearly_recurring.push({ desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat });
-      } else {
-        const startDateVal = (startDateEl && startDateEl.value) ? startDateEl.value : `${appState.currentYear}-01-01`;
-        const parsedStartDate = new Date(startDateVal.includes('T') ? startDateVal : startDateVal + 'T00:00:00');
-        const startDay = !isNaN(parsedStartDate.getDate()) ? parsedStartDate.getDate() : dueDay;
+        const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat, start_date: startDateVal, end_date: endDateVal };
+        if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+        cfg.default_yearly_recurring.push(newYR);
 
-        const recurring = getRecurringPayments(appState.currentYear);
-        recurring.push({
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yData = appState.data.years[yStr];
+            if (!yData.yearly_recurring) yData.yearly_recurring = [];
+            if (!yData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+              yData.yearly_recurring.push({ ...newYR });
+            }
+          });
+        }
+      } else {
+        const startDay = startDateVal ? (new Date(startDateVal.includes('T') ? startDateVal : startDateVal + 'T00:00:00').getDate() || dueDay) : dueDay;
+        const newRP = {
           desc,
           amount: amt,
           frequency: freq,
           interval_n: interval,
           day_of_month: startDay,
-          start_date: startDateVal,
+          start_date: startDateVal || `${curPeriod.year}-01-01`,
+          end_date: endDateVal,
           account: acc,
           transfer_to: transferTo,
           holiday_rule: holidayRule,
           category: schedCat
-        });
+        };
+        if (!cfg.recurring_payments) cfg.recurring_payments = [];
+        cfg.recurring_payments.push(newRP);
+
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yData = appState.data.years[yStr];
+            if (!yData.recurring_payments) yData.recurring_payments = [];
+            if (!yData.recurring_payments.some(rp => rp.desc === desc)) {
+              yData.recurring_payments.push({ ...newRP });
+            }
+          });
+        }
       }
     }
 
     descEl.value = '';
     amtEl.value = '';
+    if (startDateEl) startDateEl.value = '';
+    if (endDateEl) endDateEl.value = '';
     calculateAndSyncRollovers();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
   async editFullScheduledBill(sourceType, sourceIdx, field, value) {
-    const activeTab = months.includes(appState.activeTab) ? appState.activeTab : 'Jan';
+    const cfg = getSettings();
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: appState.currentYear, monthIdx: new Date().getMonth() };
+    const curTotalM = Number(curPeriod.year) * 12 + curPeriod.monthIdx;
+
     if (sourceType === 'direct_debit') {
-      const mData = getMonthData(activeTab);
-      if (mData.direct_debits && mData.direct_debits[sourceIdx]) {
-        mData.direct_debits[sourceIdx][field] = value;
+      let oldDesc = null;
+      if (cfg.default_direct_debits && cfg.default_direct_debits[sourceIdx]) {
+        oldDesc = cfg.default_direct_debits[sourceIdx].desc;
+        cfg.default_direct_debits[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const y = parseInt(yStr, 10);
+          const yData = appState.data.years[yStr];
+          if (!yData.months) return;
+          months.forEach((mName, mIdx) => {
+            const targetTotalM = y * 12 + mIdx;
+            if (targetTotalM >= curTotalM && yData.months[mName]?.direct_debits) {
+              const dds = yData.months[mName].direct_debits;
+              const targetItem = (oldDesc ? dds.find(d => d.desc === oldDesc) : null) || dds[sourceIdx];
+              if (targetItem) targetItem[field] = value;
+            }
+          });
+        });
       }
     } else if (sourceType === 'monthly_payment_in') {
-      const mData = getMonthData(activeTab);
-      if (mData.payments_in && mData.payments_in[sourceIdx]) {
-        mData.payments_in[sourceIdx][field] = value;
+      let oldDesc = null;
+      if (cfg.default_payments_in && cfg.default_payments_in[sourceIdx]) {
+        oldDesc = cfg.default_payments_in[sourceIdx].desc;
+        cfg.default_payments_in[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const y = parseInt(yStr, 10);
+          const yData = appState.data.years[yStr];
+          if (!yData.months) return;
+          months.forEach((mName, mIdx) => {
+            const targetTotalM = y * 12 + mIdx;
+            if (targetTotalM >= curTotalM && yData.months[mName]?.payments_in) {
+              const pis = yData.months[mName].payments_in;
+              const targetItem = (oldDesc ? pis.find(p => p.desc === oldDesc) : null) || pis[sourceIdx];
+              if (targetItem) targetItem[field] = value;
+            }
+          });
+        });
       }
     } else if (sourceType === 'yearly_recurring') {
-      const yData = getYearData();
-      if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
-        yData.yearly_recurring[sourceIdx][field] = value;
+      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
+        cfg.default_yearly_recurring[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
+            yData.yearly_recurring[sourceIdx][field] = value;
+          }
+        });
       }
     } else if (sourceType === 'yearly_income') {
-      const yData = getYearData();
-      if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
-        yData.yearly_income[sourceIdx][field] = value;
+      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
+        cfg.default_yearly_income[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
+            yData.yearly_income[sourceIdx][field] = value;
+          }
+        });
       }
     } else if (sourceType === 'recurring_payment') {
-      const recurring = getRecurringPayments(appState.currentYear);
-      if (recurring && recurring[sourceIdx]) {
-        recurring[sourceIdx][field] = value;
+      if (cfg.recurring_payments && cfg.recurring_payments[sourceIdx]) {
+        cfg.recurring_payments[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.recurring_payments && yData.recurring_payments[sourceIdx]) {
+            yData.recurring_payments[sourceIdx][field] = value;
+          }
+        });
       }
     } else if (sourceType === 'recurring_income') {
-      const recurring = (typeof getRecurringIncomes === 'function') ? getRecurringIncomes(appState.currentYear) : (getYearData().recurring_incomes || []);
-      if (recurring && recurring[sourceIdx]) {
-        recurring[sourceIdx][field] = value;
+      if (cfg.recurring_incomes && cfg.recurring_incomes[sourceIdx]) {
+        cfg.recurring_incomes[sourceIdx][field] = value;
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.recurring_incomes && yData.recurring_incomes[sourceIdx]) {
+            yData.recurring_incomes[sourceIdx][field] = value;
+          }
+        });
       }
     }
 
@@ -2741,24 +3353,102 @@ window.budgetApp = {
   async deleteUnifiedScheduledBill(sourceType, sourceIdx, activeFilter = 'all') {
     if (!confirm("Are you sure you want to delete this scheduled item?")) return;
 
+    const cfg = getSettings();
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: appState.currentYear, monthIdx: new Date().getMonth() };
+    const curTotalM = Number(curPeriod.year) * 12 + curPeriod.monthIdx;
+
     if (sourceType === 'direct_debit') {
-      const mData = getMonthData(appState.activeTab);
-      if (mData.direct_debits) mData.direct_debits.splice(sourceIdx, 1);
+      let delDesc = null;
+      if (cfg.default_direct_debits && cfg.default_direct_debits[sourceIdx]) {
+        delDesc = cfg.default_direct_debits[sourceIdx].desc;
+        cfg.default_direct_debits.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const y = parseInt(yStr, 10);
+          const yData = appState.data.years[yStr];
+          if (!yData.months) return;
+          months.forEach((mName, mIdx) => {
+            const targetTotalM = y * 12 + mIdx;
+            if (targetTotalM >= curTotalM && yData.months[mName]?.direct_debits) {
+              const dds = yData.months[mName].direct_debits;
+              const idx = delDesc ? dds.findIndex(d => d.desc === delDesc) : sourceIdx;
+              if (idx >= 0 && idx < dds.length) dds.splice(idx, 1);
+            }
+          });
+        });
+      }
     } else if (sourceType === 'monthly_payment_in') {
-      const mData = getMonthData(appState.activeTab);
-      if (mData.payments_in) mData.payments_in.splice(sourceIdx, 1);
+      let delDesc = null;
+      if (cfg.default_payments_in && cfg.default_payments_in[sourceIdx]) {
+        delDesc = cfg.default_payments_in[sourceIdx].desc;
+        cfg.default_payments_in.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const y = parseInt(yStr, 10);
+          const yData = appState.data.years[yStr];
+          if (!yData.months) return;
+          months.forEach((mName, mIdx) => {
+            const targetTotalM = y * 12 + mIdx;
+            if (targetTotalM >= curTotalM && yData.months[mName]?.payments_in) {
+              const pis = yData.months[mName].payments_in;
+              const idx = delDesc ? pis.findIndex(p => p.desc === delDesc) : sourceIdx;
+              if (idx >= 0 && idx < pis.length) pis.splice(idx, 1);
+            }
+          });
+        });
+      }
     } else if (sourceType === 'yearly_recurring') {
-      const yData = getYearData();
-      if (yData.yearly_recurring) yData.yearly_recurring.splice(sourceIdx, 1);
+      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
+        cfg.default_yearly_recurring.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
+            yData.yearly_recurring.splice(sourceIdx, 1);
+          }
+        });
+      }
     } else if (sourceType === 'yearly_income') {
-      const yData = getYearData();
-      if (yData.yearly_income) yData.yearly_income.splice(sourceIdx, 1);
+      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
+        cfg.default_yearly_income.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
+            yData.yearly_income.splice(sourceIdx, 1);
+          }
+        });
+      }
     } else if (sourceType === 'recurring_payment') {
-      const recurring = getRecurringPayments(appState.currentYear);
-      recurring.splice(sourceIdx, 1);
+      if (cfg.recurring_payments && cfg.recurring_payments[sourceIdx]) {
+        cfg.recurring_payments.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.recurring_payments && yData.recurring_payments[sourceIdx]) {
+            yData.recurring_payments.splice(sourceIdx, 1);
+          }
+        });
+      }
     } else if (sourceType === 'recurring_income') {
-      const recurring = (typeof getRecurringIncomes === 'function') ? getRecurringIncomes(appState.currentYear) : (getYearData().recurring_incomes || []);
-      recurring.splice(sourceIdx, 1);
+      if (cfg.recurring_incomes && cfg.recurring_incomes[sourceIdx]) {
+        cfg.recurring_incomes.splice(sourceIdx, 1);
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yData = appState.data.years[yStr];
+          if (yData.recurring_incomes && yData.recurring_incomes[sourceIdx]) {
+            yData.recurring_incomes.splice(sourceIdx, 1);
+          }
+        });
+      }
     }
 
     calculateAndSyncRollovers();
@@ -3021,6 +3711,11 @@ window.budgetApp = {
     const cfg = getSettings();
     const configs = getAccountTrackingSettings();
     const md = getMonthData(appState.activeTab);
+    const cur = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+    const curTotalM = cur.year * 12 + cur.monthIdx;
+    const isFutureMonth = (appState.currentYear * 12 + months.indexOf(appState.activeTab)) > curTotalM;
 
     cfg.current_accounts.forEach((acc, idx) => {
       const trk = document.getElementById(`m_trk_c_${idx}`)?.value || 'weekly';
@@ -3029,14 +3724,18 @@ window.budgetApp = {
       const own = document.getElementById(`m_own_c_${idx}`)?.value;
       if (own) setAccountOwner('current', acc, own);
 
-      const openVal = document.getElementById(`m_open_c_${idx}`)?.value;
-      if (!md.current_data[acc]) md.current_data[acc] = {};
-      if (openVal === "" || openVal === null || openVal === undefined) {
-        delete md.current_data[acc].opening;
+      if (!isFutureMonth) {
+        const openVal = document.getElementById(`m_open_c_${idx}`)?.value;
+        if (!md.current_data[acc]) md.current_data[acc] = {};
+        if (openVal === "" || openVal === null || openVal === undefined) {
+          delete md.current_data[acc].opening;
+          delete md.current_data[acc].user_edited;
+        } else {
+          md.current_data[acc].opening = parseFloat(openVal) || 0;
+          md.current_data[acc].user_edited = true;
+        }
+      } else if (md.current_data && md.current_data[acc]) {
         delete md.current_data[acc].user_edited;
-      } else {
-        md.current_data[acc].opening = parseFloat(openVal) || 0;
-        md.current_data[acc].user_edited = true;
       }
     });
 
@@ -3047,14 +3746,18 @@ window.budgetApp = {
       const own = document.getElementById(`m_own_cr_${idx}`)?.value;
       if (own) setAccountOwner('credit', c.name, own);
 
-      const spentVal = document.getElementById(`m_open_cr_${idx}`)?.value;
-      if (!md.credit_data[c.name]) md.credit_data[c.name] = {};
-      if (spentVal === "" || spentVal === null || spentVal === undefined) {
-        delete md.credit_data[c.name].opening_spent;
+      if (!isFutureMonth) {
+        const spentVal = document.getElementById(`m_open_cr_${idx}`)?.value;
+        if (!md.credit_data[c.name]) md.credit_data[c.name] = {};
+        if (spentVal === "" || spentVal === null || spentVal === undefined) {
+          delete md.credit_data[c.name].opening_spent;
+          delete md.credit_data[c.name].user_edited;
+        } else {
+          md.credit_data[c.name].opening_spent = parseFloat(spentVal) || 0;
+          md.credit_data[c.name].user_edited = true;
+        }
+      } else if (md.credit_data && md.credit_data[c.name]) {
         delete md.credit_data[c.name].user_edited;
-      } else {
-        md.credit_data[c.name].opening_spent = parseFloat(spentVal) || 0;
-        md.credit_data[c.name].user_edited = true;
       }
     });
 
@@ -3067,15 +3770,27 @@ window.budgetApp = {
         const own = document.getElementById(`m_own_s_${idx}`)?.value;
         if (own) setAccountOwner('savings', s, own);
 
-        const savVal = document.getElementById(`m_open_s_${idx}`)?.value;
-        if (!md.savings_data[s]) md.savings_data[s] = {};
-        if (savVal === "" || savVal === null || savVal === undefined) {
-          delete md.savings_data[s].opening;
+        if (!isFutureMonth) {
+          const savVal = document.getElementById(`m_open_s_${idx}`)?.value;
+          if (!md.savings_data[s]) md.savings_data[s] = {};
+          if (savVal === "" || savVal === null || savVal === undefined) {
+            delete md.savings_data[s].opening;
+            delete md.savings_data[s].user_edited;
+          } else {
+            md.savings_data[s].opening = parseFloat(savVal) || 0;
+            md.savings_data[s].user_edited = true;
+          }
+        } else if (md.savings_data && md.savings_data[s]) {
           delete md.savings_data[s].user_edited;
-        } else {
-          md.savings_data[s].opening = parseFloat(savVal) || 0;
-          md.savings_data[s].user_edited = true;
         }
+      });
+    }
+
+    // Save master cfg.account_configs and synchronize across all years
+    cfg.account_configs = JSON.parse(JSON.stringify(configs));
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(y => {
+        appState.data.years[y].account_configs = JSON.parse(JSON.stringify(configs));
       });
     }
 
@@ -3321,15 +4036,29 @@ window.budgetApp = {
   },
 
   // Archive Manager
-  async toggleArchiveMonth(mName, fromModal = false) {
-    const md = getMonthData(mName);
+  async toggleArchiveMonth(mName, fromModal = false, year = null) {
+    const targetY = year ? parseInt(year, 10) : appState.currentYear;
+    const md = getMonthData(mName, targetY);
     md.archived = !md.archived;
+    if (!md.archived) {
+      md.manually_unarchived = true;
+    } else {
+      delete md.manually_unarchived;
+    }
     if (fromModal) {
       openArchiveManagerModal();
+    } else {
+      if (md.archived && appState.activeTab === mName && appState.currentYear === targetY) {
+        appState.activeTab = 'Overview';
+      }
     }
     renderNav();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  syncSlidingWindowAutoArchive() {
+    syncSlidingWindowAutoArchive();
   },
 
   async createNewBudgetYear(newYear) {
@@ -3368,6 +4097,7 @@ window.budgetApp = {
       appState.data.years[newYear] = {
         archived: false,
         birthdays: initialBirthdays,
+        account_configs: JSON.parse(JSON.stringify(cfg.account_configs || (prevYearData && prevYearData.account_configs) || {})),
         recurring_payments: initialRecurring,
         recurring_incomes: initialRecurringIncomes,
         yearly_recurring: initialYearlyBills,
@@ -3495,9 +4225,7 @@ window.budgetApp = {
     const strategy = document.getElementById('bg-strategy').value;
 
     if (!name || isNaN(total)) return;
-    const yData = getYearData();
-    if (!yData.yearly_budgets) yData.yearly_budgets = [];
-    yData.yearly_budgets.push({
+    const newBudget = {
       name,
       category: cat,
       total_budget: total,
@@ -3505,7 +4233,27 @@ window.budgetApp = {
       end_date: endDate,
       deduction_strategy: strategy,
       transactions: []
-    });
+    };
+
+    const yData = getYearData();
+    if (!yData.yearly_budgets) yData.yearly_budgets = [];
+    yData.yearly_budgets.push(newBudget);
+
+    const cfg = getSettings();
+    if (!cfg.yearly_budgets) cfg.yearly_budgets = [];
+    if (!cfg.yearly_budgets.some(b => b.name === name)) {
+      cfg.yearly_budgets.push(JSON.parse(JSON.stringify(newBudget)));
+    }
+
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(y => {
+        const yd = appState.data.years[y];
+        if (!yd.yearly_budgets) yd.yearly_budgets = [];
+        if (!yd.yearly_budgets.some(b => b.name === name)) {
+          yd.yearly_budgets.push(JSON.parse(JSON.stringify(newBudget)));
+        }
+      });
+    }
 
     closeModal();
     calculateAndSyncRollovers();
@@ -3514,14 +4262,32 @@ window.budgetApp = {
   },
 
   async deleteBudget(bIdx) {
-    if (!confirm("Are you sure you want to delete this annual budget?")) return;
+    if (!confirm("Are you sure you want to delete this budget?")) return;
     const yData = getYearData();
+    const b = (yData.yearly_budgets && yData.yearly_budgets[bIdx]) ? yData.yearly_budgets[bIdx] : null;
+    const delName = b ? b.name : null;
+
     if (yData.yearly_budgets) {
       yData.yearly_budgets.splice(bIdx, 1);
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
     }
+    const cfg = getSettings();
+    if (cfg.yearly_budgets && delName) {
+      const cIdx = cfg.yearly_budgets.findIndex(item => item.name === delName);
+      if (cIdx >= 0) cfg.yearly_budgets.splice(cIdx, 1);
+    }
+    if (appState.data && appState.data.years) {
+      Object.keys(appState.data.years).forEach(y => {
+        const yd = appState.data.years[y];
+        if (yd.yearly_budgets && delName) {
+          const yIdx = yd.yearly_budgets.findIndex(item => item.name === delName);
+          if (yIdx >= 0) yd.yearly_budgets.splice(yIdx, 1);
+        }
+      });
+    }
+
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
   addBudgetTransaction(bIdx) {
@@ -3578,6 +4344,7 @@ window.budgetApp = {
   async editYearlyBudgetField(bIdx, field, value) {
     const b = getYearData().yearly_budgets[bIdx];
     if (b) {
+      const oldName = b.name;
       if (field === 'end_date') {
         if (!value || value.length < 10) return;
         b.end_date = value;
@@ -3586,6 +4353,26 @@ window.budgetApp = {
       } else {
         b[field] = value;
       }
+
+      const cfg = getSettings();
+      if (cfg.yearly_budgets) {
+        const mb = cfg.yearly_budgets.find(item => item.name === oldName);
+        if (mb) {
+          mb[field] = b[field];
+        }
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(y => {
+          const yd = appState.data.years[y];
+          if (yd.yearly_budgets) {
+            const yb = yd.yearly_budgets.find(item => item.name === oldName);
+            if (yb) {
+              yb[field] = b[field];
+            }
+          }
+        });
+      }
+
       calculateAndSyncRollovers();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
     }
@@ -4422,6 +5209,11 @@ window.budgetApp = {
       applyTheme(themeEl.value);
     }
 
+    const advanceEl = document.getElementById('cfg-months-advance');
+    const arrearsEl = document.getElementById('cfg-months-arrears');
+    if (advanceEl) cfg.months_in_advance = Math.max(1, parseInt(advanceEl.value, 10) || 12);
+    if (arrearsEl) cfg.months_in_arrears = Math.max(0, parseInt(arrearsEl.value, 10) || 0);
+
     const allOrder = this.getAllWidgetOrder();
     const selectedWidgets = [];
     allOrder.forEach(id => {
@@ -4434,7 +5226,9 @@ window.budgetApp = {
     });
     cfg.enabled_widgets = selectedWidgets;
 
+    syncSlidingWindowAutoArchive();
     calculateAndSyncRollovers();
+    renderNav();
     renderContent();
     await saveBudget(appState.data);
     alert("Settings saved successfully!");

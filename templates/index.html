@@ -819,17 +819,7 @@
                 <button id="userProfileBtn" class="btn secondary" onclick="window.budgetApp.toggleUserDropdown(event)" title="Active User Profile"><span class="btn-icon">&#128100;</span><span class="btn-text"> <span id="currentUserDisplay">Joint</span> &#9662;</span></button>
                 <div id="userProfileDropdownOptions" class="dropdown-content"></div>
               </div>
-              <div class="dropdown">
-                <button id="yearDropdownBtn" class="btn secondary" onclick="window.budgetApp.toggleYearDropdown(event)" title="Select Year"><span class="btn-icon">&#128197;</span><span class="btn-text"> <span id="currentYearDisplay">2026</span> &#9662;</span></button>
-                <div class="dropdown-content">
-                  <div id="yearListOptions"></div>
-                  <div style="border-top:1px solid var(--border); margin-top:4px;">
-                    <button id="dropdownArchiveManagerBtn" onclick="window.budgetApp.openArchiveManagerModal()">&#128230; Archive Manager</button>
-                    <button id="archiveYearActionBtn" onclick="window.budgetApp.toggleArchiveYear()">&#128230; Archive Year</button>
-                    <button id="createNewYearBtn" onclick="window.budgetApp.promptCreateNewYear()">&#10133; Create New Year</button>
-                  </div>
-                </div>
-              </div>
+              <button id="archiveNavBtn" class="btn secondary" onclick="window.budgetApp.openArchiveManagerModal()" title="Archive & History Manager"><span class="btn-icon">&#128230;</span><span class="btn-text"> Archive</span></button>
               <button id="calculatorNavBtn" class="btn secondary" onclick="window.budgetApp.toggleCalculator()" title="Budget Calculator (Alt+C)"><span class="btn-icon">&#129518;</span><span class="btn-text"> Calculator</span></button>
               <button id="lockSessionNavBtn" class="btn secondary" onclick="window.budgetApp.lockActiveSession()" title="Lock Session (PIN)" style="display:none;"><span class="btn-icon">🔒</span><span class="btn-text"> Lock</span></button>
               <button id="globalModeBtn" class="btn secondary" onclick="window.budgetApp.toggleGlobalEditMode()" title="Toggle View/Edit Mode"><span class="btn-icon">&#128065;&#65039;</span><span class="btn-text"> View Mode</span></button>
