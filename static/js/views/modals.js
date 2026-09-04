@@ -135,6 +135,306 @@ export function updateMoveWeekOptions(mName, selWeek) {
   }
 }
 
+export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
+  const items = getWeekItems(sourceMonth, sourceWeek);
+  const item = items ? items[itemIdx] : null;
+  if (!item) return;
+
+  const cfg = getSettings();
+  const curr = cfg.currency;
+  const mIdx = months.indexOf(sourceMonth);
+  const sched = (typeof calculateMonthSchedule === 'function') ? calculateMonthSchedule(appState.currentYear, mIdx) : null;
+  const wObj = sched?.weeks?.find(w => w.name === sourceWeek);
+  
+  let defaultDueDay = 1;
+  if (wObj && wObj.start) {
+    defaultDueDay = wObj.start.getDate();
+  } else {
+    defaultDueDay = new Date().getDate();
+  }
+
+  const yData = getYearData(appState.currentYear);
+  const existingBirthdays = (yData.birthdays && yData.birthdays.length > 0) ? yData.birthdays : (cfg.birthdays || []);
+
+  const cleanDesc = (item.desc || '').replace(/"/g, '&quot;');
+  const itemAmt = Number(item.amount || 0).toFixed(2);
+  const isIncome = Boolean(item.is_income);
+  const itemAcc = item.account_name || cfg.current_accounts[0];
+
+  showModal({
+    title: `🔄 Convert Payment: "${cleanDesc || 'Payment'}"`,
+    body: `
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+        Convert <strong>${cleanDesc || 'Payment'}</strong> (${curr}${itemAmt}) from <strong>${sourceMonth} - ${sourceWeek}</strong> into a scheduled payment or occasion:
+      </div>
+
+      <!-- Segmented Target Chooser -->
+      <div style="display:flex; gap:6px; margin-bottom:14px; background:rgba(255,255,255,0.04); padding:4px; border-radius:8px; border:1px solid var(--border);">
+        <button id="conv-tab-btn-scheduled" type="button" class="btn" style="flex:1; justify-content:center; font-size:11.5px; padding:6px 8px; background:var(--curr-border); color:#fff; border-color:var(--curr-border);" onclick="window.budgetApp.onConvertTargetChange('scheduled')">
+          📅 Direct Debit / Scheduled Bill
+        </button>
+        <button id="conv-tab-btn-birthday" type="button" class="btn secondary" style="flex:1; justify-content:center; font-size:11.5px; padding:6px 8px;" onclick="window.budgetApp.onConvertTargetChange('birthday')">
+          🎂 Birthday / Occasion
+        </button>
+      </div>
+
+      <input type="hidden" id="conv-target-type" value="scheduled">
+
+      <!-- SECTION 1: DIRECT DEBIT / SCHEDULED RECURRING -->
+      <div id="conv-section-scheduled">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Description</label>
+            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
+            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Type</label>
+            <select id="conv-sched-type" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
+              <option value="expense" ${!isIncome ? 'selected' : ''}>- Outgoing Bill / Direct Debit</option>
+              <option value="income" ${isIncome ? 'selected' : ''}>+ Inflow / Scheduled Income</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Cadence / Frequency</label>
+            <select id="conv-sched-freq" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
+              <option value="monthly" selected>📅 Monthly Direct Debit (Ongoing)</option>
+              <option value="weekly">🔄 Weekly</option>
+              <option value="biweekly">🔄 Bi-Weekly (Every 2 Weeks)</option>
+              <option value="four_weekly">🗓️ 4-Weekly (Every 4 Weeks)</option>
+              <option value="quarterly">📊 Quarterly (Every 3 Months)</option>
+              <option value="yearly">🎉 Annual / Yearly Bill</option>
+              <option value="custom_weeks">⚙️ Custom (Every N Weeks)</option>
+              <option value="custom_months">⚙️ Custom (Every N Months)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div id="conv-sched-day-box">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Day of Month</label>
+            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+          </div>
+          <div id="conv-sched-month-box" style="display:none;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Month</label>
+            <select id="conv-sched-month" style="width:100%; margin-top:2px;">
+              ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
+            </select>
+          </div>
+          <div id="conv-sched-interval-box" style="display:none;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Interval (N)</label>
+            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; margin-top:2px;">
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Account</label>
+            <select id="conv-sched-acc" style="width:100%; margin-top:2px;">
+              <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+              ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+              ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Holiday Adjustment</label>
+            <select id="conv-sched-holiday-rule" style="width:100%; margin-top:2px;">
+              <option value="following" ${!isIncome ? 'selected' : ''}>➡️ Following Workday</option>
+              <option value="previous" ${isIncome ? 'selected' : ''}>⬅️ Previous Workday</option>
+              <option value="exact">⏸️ Exact Date</option>
+            </select>
+          </div>
+          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''}">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Transfer To (Standing Order)</label>
+            <select id="conv-sched-transfer" style="width:100%; margin-top:2px;">
+              <option value="none">None (Standard Bill)</option>
+              ${(cfg.savings_accounts || []).map(s => `<option value="${s}">📈 ${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECTION 2: BIRTHDAY OR OCCASION -->
+      <div id="conv-section-birthday" style="display:none;">
+        ${existingBirthdays.length > 0 ? `
+          <div style="display:flex; gap:12px; margin-bottom:10px; background:rgba(236,72,153,0.06); padding:6px 10px; border-radius:6px; border:1px solid rgba(236,72,153,0.2);">
+            <label style="font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+              <input type="radio" name="conv-bday-mode" value="new" checked onchange="window.budgetApp.updateConvertBdayMode(this.value)">
+              <span>Create New Occasion</span>
+            </label>
+            <label style="font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+              <input type="radio" name="conv-bday-mode" value="existing" onchange="window.budgetApp.updateConvertBdayMode(this.value)">
+              <span>Attach as Spend to Existing Occasion</span>
+            </label>
+          </div>
+        ` : `<input type="hidden" name="conv-bday-mode" value="new">`}
+
+        <!-- New Occasion Fields -->
+        <div id="conv-bday-new-fields">
+          <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Person / Occasion Name</label>
+              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; margin-top:2px;">
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Occasion Category</label>
+              <select id="conv-bday-cat" style="width:100%; margin-top:2px;">
+                <option value="Birthday" selected>🎂 Birthday</option>
+                <option value="Anniversary">💍 Anniversary</option>
+                <option value="Holiday">🎄 Holiday</option>
+                <option value="Celebration">🎉 Celebration / Occasion</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:8px;">
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Month</label>
+              <select id="conv-bday-month" style="width:100%; margin-top:2px;">
+                ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Day of Month</label>
+              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
+              <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+            </div>
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
+            <select id="conv-bday-acc" style="width:100%; margin-top:2px;">
+              <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+              ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+              ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
+        <!-- Existing Occasion Fields -->
+        ${existingBirthdays.length > 0 ? `
+          <div id="conv-bday-existing-fields" style="display:none;">
+            <div style="margin-bottom:8px;">
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Select Occasion</label>
+              <select id="conv-bday-select" style="width:100%; margin-top:2px;">
+                ${existingBirthdays.map((b, bIdx) => `
+                  <option value="${bIdx}">${b.name} (${b.month} ${b.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>
+                `).join('')}
+              </select>
+            </div>
+            <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
+              <div>
+                <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift / Spend Description</label>
+                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+              </div>
+              <div>
+                <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
+                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+              </div>
+            </div>
+            <div style="margin-bottom:8px;">
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
+              <select id="conv-bday-spend-acc" style="width:100%; margin-top:2px;">
+                <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+                ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+                ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+              </select>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Conversion Options -->
+      <div style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border);">
+        <label style="font-size:11.5px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--heading); font-weight:600;">
+          <input type="checkbox" id="conv-remove-original" checked>
+          <span>Remove original payment from ${sourceMonth} (${sourceWeek})</span>
+        </label>
+        <div style="font-size:10.5px; color:var(--text-muted); margin-left:22px; margin-top:2px;">
+          Prevents double-counting once the item is scheduled or tracked as an occasion.
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.confirmConvertItem('${sourceMonth}', '${sourceWeek}', ${itemIdx})">Convert Payment</button>
+    `
+  });
+}
+
+export function onConvertTargetChange(targetType) {
+  const schedBtn = document.getElementById('conv-tab-btn-scheduled');
+  const bdayBtn = document.getElementById('conv-tab-btn-birthday');
+  const schedSec = document.getElementById('conv-section-scheduled');
+  const bdaySec = document.getElementById('conv-section-birthday');
+  const targetTypeEl = document.getElementById('conv-target-type');
+
+  if (targetTypeEl) targetTypeEl.value = targetType;
+
+  if (targetType === 'scheduled') {
+    if (schedBtn) {
+      schedBtn.className = 'btn';
+      schedBtn.style.background = 'var(--curr-border)';
+      schedBtn.style.color = '#fff';
+      schedBtn.style.borderColor = 'var(--curr-border)';
+    }
+    if (bdayBtn) {
+      bdayBtn.className = 'btn secondary';
+      bdayBtn.style.background = '';
+      bdayBtn.style.color = '';
+      bdayBtn.style.borderColor = '';
+    }
+    if (schedSec) schedSec.style.display = 'block';
+    if (bdaySec) bdaySec.style.display = 'none';
+  } else {
+    if (bdayBtn) {
+      bdayBtn.className = 'btn';
+      bdayBtn.style.background = '#ec4899';
+      bdayBtn.style.color = '#fff';
+      bdayBtn.style.borderColor = '#ec4899';
+    }
+    if (schedBtn) {
+      schedBtn.className = 'btn secondary';
+      schedBtn.style.background = '';
+      schedBtn.style.color = '';
+      schedBtn.style.borderColor = '';
+    }
+    if (schedSec) schedSec.style.display = 'none';
+    if (bdaySec) bdaySec.style.display = 'block';
+  }
+}
+
+export function updateConvertFrequencyFields(freqVal) {
+  const dayBox = document.getElementById('conv-sched-day-box');
+  const monthBox = document.getElementById('conv-sched-month-box');
+  const intBox = document.getElementById('conv-sched-interval-box');
+
+  if (dayBox) dayBox.style.display = (freqVal === 'monthly' || freqVal === 'quarterly' || freqVal === 'yearly') ? 'block' : 'none';
+  if (monthBox) monthBox.style.display = (freqVal === 'yearly') ? 'block' : 'none';
+  if (intBox) intBox.style.display = (freqVal === 'custom_weeks' || freqVal === 'custom_months') ? 'block' : 'none';
+}
+
+export function updateConvertSchedType(typeVal) {
+  const transBox = document.getElementById('conv-sched-transfer-box');
+  if (transBox) transBox.style.display = (typeVal === 'income') ? 'none' : 'block';
+}
+
+export function updateConvertBdayMode(modeVal) {
+  const newFields = document.getElementById('conv-bday-new-fields');
+  const existFields = document.getElementById('conv-bday-existing-fields');
+  if (newFields) newFields.style.display = (modeVal === 'new') ? 'block' : 'none';
+  if (existFields) existFields.style.display = (modeVal === 'existing') ? 'block' : 'none';
+}
+
 export function openRescheduleRecurringModal(recurringIdx, currentMonth, currentWeek, itemType = 'outgoing') {
   const yData = getYearData();
   const cfg = getSettings();

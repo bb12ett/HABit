@@ -5113,6 +5113,306 @@ function updateMoveWeekOptions(mName, selWeek) {
   }
 }
 
+function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
+  const items = getWeekItems(sourceMonth, sourceWeek);
+  const item = items ? items[itemIdx] : null;
+  if (!item) return;
+
+  const cfg = getSettings();
+  const curr = cfg.currency;
+  const mIdx = months.indexOf(sourceMonth);
+  const sched = (typeof calculateMonthSchedule === 'function') ? calculateMonthSchedule(appState.currentYear, mIdx) : null;
+  const wObj = sched?.weeks?.find(w => w.name === sourceWeek);
+  
+  let defaultDueDay = 1;
+  if (wObj && wObj.start) {
+    defaultDueDay = wObj.start.getDate();
+  } else {
+    defaultDueDay = new Date().getDate();
+  }
+
+  const yData = getYearData(appState.currentYear);
+  const existingBirthdays = (yData.birthdays && yData.birthdays.length > 0) ? yData.birthdays : (cfg.birthdays || []);
+
+  const cleanDesc = (item.desc || '').replace(/"/g, '&quot;');
+  const itemAmt = Number(item.amount || 0).toFixed(2);
+  const isIncome = Boolean(item.is_income);
+  const itemAcc = item.account_name || cfg.current_accounts[0];
+
+  showModal({
+    title: `🔄 Convert Payment: "${cleanDesc || 'Payment'}"`,
+    body: `
+      <div style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">
+        Convert <strong>${cleanDesc || 'Payment'}</strong> (${curr}${itemAmt}) from <strong>${sourceMonth} - ${sourceWeek}</strong> into a scheduled payment or occasion:
+      </div>
+
+      <!-- Segmented Target Chooser -->
+      <div style="display:flex; gap:6px; margin-bottom:14px; background:rgba(255,255,255,0.04); padding:4px; border-radius:8px; border:1px solid var(--border);">
+        <button id="conv-tab-btn-scheduled" type="button" class="btn" style="flex:1; justify-content:center; font-size:11.5px; padding:6px 8px; background:var(--curr-border); color:#fff; border-color:var(--curr-border);" onclick="window.budgetApp.onConvertTargetChange('scheduled')">
+          📅 Direct Debit / Scheduled Bill
+        </button>
+        <button id="conv-tab-btn-birthday" type="button" class="btn secondary" style="flex:1; justify-content:center; font-size:11.5px; padding:6px 8px;" onclick="window.budgetApp.onConvertTargetChange('birthday')">
+          🎂 Birthday / Occasion
+        </button>
+      </div>
+
+      <input type="hidden" id="conv-target-type" value="scheduled">
+
+      <!-- SECTION 1: DIRECT DEBIT / SCHEDULED RECURRING -->
+      <div id="conv-section-scheduled">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Description</label>
+            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
+            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Type</label>
+            <select id="conv-sched-type" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
+              <option value="expense" ${!isIncome ? 'selected' : ''}>- Outgoing Bill / Direct Debit</option>
+              <option value="income" ${isIncome ? 'selected' : ''}>+ Inflow / Scheduled Income</option>
+            </select>
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Cadence / Frequency</label>
+            <select id="conv-sched-freq" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
+              <option value="monthly" selected>📅 Monthly Direct Debit (Ongoing)</option>
+              <option value="weekly">🔄 Weekly</option>
+              <option value="biweekly">🔄 Bi-Weekly (Every 2 Weeks)</option>
+              <option value="four_weekly">🗓️ 4-Weekly (Every 4 Weeks)</option>
+              <option value="quarterly">📊 Quarterly (Every 3 Months)</option>
+              <option value="yearly">🎉 Annual / Yearly Bill</option>
+              <option value="custom_weeks">⚙️ Custom (Every N Weeks)</option>
+              <option value="custom_months">⚙️ Custom (Every N Months)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div id="conv-sched-day-box">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Day of Month</label>
+            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+          </div>
+          <div id="conv-sched-month-box" style="display:none;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Month</label>
+            <select id="conv-sched-month" style="width:100%; margin-top:2px;">
+              ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
+            </select>
+          </div>
+          <div id="conv-sched-interval-box" style="display:none;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Interval (N)</label>
+            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; margin-top:2px;">
+          </div>
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Account</label>
+            <select id="conv-sched-acc" style="width:100%; margin-top:2px;">
+              <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+              ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+              ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <div>
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Holiday Adjustment</label>
+            <select id="conv-sched-holiday-rule" style="width:100%; margin-top:2px;">
+              <option value="following" ${!isIncome ? 'selected' : ''}>➡️ Following Workday</option>
+              <option value="previous" ${isIncome ? 'selected' : ''}>⬅️ Previous Workday</option>
+              <option value="exact">⏸️ Exact Date</option>
+            </select>
+          </div>
+          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''}">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Transfer To (Standing Order)</label>
+            <select id="conv-sched-transfer" style="width:100%; margin-top:2px;">
+              <option value="none">None (Standard Bill)</option>
+              ${(cfg.savings_accounts || []).map(s => `<option value="${s}">📈 ${s}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECTION 2: BIRTHDAY OR OCCASION -->
+      <div id="conv-section-birthday" style="display:none;">
+        ${existingBirthdays.length > 0 ? `
+          <div style="display:flex; gap:12px; margin-bottom:10px; background:rgba(236,72,153,0.06); padding:6px 10px; border-radius:6px; border:1px solid rgba(236,72,153,0.2);">
+            <label style="font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+              <input type="radio" name="conv-bday-mode" value="new" checked onchange="window.budgetApp.updateConvertBdayMode(this.value)">
+              <span>Create New Occasion</span>
+            </label>
+            <label style="font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:5px; font-weight:600;">
+              <input type="radio" name="conv-bday-mode" value="existing" onchange="window.budgetApp.updateConvertBdayMode(this.value)">
+              <span>Attach as Spend to Existing Occasion</span>
+            </label>
+          </div>
+        ` : `<input type="hidden" name="conv-bday-mode" value="new">`}
+
+        <!-- New Occasion Fields -->
+        <div id="conv-bday-new-fields">
+          <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Person / Occasion Name</label>
+              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; margin-top:2px;">
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Occasion Category</label>
+              <select id="conv-bday-cat" style="width:100%; margin-top:2px;">
+                <option value="Birthday" selected>🎂 Birthday</option>
+                <option value="Anniversary">💍 Anniversary</option>
+                <option value="Holiday">🎄 Holiday</option>
+                <option value="Celebration">🎉 Celebration / Occasion</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:8px;">
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Month</label>
+              <select id="conv-bday-month" style="width:100%; margin-top:2px;">
+                ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Day of Month</label>
+              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+            </div>
+            <div>
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
+              <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+            </div>
+          </div>
+
+          <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
+            <select id="conv-bday-acc" style="width:100%; margin-top:2px;">
+              <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+              ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+              ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+            </select>
+          </div>
+        </div>
+
+        <!-- Existing Occasion Fields -->
+        ${existingBirthdays.length > 0 ? `
+          <div id="conv-bday-existing-fields" style="display:none;">
+            <div style="margin-bottom:8px;">
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Select Occasion</label>
+              <select id="conv-bday-select" style="width:100%; margin-top:2px;">
+                ${existingBirthdays.map((b, bIdx) => `
+                  <option value="${bIdx}">${b.name} (${b.month} ${b.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>
+                `).join('')}
+              </select>
+            </div>
+            <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
+              <div>
+                <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift / Spend Description</label>
+                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+              </div>
+              <div>
+                <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
+                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+              </div>
+            </div>
+            <div style="margin-bottom:8px;">
+              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
+              <select id="conv-bday-spend-acc" style="width:100%; margin-top:2px;">
+                <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
+                ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
+                ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
+              </select>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Conversion Options -->
+      <div style="margin-top:14px; padding-top:10px; border-top:1px solid var(--border);">
+        <label style="font-size:11.5px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--heading); font-weight:600;">
+          <input type="checkbox" id="conv-remove-original" checked>
+          <span>Remove original payment from ${sourceMonth} (${sourceWeek})</span>
+        </label>
+        <div style="font-size:10.5px; color:var(--text-muted); margin-left:22px; margin-top:2px;">
+          Prevents double-counting once the item is scheduled or tracked as an occasion.
+        </div>
+      </div>
+    `,
+    actions: `
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+      <button class="btn green" onclick="window.budgetApp.confirmConvertItem('${sourceMonth}', '${sourceWeek}', ${itemIdx})">Convert Payment</button>
+    `
+  });
+}
+
+function onConvertTargetChange(targetType) {
+  const schedBtn = document.getElementById('conv-tab-btn-scheduled');
+  const bdayBtn = document.getElementById('conv-tab-btn-birthday');
+  const schedSec = document.getElementById('conv-section-scheduled');
+  const bdaySec = document.getElementById('conv-section-birthday');
+  const targetTypeEl = document.getElementById('conv-target-type');
+
+  if (targetTypeEl) targetTypeEl.value = targetType;
+
+  if (targetType === 'scheduled') {
+    if (schedBtn) {
+      schedBtn.className = 'btn';
+      schedBtn.style.background = 'var(--curr-border)';
+      schedBtn.style.color = '#fff';
+      schedBtn.style.borderColor = 'var(--curr-border)';
+    }
+    if (bdayBtn) {
+      bdayBtn.className = 'btn secondary';
+      bdayBtn.style.background = '';
+      bdayBtn.style.color = '';
+      bdayBtn.style.borderColor = '';
+    }
+    if (schedSec) schedSec.style.display = 'block';
+    if (bdaySec) bdaySec.style.display = 'none';
+  } else {
+    if (bdayBtn) {
+      bdayBtn.className = 'btn';
+      bdayBtn.style.background = '#ec4899';
+      bdayBtn.style.color = '#fff';
+      bdayBtn.style.borderColor = '#ec4899';
+    }
+    if (schedBtn) {
+      schedBtn.className = 'btn secondary';
+      schedBtn.style.background = '';
+      schedBtn.style.color = '';
+      schedBtn.style.borderColor = '';
+    }
+    if (schedSec) schedSec.style.display = 'none';
+    if (bdaySec) bdaySec.style.display = 'block';
+  }
+}
+
+function updateConvertFrequencyFields(freqVal) {
+  const dayBox = document.getElementById('conv-sched-day-box');
+  const monthBox = document.getElementById('conv-sched-month-box');
+  const intBox = document.getElementById('conv-sched-interval-box');
+
+  if (dayBox) dayBox.style.display = (freqVal === 'monthly' || freqVal === 'quarterly' || freqVal === 'yearly') ? 'block' : 'none';
+  if (monthBox) monthBox.style.display = (freqVal === 'yearly') ? 'block' : 'none';
+  if (intBox) intBox.style.display = (freqVal === 'custom_weeks' || freqVal === 'custom_months') ? 'block' : 'none';
+}
+
+function updateConvertSchedType(typeVal) {
+  const transBox = document.getElementById('conv-sched-transfer-box');
+  if (transBox) transBox.style.display = (typeVal === 'income') ? 'none' : 'block';
+}
+
+function updateConvertBdayMode(modeVal) {
+  const newFields = document.getElementById('conv-bday-new-fields');
+  const existFields = document.getElementById('conv-bday-existing-fields');
+  if (newFields) newFields.style.display = (modeVal === 'new') ? 'block' : 'none';
+  if (existFields) existFields.style.display = (modeVal === 'existing') ? 'block' : 'none';
+}
+
 function openRescheduleRecurringModal(recurringIdx, currentMonth, currentWeek, itemType = 'outgoing') {
   const yData = getYearData();
   const cfg = getSettings();
@@ -10334,15 +10634,20 @@ function renderOverviewView(container) {
                               } else {
                                 return `
                                   <div class="item-entry" draggable="true" ondragstart="window.budgetApp.handleDragStart(event, '${activeTab}', '${w}', ${entry.idx})" ondragend="window.budgetApp.handleDragEnd(event)">
-                                    <span class="drag-handle" title="Drag to any week or column">⠿</span>
-                                    <select onchange="window.budgetApp.editWeekItemType('${w}', ${entry.idx}, this.value)" style="padding:2px; font-size:11px; color:${entry.item.is_income ? 'var(--green)' : 'var(--red)'}; font-weight:bold;">
-                                      <option value="expense" ${!entry.item.is_income ? 'selected' : ''}>- Expense</option>
-                                      <option value="income" ${entry.item.is_income ? 'selected' : ''}>+ Income</option>
-                                    </select>
-                                    <input type="text" value="${entry.item.desc}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'desc', this.value)">
-                                    <input type="number" step="0.01" value="${entry.item.amount}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'amount', this.value)" style="text-align:right;">
-                                    <button class="move-btn" title="Move item to another month or week" onclick="window.budgetApp.openMoveItemModal('${activeTab}', '${w}', ${entry.idx})">↔</button>
-                                    <button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteWeekItem('${w}', ${entry.idx})">&times;</button>
+                                    <div class="item-entry-main">
+                                      <span class="drag-handle" title="Drag to any week or column">⠿</span>
+                                      <select onchange="window.budgetApp.editWeekItemType('${w}', ${entry.idx}, this.value)" style="padding:2px; font-size:11px; color:${entry.item.is_income ? 'var(--green)' : 'var(--red)'}; font-weight:bold;">
+                                        <option value="expense" ${!entry.item.is_income ? 'selected' : ''}>- Expense</option>
+                                        <option value="income" ${entry.item.is_income ? 'selected' : ''}>+ Income</option>
+                                      </select>
+                                      <input type="text" value="${entry.item.desc}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'desc', this.value)">
+                                      <input type="number" step="0.01" value="${entry.item.amount}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'amount', this.value)" style="text-align:right;">
+                                    </div>
+                                    <div class="item-entry-actions">
+                                      <button type="button" class="convert-btn" title="Convert payment to Direct Debit, Recurring Bill, or Birthday/Occasion" onclick="event.stopPropagation(); window.budgetApp.openConvertItemModal('${activeTab}', '${w}', ${entry.idx})">🔄 <span>Convert</span></button>
+                                      <button type="button" class="move-btn" title="Move item to another month or week" onclick="window.budgetApp.openMoveItemModal('${activeTab}', '${w}', ${entry.idx})">↔ <span>Move</span></button>
+                                      <button type="button" class="del-btn" title="Delete item" onclick="event.stopPropagation(); window.budgetApp.deleteWeekItem('${w}', ${entry.idx})">&times; <span>Delete</span></button>
+                                    </div>
                                   </div>
                                 `;
                               }
@@ -16566,6 +16871,11 @@ window.budgetApp = {
   openDateOverrideModal,
   openMoveItemModal,
   updateMoveWeekOptions,
+  openConvertItemModal,
+  onConvertTargetChange,
+  updateConvertFrequencyFields,
+  updateConvertSchedType,
+  updateConvertBdayMode,
   openRescheduleRecurringModal,
   updateReschedWeekOptions,
   openAccountTrackingModal,
@@ -19345,6 +19655,261 @@ window.budgetApp = {
     }
   },
 
+  async confirmConvertItem(sourceMonth, sourceWeek, itemIdx) {
+    const targetType = document.getElementById('conv-target-type')?.value || 'scheduled';
+    const removeOriginal = Boolean(document.getElementById('conv-remove-original')?.checked);
+
+    const cfg = getSettings();
+    const yData = getYearData(appState.currentYear);
+    const numIdx = parseInt(itemIdx, 10);
+    const srcMonth = sourceMonth || appState.activeTab;
+
+    if (targetType === 'scheduled') {
+      const descEl = document.getElementById('conv-sched-desc');
+      const amtEl = document.getElementById('conv-sched-amt');
+      const typeEl = document.getElementById('conv-sched-type');
+      const freqEl = document.getElementById('conv-sched-freq');
+      const dayEl = document.getElementById('conv-sched-due-day');
+      const monthEl = document.getElementById('conv-sched-month');
+      const intEl = document.getElementById('conv-sched-interval');
+      const accEl = document.getElementById('conv-sched-acc');
+      const holidayEl = document.getElementById('conv-sched-holiday-rule');
+      const transEl = document.getElementById('conv-sched-transfer');
+
+      const desc = descEl ? descEl.value.trim() : '';
+      const amt = parseFloat(amtEl ? amtEl.value : 0);
+      const isIncome = typeEl ? (typeEl.value === 'income') : false;
+      const freq = freqEl ? freqEl.value : 'monthly';
+      const dueDay = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+      const month = monthEl ? monthEl.value : srcMonth;
+      const interval = intEl ? (parseInt(intEl.value, 10) || 1) : 1;
+      const acc = accEl ? accEl.value : cfg.current_accounts[0];
+      const holidayRule = holidayEl ? holidayEl.value : (isIncome ? 'previous' : 'following');
+      const transferTo = (transEl && !isIncome) ? transEl.value : 'none';
+
+      if (!desc || isNaN(amt) || amt <= 0) {
+        alert("Please enter a description and valid positive amount.");
+        return;
+      }
+
+      const curTotalM = Number(appState.currentYear) * 12 + months.indexOf(srcMonth);
+      const startDateVal = `${appState.currentYear}-${String(months.indexOf(srcMonth) + 1).padStart(2, '0')}-${String(Math.min(28, Math.max(1, dueDay))).padStart(2, '0')}`;
+
+      if (isIncome) {
+        if (freq === 'monthly') {
+          const newPI = { desc, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_payments_in) cfg.default_payments_in = [];
+          cfg.default_payments_in.push(newPI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const y = parseInt(yStr, 10);
+              const yrData = appState.data.years[yStr];
+              if (!yrData.months) return;
+              months.forEach((mName, mIdx) => {
+                const targetTotalM = y * 12 + mIdx;
+                if (targetTotalM >= curTotalM && (typeof isItemActiveInMonth !== 'function' || isItemActiveInMonth(newPI, mName, y))) {
+                  if (!yrData.months[mName]) yrData.months[mName] = {};
+                  if (!yrData.months[mName].payments_in) yrData.months[mName].payments_in = [];
+                  if (!yrData.months[mName].payments_in.some(p => p.desc === desc && p.due_day === dueDay)) {
+                    yrData.months[mName].payments_in.push({ ...newPI });
+                  }
+                }
+              });
+            });
+          }
+          const mData = getMonthData(srcMonth);
+          if (mData && mData.payments_in && !mData.payments_in.some(p => p.desc === desc && p.due_day === dueDay)) {
+            mData.payments_in.push({ ...newPI });
+          }
+        } else if (freq === 'yearly') {
+          const newYI = { desc, month, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_yearly_income) cfg.default_yearly_income = [];
+          cfg.default_yearly_income.push(newYI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.yearly_income) yrData.yearly_income = [];
+              if (!yrData.yearly_income.some(yi => yi.desc === desc && yi.month === month)) {
+                yrData.yearly_income.push({ ...newYI });
+              }
+            });
+          }
+        } else {
+          // Weekly, biweekly, custom recurring income
+          const newRI = {
+            desc,
+            amount: amt,
+            frequency: freq,
+            interval_n: interval,
+            day_of_month: dueDay,
+            start_date: startDateVal,
+            account: acc,
+            is_income: true,
+            holiday_rule: holidayRule
+          };
+          if (!cfg.recurring_incomes) cfg.recurring_incomes = [];
+          cfg.recurring_incomes.push(newRI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.recurring_incomes) yrData.recurring_incomes = [];
+              if (!yrData.recurring_incomes.some(ri => ri.desc === desc)) {
+                yrData.recurring_incomes.push({ ...newRI });
+              }
+            });
+          }
+        }
+      } else {
+        // Outgoing bill
+        if (freq === 'monthly') {
+          const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_direct_debits) cfg.default_direct_debits = [];
+          cfg.default_direct_debits.push(newDD);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const y = parseInt(yStr, 10);
+              const yrData = appState.data.years[yStr];
+              if (!yrData.months) return;
+              months.forEach((mName, mIdx) => {
+                const targetTotalM = y * 12 + mIdx;
+                if (targetTotalM >= curTotalM && (typeof isItemActiveInMonth !== 'function' || isItemActiveInMonth(newDD, mName, y))) {
+                  if (!yrData.months[mName]) yrData.months[mName] = {};
+                  if (!yrData.months[mName].direct_debits) yrData.months[mName].direct_debits = [];
+                  if (!yrData.months[mName].direct_debits.some(d => d.desc === desc && d.due_day === dueDay)) {
+                    yrData.months[mName].direct_debits.push({ ...newDD });
+                  }
+                }
+              });
+            });
+          }
+          const mData = getMonthData(srcMonth);
+          if (mData && mData.direct_debits && !mData.direct_debits.some(d => d.desc === desc && d.due_day === dueDay)) {
+            mData.direct_debits.push({ ...newDD });
+          }
+        } else if (freq === 'yearly') {
+          const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+          cfg.default_yearly_recurring.push(newYR);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.yearly_recurring) yrData.yearly_recurring = [];
+              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+                yrData.yearly_recurring.push({ ...newYR });
+              }
+            });
+          }
+        } else {
+          // Weekly, biweekly, 4-weekly, quarterly, custom recurring payment
+          const newRP = {
+            desc,
+            amount: amt,
+            frequency: freq,
+            interval_n: interval,
+            day_of_month: dueDay,
+            start_date: startDateVal,
+            account: acc,
+            transfer_to: transferTo,
+            holiday_rule: holidayRule
+          };
+          if (!cfg.recurring_payments) cfg.recurring_payments = [];
+          cfg.recurring_payments.push(newRP);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.recurring_payments) yrData.recurring_payments = [];
+              if (!yrData.recurring_payments.some(rp => rp.desc === desc)) {
+                yrData.recurring_payments.push({ ...newRP });
+              }
+            });
+          }
+        }
+      }
+    } else {
+      // Birthday or Occasion
+      const bdayMode = document.querySelector('input[name="conv-bday-mode"]:checked')?.value || 'new';
+      if (bdayMode === 'new') {
+        const nameEl = document.getElementById('conv-bday-name');
+        const monthEl = document.getElementById('conv-bday-month');
+        const dayEl = document.getElementById('conv-bday-day');
+        const budgetEl = document.getElementById('conv-bday-budget');
+        const accEl = document.getElementById('conv-bday-acc');
+        const catEl = document.getElementById('conv-bday-cat');
+
+        const name = nameEl ? nameEl.value.trim() : '';
+        const month = monthEl ? monthEl.value : srcMonth;
+        const day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+        const budget = parseFloat(budgetEl ? budgetEl.value : 0) || 0;
+        const acc = accEl ? accEl.value : cfg.current_accounts[0];
+        const cat = catEl ? catEl.value : 'Birthday';
+
+        if (!name) {
+          alert("Please enter a name for the birthday or celebration.");
+          return;
+        }
+
+        const newBday = {
+          name,
+          month,
+          day,
+          budget_amount: budget,
+          account: acc,
+          category: cat,
+          transactions: []
+        };
+
+        if (!cfg.birthdays) cfg.birthdays = [];
+        cfg.birthdays.push(newBday);
+
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(y => {
+            const yrData = appState.data.years[y];
+            if (!yrData.birthdays) yrData.birthdays = [];
+            if (!yrData.birthdays.some(b => b.name === name)) {
+              yrData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+            }
+          });
+        }
+      } else {
+        // Existing occasion
+        const selIdx = parseInt(document.getElementById('conv-bday-select')?.value, 10);
+        const spendDesc = document.getElementById('conv-bday-spend-desc')?.value.trim() || 'Gift';
+        const spendAmt = parseFloat(document.getElementById('conv-bday-spend-amt')?.value) || 0;
+        const spendAcc = document.getElementById('conv-bday-spend-acc')?.value || cfg.current_accounts[0];
+
+        const birthdays = (yData.birthdays && yData.birthdays.length > 0) ? yData.birthdays : (cfg.birthdays || []);
+        const b = birthdays[selIdx];
+        if (b) {
+          if (!b.transactions) b.transactions = [];
+          const now = new Date();
+          const todayIso = `${appState.currentYear}-${String(months.indexOf(srcMonth) + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          b.transactions.push({ desc: spendDesc, amount: spendAmt, date: todayIso, account: spendAcc });
+        }
+      }
+    }
+
+    // Optionally remove original weekly item
+    if (removeOriginal) {
+      const sourceItems = getWeekItems(srcMonth, sourceWeek);
+      if (sourceItems && !isNaN(numIdx) && numIdx >= 0 && numIdx < sourceItems.length) {
+        sourceItems.splice(numIdx, 1);
+      }
+    }
+
+    closeModal();
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) {
+      await saveBudget(appState.data);
+    }
+  },
+
   // Onboarding Wizard
   startOnboarding() { startOnboarding(); },
   closeOnboarding() { closeOnboarding(); },
@@ -21327,105 +21892,3 @@ if (document.readyState === 'loading') {
 } else {
   window.budgetApp.init();
 }
-
-// --- settings function safety patch ---
-(function() {
-  var app = window.budgetApp;
-  if (!app) return;
-
-  if (typeof app.addCurrentAccountInSettings !== 'function') {
-    app.addCurrentAccountInSettings = async function() {
-      var name = prompt('Enter current account name:');
-      if (name && name.trim()) {
-        getSettings().current_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addCreditAccountInSettings !== 'function') {
-    app.addCreditAccountInSettings = async function() {
-      var name = prompt('Enter credit card name:');
-      if (name && name.trim()) {
-        getSettings().credit_accounts.push({
-          name: name.trim(),
-          limit: 0,
-          autopay_enabled: false,
-          autopay_from: getSettings().current_accounts[0] || '',
-          autopay_when: 'week_1',
-          autopay_type: 'full',
-          autopay_fixed_amt: 0.00
-        });
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addSavingsAccountInSettings !== 'function') {
-    app.addSavingsAccountInSettings = async function() {
-      var name = prompt('Enter savings account name:');
-      if (name && name.trim()) {
-        getSettings().savings_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.editCreditAccount !== 'function') {
-    app.editCreditAccount = async function(idx, field, value) {
-      var acc = getSettings().credit_accounts[idx];
-      if (!acc) return;
-      if (field === 'autopay_enabled') {
-        acc[field] = (value === true || value === 'true');
-      } else if (field === 'limit' || field === 'autopay_fixed_amt') {
-        acc[field] = parseFloat(value) || 0;
-      } else {
-        acc[field] = value;
-      }
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.updateOpenBankingBalanceType !== 'function') {
-    app.updateOpenBankingBalanceType = function(val) {
-      var cfg = getSettings();
-      cfg.open_banking = cfg.open_banking || {};
-      cfg.open_banking.balance_type = val;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ balance_type: val }); }
-      if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-      renderContent();
-    };
-  }
-
-  if (typeof app.updateLinkedAccountBalanceType !== 'function') {
-    app.updateLinkedAccountBalanceType = async function(accountId, newBalanceType) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
-      var acc = cfg.open_banking.linked_accounts.find(function(a) { return String(a.account_id) === String(accountId) || a.account_name === accountId; });
-      if (acc) {
-        acc.balance_type = newBalanceType;
-        renderContent();
-        if (typeof mapOpenBankingAccount === 'function') {
-          try {
-            await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, acc.owner || 'Joint', newBalanceType);
-          } catch (e) {
-            console.warn("mapOpenBankingAccount error:", e);
-          }
-        }
-        if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-        if (getSettings().onboarding_complete && typeof saveBudget === 'function') { await saveBudget(appState.data); }
-        renderContent();
-      }
-    };
-  }
-})();

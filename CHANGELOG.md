@@ -5,9 +5,23 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.11] - 2026-09-04
+## [0.3.12] - 2026-09-04
 
 ### Added & Enhanced
+- **🔄 Convert Payment to Direct Debit / Scheduled Recurring or Birthday / Occasion**:
+  - Added a dedicated **Convert** (`🔄`) button to every payment entry row in Edit Mode on monthly tabs.
+  - Seamlessly convert ad-hoc weekly payments into:
+    - **Direct Debit / Scheduled Recurring**: Supports ongoing Monthly Direct Debits, Weekly, Bi-Weekly, 4-Weekly, Quarterly, Annual/Yearly bills, or Custom intervals, complete with due day, holiday rule, and transfer destinations. Automatically handles Scheduled Payments In for income items.
+    - **Birthday or Occasion**: Create a new Birthday/Occasion budget or attach the payment as logged gift spend to an existing occasion.
+  - Includes a pre-checked option to safely remove the original weekly payment upon conversion, automatically recalibrating rolling balances and pacing with zero double counting.
+- **📱 Responsive 2-Tier Card Layout for Payment Edit Rows**:
+  - Moved action buttons (`🔄 Convert`, `↔ Move`, `✕ Delete`) onto their own dedicated row beneath the inputs.
+  - Enlarged buttons to 32px height with touch-friendly tap targets and distinct role-tinted styling.
+  - Expanded description edit boxes to take the full remaining card width, eliminating cramped inputs and awkward text wrapping.
+
+---
+
+## [0.3.11] - 2026-09-04
 - **⚡ Master Scheduled Commitments Hub (`Scheduled Bills`)**:
   - Transformed the Bills view from a single calendar year into a consolidated, rolling Master Commitments Hub.
   - Added real-time Burn Rate KPI cards: Monthly Fixed Commitments, Monthly Scheduled Inflow, Net Regular Cashflow, and Total Annual Commitments.

@@ -87,6 +87,11 @@ import {
   openDateOverrideModal,
   openMoveItemModal,
   updateMoveWeekOptions,
+  openConvertItemModal,
+  onConvertTargetChange,
+  updateConvertFrequencyFields,
+  updateConvertSchedType,
+  updateConvertBdayMode,
   openRescheduleRecurringModal,
   updateReschedWeekOptions,
   openAccountTrackingModal,
@@ -1103,6 +1108,11 @@ window.budgetApp = {
   openDateOverrideModal,
   openMoveItemModal,
   updateMoveWeekOptions,
+  openConvertItemModal,
+  onConvertTargetChange,
+  updateConvertFrequencyFields,
+  updateConvertSchedType,
+  updateConvertBdayMode,
   openRescheduleRecurringModal,
   updateReschedWeekOptions,
   openAccountTrackingModal,
@@ -3871,6 +3881,261 @@ window.budgetApp = {
       const targetItems = getWeekItems(targetMonth, targetWeek);
       if (targetItems) {
         targetItems.push(moved);
+      }
+    }
+
+    closeModal();
+    calculateAndSyncRollovers();
+    renderContent();
+    if (getSettings().onboarding_complete) {
+      await saveBudget(appState.data);
+    }
+  },
+
+  async confirmConvertItem(sourceMonth, sourceWeek, itemIdx) {
+    const targetType = document.getElementById('conv-target-type')?.value || 'scheduled';
+    const removeOriginal = Boolean(document.getElementById('conv-remove-original')?.checked);
+
+    const cfg = getSettings();
+    const yData = getYearData(appState.currentYear);
+    const numIdx = parseInt(itemIdx, 10);
+    const srcMonth = sourceMonth || appState.activeTab;
+
+    if (targetType === 'scheduled') {
+      const descEl = document.getElementById('conv-sched-desc');
+      const amtEl = document.getElementById('conv-sched-amt');
+      const typeEl = document.getElementById('conv-sched-type');
+      const freqEl = document.getElementById('conv-sched-freq');
+      const dayEl = document.getElementById('conv-sched-due-day');
+      const monthEl = document.getElementById('conv-sched-month');
+      const intEl = document.getElementById('conv-sched-interval');
+      const accEl = document.getElementById('conv-sched-acc');
+      const holidayEl = document.getElementById('conv-sched-holiday-rule');
+      const transEl = document.getElementById('conv-sched-transfer');
+
+      const desc = descEl ? descEl.value.trim() : '';
+      const amt = parseFloat(amtEl ? amtEl.value : 0);
+      const isIncome = typeEl ? (typeEl.value === 'income') : false;
+      const freq = freqEl ? freqEl.value : 'monthly';
+      const dueDay = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+      const month = monthEl ? monthEl.value : srcMonth;
+      const interval = intEl ? (parseInt(intEl.value, 10) || 1) : 1;
+      const acc = accEl ? accEl.value : cfg.current_accounts[0];
+      const holidayRule = holidayEl ? holidayEl.value : (isIncome ? 'previous' : 'following');
+      const transferTo = (transEl && !isIncome) ? transEl.value : 'none';
+
+      if (!desc || isNaN(amt) || amt <= 0) {
+        alert("Please enter a description and valid positive amount.");
+        return;
+      }
+
+      const curTotalM = Number(appState.currentYear) * 12 + months.indexOf(srcMonth);
+      const startDateVal = `${appState.currentYear}-${String(months.indexOf(srcMonth) + 1).padStart(2, '0')}-${String(Math.min(28, Math.max(1, dueDay))).padStart(2, '0')}`;
+
+      if (isIncome) {
+        if (freq === 'monthly') {
+          const newPI = { desc, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_payments_in) cfg.default_payments_in = [];
+          cfg.default_payments_in.push(newPI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const y = parseInt(yStr, 10);
+              const yrData = appState.data.years[yStr];
+              if (!yrData.months) return;
+              months.forEach((mName, mIdx) => {
+                const targetTotalM = y * 12 + mIdx;
+                if (targetTotalM >= curTotalM && (typeof isItemActiveInMonth !== 'function' || isItemActiveInMonth(newPI, mName, y))) {
+                  if (!yrData.months[mName]) yrData.months[mName] = {};
+                  if (!yrData.months[mName].payments_in) yrData.months[mName].payments_in = [];
+                  if (!yrData.months[mName].payments_in.some(p => p.desc === desc && p.due_day === dueDay)) {
+                    yrData.months[mName].payments_in.push({ ...newPI });
+                  }
+                }
+              });
+            });
+          }
+          const mData = getMonthData(srcMonth);
+          if (mData && mData.payments_in && !mData.payments_in.some(p => p.desc === desc && p.due_day === dueDay)) {
+            mData.payments_in.push({ ...newPI });
+          }
+        } else if (freq === 'yearly') {
+          const newYI = { desc, month, due_day: dueDay, amount: amt, account: acc, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_yearly_income) cfg.default_yearly_income = [];
+          cfg.default_yearly_income.push(newYI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.yearly_income) yrData.yearly_income = [];
+              if (!yrData.yearly_income.some(yi => yi.desc === desc && yi.month === month)) {
+                yrData.yearly_income.push({ ...newYI });
+              }
+            });
+          }
+        } else {
+          // Weekly, biweekly, custom recurring income
+          const newRI = {
+            desc,
+            amount: amt,
+            frequency: freq,
+            interval_n: interval,
+            day_of_month: dueDay,
+            start_date: startDateVal,
+            account: acc,
+            is_income: true,
+            holiday_rule: holidayRule
+          };
+          if (!cfg.recurring_incomes) cfg.recurring_incomes = [];
+          cfg.recurring_incomes.push(newRI);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.recurring_incomes) yrData.recurring_incomes = [];
+              if (!yrData.recurring_incomes.some(ri => ri.desc === desc)) {
+                yrData.recurring_incomes.push({ ...newRI });
+              }
+            });
+          }
+        }
+      } else {
+        // Outgoing bill
+        if (freq === 'monthly') {
+          const newDD = { desc, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_direct_debits) cfg.default_direct_debits = [];
+          cfg.default_direct_debits.push(newDD);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const y = parseInt(yStr, 10);
+              const yrData = appState.data.years[yStr];
+              if (!yrData.months) return;
+              months.forEach((mName, mIdx) => {
+                const targetTotalM = y * 12 + mIdx;
+                if (targetTotalM >= curTotalM && (typeof isItemActiveInMonth !== 'function' || isItemActiveInMonth(newDD, mName, y))) {
+                  if (!yrData.months[mName]) yrData.months[mName] = {};
+                  if (!yrData.months[mName].direct_debits) yrData.months[mName].direct_debits = [];
+                  if (!yrData.months[mName].direct_debits.some(d => d.desc === desc && d.due_day === dueDay)) {
+                    yrData.months[mName].direct_debits.push({ ...newDD });
+                  }
+                }
+              });
+            });
+          }
+          const mData = getMonthData(srcMonth);
+          if (mData && mData.direct_debits && !mData.direct_debits.some(d => d.desc === desc && d.due_day === dueDay)) {
+            mData.direct_debits.push({ ...newDD });
+          }
+        } else if (freq === 'yearly') {
+          const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
+          if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+          cfg.default_yearly_recurring.push(newYR);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.yearly_recurring) yrData.yearly_recurring = [];
+              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+                yrData.yearly_recurring.push({ ...newYR });
+              }
+            });
+          }
+        } else {
+          // Weekly, biweekly, 4-weekly, quarterly, custom recurring payment
+          const newRP = {
+            desc,
+            amount: amt,
+            frequency: freq,
+            interval_n: interval,
+            day_of_month: dueDay,
+            start_date: startDateVal,
+            account: acc,
+            transfer_to: transferTo,
+            holiday_rule: holidayRule
+          };
+          if (!cfg.recurring_payments) cfg.recurring_payments = [];
+          cfg.recurring_payments.push(newRP);
+
+          if (appState.data && appState.data.years) {
+            Object.keys(appState.data.years).forEach(yStr => {
+              const yrData = appState.data.years[yStr];
+              if (!yrData.recurring_payments) yrData.recurring_payments = [];
+              if (!yrData.recurring_payments.some(rp => rp.desc === desc)) {
+                yrData.recurring_payments.push({ ...newRP });
+              }
+            });
+          }
+        }
+      }
+    } else {
+      // Birthday or Occasion
+      const bdayMode = document.querySelector('input[name="conv-bday-mode"]:checked')?.value || 'new';
+      if (bdayMode === 'new') {
+        const nameEl = document.getElementById('conv-bday-name');
+        const monthEl = document.getElementById('conv-bday-month');
+        const dayEl = document.getElementById('conv-bday-day');
+        const budgetEl = document.getElementById('conv-bday-budget');
+        const accEl = document.getElementById('conv-bday-acc');
+        const catEl = document.getElementById('conv-bday-cat');
+
+        const name = nameEl ? nameEl.value.trim() : '';
+        const month = monthEl ? monthEl.value : srcMonth;
+        const day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+        const budget = parseFloat(budgetEl ? budgetEl.value : 0) || 0;
+        const acc = accEl ? accEl.value : cfg.current_accounts[0];
+        const cat = catEl ? catEl.value : 'Birthday';
+
+        if (!name) {
+          alert("Please enter a name for the birthday or celebration.");
+          return;
+        }
+
+        const newBday = {
+          name,
+          month,
+          day,
+          budget_amount: budget,
+          account: acc,
+          category: cat,
+          transactions: []
+        };
+
+        if (!cfg.birthdays) cfg.birthdays = [];
+        cfg.birthdays.push(newBday);
+
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(y => {
+            const yrData = appState.data.years[y];
+            if (!yrData.birthdays) yrData.birthdays = [];
+            if (!yrData.birthdays.some(b => b.name === name)) {
+              yrData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+            }
+          });
+        }
+      } else {
+        // Existing occasion
+        const selIdx = parseInt(document.getElementById('conv-bday-select')?.value, 10);
+        const spendDesc = document.getElementById('conv-bday-spend-desc')?.value.trim() || 'Gift';
+        const spendAmt = parseFloat(document.getElementById('conv-bday-spend-amt')?.value) || 0;
+        const spendAcc = document.getElementById('conv-bday-spend-acc')?.value || cfg.current_accounts[0];
+
+        const birthdays = (yData.birthdays && yData.birthdays.length > 0) ? yData.birthdays : (cfg.birthdays || []);
+        const b = birthdays[selIdx];
+        if (b) {
+          if (!b.transactions) b.transactions = [];
+          const now = new Date();
+          const todayIso = `${appState.currentYear}-${String(months.indexOf(srcMonth) + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+          b.transactions.push({ desc: spendDesc, amount: spendAmt, date: todayIso, account: spendAcc });
+        }
+      }
+    }
+
+    // Optionally remove original weekly item
+    if (removeOriginal) {
+      const sourceItems = getWeekItems(srcMonth, sourceWeek);
+      if (sourceItems && !isNaN(numIdx) && numIdx >= 0 && numIdx < sourceItems.length) {
+        sourceItems.splice(numIdx, 1);
       }
     }
 

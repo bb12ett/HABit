@@ -778,15 +778,20 @@ export function renderOverviewView(container) {
                               } else {
                                 return `
                                   <div class="item-entry" draggable="true" ondragstart="window.budgetApp.handleDragStart(event, '${activeTab}', '${w}', ${entry.idx})" ondragend="window.budgetApp.handleDragEnd(event)">
-                                    <span class="drag-handle" title="Drag to any week or column">⠿</span>
-                                    <select onchange="window.budgetApp.editWeekItemType('${w}', ${entry.idx}, this.value)" style="padding:2px; font-size:11px; color:${entry.item.is_income ? 'var(--green)' : 'var(--red)'}; font-weight:bold;">
-                                      <option value="expense" ${!entry.item.is_income ? 'selected' : ''}>- Expense</option>
-                                      <option value="income" ${entry.item.is_income ? 'selected' : ''}>+ Income</option>
-                                    </select>
-                                    <input type="text" value="${entry.item.desc}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'desc', this.value)">
-                                    <input type="number" step="0.01" value="${entry.item.amount}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'amount', this.value)" style="text-align:right;">
-                                    <button class="move-btn" title="Move item to another month or week" onclick="window.budgetApp.openMoveItemModal('${activeTab}', '${w}', ${entry.idx})">↔</button>
-                                    <button class="del-btn" onclick="event.stopPropagation(); window.budgetApp.deleteWeekItem('${w}', ${entry.idx})">&times;</button>
+                                    <div class="item-entry-main">
+                                      <span class="drag-handle" title="Drag to any week or column">⠿</span>
+                                      <select onchange="window.budgetApp.editWeekItemType('${w}', ${entry.idx}, this.value)" style="padding:2px; font-size:11px; color:${entry.item.is_income ? 'var(--green)' : 'var(--red)'}; font-weight:bold;">
+                                        <option value="expense" ${!entry.item.is_income ? 'selected' : ''}>- Expense</option>
+                                        <option value="income" ${entry.item.is_income ? 'selected' : ''}>+ Income</option>
+                                      </select>
+                                      <input type="text" value="${entry.item.desc}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'desc', this.value)">
+                                      <input type="number" step="0.01" value="${entry.item.amount}" onchange="window.budgetApp.editWeekItem('${w}', ${entry.idx}, 'amount', this.value)" style="text-align:right;">
+                                    </div>
+                                    <div class="item-entry-actions">
+                                      <button type="button" class="convert-btn" title="Convert payment to Direct Debit, Recurring Bill, or Birthday/Occasion" onclick="event.stopPropagation(); window.budgetApp.openConvertItemModal('${activeTab}', '${w}', ${entry.idx})">🔄 <span>Convert</span></button>
+                                      <button type="button" class="move-btn" title="Move item to another month or week" onclick="window.budgetApp.openMoveItemModal('${activeTab}', '${w}', ${entry.idx})">↔ <span>Move</span></button>
+                                      <button type="button" class="del-btn" title="Delete item" onclick="event.stopPropagation(); window.budgetApp.deleteWeekItem('${w}', ${entry.idx})">&times; <span>Delete</span></button>
+                                    </div>
                                   </div>
                                 `;
                               }
