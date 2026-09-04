@@ -15691,8 +15691,8 @@ function updateTopBarTitle() {
   let mobileTitle = 'Budget';
 
   if (appState.activeTab === 'Overview') {
-    desktopTitle = `Forecast Overview ${yr}`;
-    mobileTitle = `Overview ${shortYr}`;
+    desktopTitle = 'Forecast Overview';
+    mobileTitle = 'Overview';
   } else if (months.includes(appState.activeTab)) {
     const fullMonth = fullMonthNames[appState.activeTab] || appState.activeTab;
     desktopTitle = `${fullMonth} ${yr}`;
@@ -15713,8 +15713,8 @@ function updateTopBarTitle() {
     desktopTitle = 'Settings & Tools';
     mobileTitle = 'Settings';
   } else if (appState.activeTab) {
-    desktopTitle = `${appState.activeTab} ${yr}`;
-    mobileTitle = `${appState.activeTab} ${shortYr}`;
+    desktopTitle = `${appState.activeTab}`;
+    mobileTitle = `${appState.activeTab}`;
   }
 
   titleEl.innerHTML = `<span class="topbar-title-desktop">${desktopTitle}</span><span class="topbar-title-mobile">${mobileTitle}</span>`;
@@ -16604,7 +16604,7 @@ window.budgetApp = {
       year = null;
     }
     let targetY = year ? parseInt(year, 10) : null;
-    if (tabName === 'Overview' && !targetY) {
+    if (tabName === 'Overview') {
       const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
         ? getCurrentPeriodMonthAndYear()
         : { year: new Date().getFullYear() };
