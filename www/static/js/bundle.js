@@ -24,6 +24,11 @@ const DEFAULT_SETTINGS = {
     secret_id: "",
     secret_key: "",
     auto_sync_interval_hours: 6,
+    auto_sync_changeover: true,
+    changeover_sync_time: "23:00",
+    sync_weekly_changeover: true,
+    sync_period_changeover: true,
+    last_changeover_sync_date: null,
     last_sync_timestamp: null,
     last_sync_status: "idle",
     linked_accounts: []
@@ -14364,7 +14369,7 @@ function renderSettingsView(container) {
                 ` : ''}
                 <div>
                   <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
-                    Auto-Sync Frequency:
+                    Auto-Sync Frequency (Interval):
                   </label>
                   <select id="cfg-openbanking-interval" style="width:100%; font-size:12px;">
                     <option value="2" ${Number(cfg.open_banking.auto_sync_interval_hours) === 2 ? 'selected' : ''}>Every 2 Hours</option>
@@ -14374,6 +14379,43 @@ function renderSettingsView(container) {
                     <option value="24" ${Number(cfg.open_banking.auto_sync_interval_hours) === 24 ? 'selected' : ''}>Once a Day (24 Hours)</option>
                     <option value="0" ${Number(cfg.open_banking.auto_sync_interval_hours) === 0 ? 'selected' : ''}>Manual Only (Disabled)</option>
                   </select>
+                </div>
+                <div style="grid-column:1/-1; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:10px 12px; margin-top:4px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+                    <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--heading); cursor:pointer; font-weight:600;">
+                      <input type="checkbox" id="cfg-openbanking-changeover-sync" ${cfg.open_banking.auto_sync_changeover !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingChangeoverSync(this.checked)">
+                      <span>🔄 <strong>Period & Weekly Changeover Auto-Sync</strong></span>
+                    </label>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      <label style="font-size:11px; color:var(--text-muted); font-weight:600;">Sync Time:</label>
+                      <select id="cfg-openbanking-changeover-time" style="font-size:11.5px; padding:2px 6px;" onchange="window.budgetApp.updateOpenBankingChangeoverTime(this.value)">
+                        <option value="20:00" ${cfg.open_banking.changeover_sync_time === '20:00' ? 'selected' : ''}>20:00 (8:00 PM)</option>
+                        <option value="21:00" ${cfg.open_banking.changeover_sync_time === '21:00' ? 'selected' : ''}>21:00 (9:00 PM)</option>
+                        <option value="22:00" ${cfg.open_banking.changeover_sync_time === '22:00' ? 'selected' : ''}>22:00 (10:00 PM)</option>
+                        <option value="23:00" ${(!cfg.open_banking.changeover_sync_time || cfg.open_banking.changeover_sync_time === '23:00') ? 'selected' : ''}>23:00 (11:00 PM - Recommended)</option>
+                        <option value="23:30" ${cfg.open_banking.changeover_sync_time === '23:30' ? 'selected' : ''}>23:30 (11:30 PM)</option>
+                        <option value="23:45" ${cfg.open_banking.changeover_sync_time === '23:45' ? 'selected' : ''}>23:45 (11:45 PM)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style="font-size:11px; color:var(--text-muted); margin:4px 0 8px 0; line-height:1.4;">
+                    Automatically triggers bank sync right before the changeover so closing balances and final transactions are recorded accurately into check-ins and period roll-overs.
+                  </div>
+                  <div style="display:flex; gap:16px; flex-wrap:wrap; padding-top:6px; border-top:1px dashed var(--border); font-size:11.5px;">
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--heading);">
+                      <input type="checkbox" id="cfg-openbanking-sync-weekly" ${cfg.open_banking.sync_weekly_changeover !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingSyncWeekly(this.checked)">
+                      <span>📅 <strong>Weekly Check-Ins:</strong> Sync every Sunday evening before Monday check-in</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:6px; cursor:pointer; color:var(--heading);">
+                      <input type="checkbox" id="cfg-openbanking-sync-period" ${cfg.open_banking.sync_period_changeover !== false ? 'checked' : ''} onchange="window.budgetApp.toggleOpenBankingSyncPeriod(this.checked)">
+                      <span>🎯 <strong>Payday Period End:</strong> Sync on period closing evening before new payday cycle</span>
+                    </label>
+                  </div>
+                  ${cfg.open_banking.last_changeover_sync_date ? `
+                    <div style="font-size:10.5px; color:var(--green); margin-top:6px;">
+                      ✓ Last changeover sync completed: <strong>${cfg.open_banking.last_changeover_sync_date}</strong>
+                    </div>
+                  ` : ''}
                 </div>
                 <div style="grid-column:1/-1;">
                   <label style="font-size:10px; color:var(--text-muted); text-transform:uppercase; font-weight:600; display:block; margin-bottom:3px;">
@@ -17096,8 +17138,16 @@ window.budgetApp = {
     cfg.open_banking.balance_type = balanceType;
     cfg.open_banking.secret_id = secId.trim();
     cfg.open_banking.secret_key = secKey.trim();
-    cfg.open_banking.redirect_uri = redirectUri.trim();
+    const changeoverSync = document.getElementById('cfg-openbanking-changeover-sync') ? document.getElementById('cfg-openbanking-changeover-sync').checked : (cfg.open_banking.auto_sync_changeover !== false);
+    const changeoverTime = document.getElementById('cfg-openbanking-changeover-time')?.value || cfg.open_banking.changeover_sync_time || '23:00';
+    const syncWeekly = document.getElementById('cfg-openbanking-sync-weekly') ? document.getElementById('cfg-openbanking-sync-weekly').checked : (cfg.open_banking.sync_weekly_changeover !== false);
+    const syncPeriod = document.getElementById('cfg-openbanking-sync-period') ? document.getElementById('cfg-openbanking-sync-period').checked : (cfg.open_banking.sync_period_changeover !== false);
+
     cfg.open_banking.auto_sync_interval_hours = isNaN(intervalVal) ? 6 : intervalVal;
+    cfg.open_banking.auto_sync_changeover = changeoverSync;
+    cfg.open_banking.changeover_sync_time = changeoverTime;
+    cfg.open_banking.sync_weekly_changeover = syncWeekly;
+    cfg.open_banking.sync_period_changeover = syncPeriod;
 
     await saveOpenBankingConfig({
       secret_id: secId.trim(),
@@ -17107,6 +17157,10 @@ window.budgetApp = {
       balance_type: balanceType,
       redirect_uri: redirectUri.trim(),
       auto_sync_interval_hours: isNaN(intervalVal) ? 6 : intervalVal,
+      auto_sync_changeover: changeoverSync,
+      changeover_sync_time: changeoverTime,
+      sync_weekly_changeover: syncWeekly,
+      sync_period_changeover: syncPeriod,
       enabled: true
     });
     cfg.open_banking.enabled = true;
@@ -17345,6 +17399,39 @@ window.budgetApp = {
     }
     saveBudget(appState.data);
     renderContent();
+  },
+
+  toggleOpenBankingChangeoverSync(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.auto_sync_changeover = !!enabled;
+    saveOpenBankingConfig({ auto_sync_changeover: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  updateOpenBankingChangeoverTime(timeVal) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.changeover_sync_time = timeVal;
+    saveOpenBankingConfig({ changeover_sync_time: timeVal });
+    saveBudget(appState.data);
+  },
+
+  toggleOpenBankingSyncWeekly(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.sync_weekly_changeover = !!enabled;
+    saveOpenBankingConfig({ sync_weekly_changeover: !!enabled });
+    saveBudget(appState.data);
+  },
+
+  toggleOpenBankingSyncPeriod(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.sync_period_changeover = !!enabled;
+    saveOpenBankingConfig({ sync_period_changeover: !!enabled });
+    saveBudget(appState.data);
   },
 
   toggleOpenBankingLiveDailyVariance(enabled) {

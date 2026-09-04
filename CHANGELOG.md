@@ -5,6 +5,21 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2026-09-04
+
+### Added & Enhanced
+- **🔄 Period & Weekly Changeover Auto-Sync for Open Banking**:
+  - Introduced automatic bank synchronization right before tracked period and weekly check-in changeovers.
+  - Syncs at a configurable evening cutoff (defaults to **11:00 PM / 23:00** on Sunday nights and payday eve) to lock in the most accurate closing balances and transactions before rolling into the next week or payday period.
+  - **Coexists with Timed Interval Sync**: Can run alongside periodic interval sync (e.g. every 6 hours), standalone, or disabled.
+  - **Granular Scope Toggles**: Selectively enable changeover sync for:
+    - `📅 Weekly Check-Ins`: Synchronize every Sunday evening prior to Monday morning check-in.
+    - `🎯 Payday Period End`: Synchronize on the closing evening of the payday period prior to the next payday cycle starting.
+  - **Configurable Cutoff Time**: Easily choose the changeover sync hour (20:00, 21:00, 22:00, 23:00, 23:30, 23:45) from Settings → Open Banking.
+  - **Intelligent Duplicate Prevention**: Automatically tracks `last_changeover_sync_date` to ensure changeover sync fires exactly once per changeover date, even if server restarts or manual syncs occur.
+
+---
+
 ## [0.3.12] - 2026-09-04
 
 ### Added & Enhanced

@@ -21,6 +21,11 @@ export const DEFAULT_SETTINGS = {
     secret_id: "",
     secret_key: "",
     auto_sync_interval_hours: 6,
+    auto_sync_changeover: true,
+    changeover_sync_time: "23:00",
+    sync_weekly_changeover: true,
+    sync_period_changeover: true,
+    last_changeover_sync_date: null,
     last_sync_timestamp: null,
     last_sync_status: "idle",
     linked_accounts: []

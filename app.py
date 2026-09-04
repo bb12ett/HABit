@@ -220,7 +220,23 @@ DEFAULT_SETTINGS = {
     ],
     "default_yearly_income": [],
     "recurring_payments": [],
-    "recurring_incomes": []
+    "recurring_incomes": [],
+    "open_banking": {
+        "enabled": False,
+        "provider": "gocardless",
+        "environment": "live",
+        "balance_type": "available",
+        "auto_update_checkins": True,
+        "auto_sync_interval_hours": 6,
+        "auto_sync_changeover": True,
+        "changeover_sync_time": "23:00",
+        "sync_weekly_changeover": True,
+        "sync_period_changeover": True,
+        "last_changeover_sync_date": None,
+        "last_sync_timestamp": None,
+        "last_sync_status": "idle",
+        "linked_accounts": []
+    }
 }
 
 def migrate_legacy_storage():
@@ -615,6 +631,73 @@ def detect_current_month_and_week_py(data: dict, today: datetime.date = None) ->
             
     cur_m_name = MONTH_NAMES[today.month - 1]
     return cur_m_name, 'Week 1'
+
+
+def check_is_changeover_day_py(data: dict, today: datetime.date = None) -> dict:
+    """
+    Evaluates whether `today` is a payday period changeover day or a weekly check-in changeover day.
+    Returns: {
+        'is_changeover': bool,
+        'is_weekly': bool,
+        'is_period': bool,
+        'month_name': str,
+        'week_name': str,
+        'reason': str
+    }
+    """
+    if today is None:
+        today = datetime.date.today()
+
+    year = today.year
+    settings = data.get('settings', {})
+    ob_cfg = settings.get('open_banking', {})
+    year_data = data.get('years', {}).get(str(year), {})
+
+    sync_weekly = ob_cfg.get('sync_weekly_changeover', True)
+    sync_period = ob_cfg.get('sync_period_changeover', True)
+
+    cur_m_name, cur_w_name = detect_current_month_and_week_py(data, today)
+    m_idx = MONTH_NAMES.index(cur_m_name) if cur_m_name in MONTH_NAMES else (today.month - 1)
+    m_data = year_data.get('months', {}).get(cur_m_name, {})
+    sched = calculate_month_schedule_py(year, m_idx, settings, m_data)
+
+    weeks = sched.get('weeks', [])
+    w_obj = next((w for w in weeks if w.get('name') == cur_w_name), None)
+
+    is_weekly = False
+    is_period = False
+    reasons = []
+
+    # Check if today is the end date of the active week or Sunday
+    if w_obj and today == w_obj.get('end_date'):
+        is_weekly = True
+    elif today.weekday() == 6:  # Sunday fallback
+        is_weekly = True
+
+    # Check if today is the end date of the month/payday period
+    if today == sched.get('end_date'):
+        is_period = True
+    elif weeks and w_obj == weeks[-1] and is_weekly:
+        is_period = True
+
+    applies_weekly = bool(sync_weekly and is_weekly)
+    applies_period = bool(sync_period and is_period)
+    is_changeover = applies_weekly or applies_period
+
+    if applies_period:
+        reasons.append(f"Payday Period Changeover ({cur_m_name})")
+    if applies_weekly:
+        reasons.append(f"Weekly Check-In Changeover ({cur_m_name} {cur_w_name})")
+
+    return {
+        'is_changeover': is_changeover,
+        'is_weekly': applies_weekly,
+        'is_period': applies_period,
+        'month_name': cur_m_name,
+        'week_name': cur_w_name,
+        'reason': " & ".join(reasons) if reasons else "None"
+    }
+
 
 
 def compute_ha_sensors(budget_data):
@@ -1064,6 +1147,47 @@ def build_bundle():
         if (getSettings().onboarding_complete && typeof saveBudget === 'function') { await saveBudget(appState.data); }
         renderContent();
       }
+    };
+  }
+
+  if (typeof app.toggleOpenBankingChangeoverSync !== 'function') {
+    app.toggleOpenBankingChangeoverSync = function(enabled) {
+      var cfg = getSettings();
+      if (!cfg.open_banking) cfg.open_banking = {};
+      cfg.open_banking.auto_sync_changeover = !!enabled;
+      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ auto_sync_changeover: !!enabled }); }
+      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
+      renderContent();
+    };
+  }
+
+  if (typeof app.updateOpenBankingChangeoverTime !== 'function') {
+    app.updateOpenBankingChangeoverTime = function(timeVal) {
+      var cfg = getSettings();
+      if (!cfg.open_banking) cfg.open_banking = {};
+      cfg.open_banking.changeover_sync_time = timeVal;
+      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ changeover_sync_time: timeVal }); }
+      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
+    };
+  }
+
+  if (typeof app.toggleOpenBankingSyncWeekly !== 'function') {
+    app.toggleOpenBankingSyncWeekly = function(enabled) {
+      var cfg = getSettings();
+      if (!cfg.open_banking) cfg.open_banking = {};
+      cfg.open_banking.sync_weekly_changeover = !!enabled;
+      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_weekly_changeover: !!enabled }); }
+      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
+    };
+  }
+
+  if (typeof app.toggleOpenBankingSyncPeriod !== 'function') {
+    app.toggleOpenBankingSyncPeriod = function(enabled) {
+      var cfg = getSettings();
+      if (!cfg.open_banking) cfg.open_banking = {};
+      cfg.open_banking.sync_period_changeover = !!enabled;
+      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_period_changeover: !!enabled }); }
+      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
     };
   }
 })();
@@ -3115,6 +3239,21 @@ def sync_open_banking_data(data):
         ob_cfg["last_sync_status"] = "success"
         ob_cfg["last_sync_error"] = None
 
+    # Record changeover sync date if today is an active changeover day and time is at/past changeover sync time
+    today_local = datetime.date.today()
+    chg_info = check_is_changeover_day_py(data, today_local)
+    if chg_info.get("is_changeover"):
+        target_time_str = ob_cfg.get("changeover_sync_time", "23:00")
+        try:
+            t_parts = [int(p) for p in str(target_time_str).split(":")]
+            target_h, target_m = t_parts[0], t_parts[1] if len(t_parts) > 1 else 0
+        except Exception:
+            target_h, target_m = 23, 0
+        now_local = datetime.datetime.now()
+        if (now_local.hour > target_h) or (now_local.hour == target_h and now_local.minute >= target_m):
+            ob_cfg["last_changeover_sync_date"] = today_local.isoformat()
+            log_open_banking_debug(f"[OpenBanking] Recorded changeover sync for {today_local.isoformat()} ({chg_info.get('reason')}).")
+
     # Sync to Home Assistant
     try:
         sync_ha_sensors(data)
@@ -3134,41 +3273,72 @@ def sync_open_banking_data(data):
 
 
 def background_open_banking_scheduler():
-    """Background daemon worker that triggers automatic open banking sync based on auto_sync_interval_hours."""
+    """Background daemon worker that triggers automatic open banking sync based on auto_sync_interval_hours and changeover schedule."""
     time.sleep(15)  # Initial grace period on server startup
     while True:
         try:
             data = load_data()
             ob_cfg = data.get("settings", {}).get("open_banking", {})
             if ob_cfg.get("enabled", False) and ob_cfg.get("linked_accounts", []):
-                interval_hours = float(ob_cfg.get("auto_sync_interval_hours", 6))
-                if interval_hours > 0:
-                    last_sync_str = ob_cfg.get("last_sync_timestamp")
-                    should_sync = False
-                    if not last_sync_str:
-                        should_sync = True
-                    else:
-                        try:
-                            clean_ts = last_sync_str.replace("Z", "+00:00")
-                            last_sync_dt = datetime.datetime.fromisoformat(clean_ts)
-                            if last_sync_dt.tzinfo is None:
-                                last_sync_dt = last_sync_dt.replace(tzinfo=datetime.timezone.utc)
-                            now_dt = datetime.datetime.now(datetime.timezone.utc)
-                            diff_hours = (now_dt - last_sync_dt).total_seconds() / 3600.0
-                            if diff_hours >= interval_hours:
-                                should_sync = True
-                        except Exception as parse_err:
-                            log_open_banking_debug(f"[AutoSync] Timestamp parse notice: {parse_err}")
-                            should_sync = True
+                should_sync = False
+                sync_reason = ""
+                today_local = datetime.date.today()
+                today_iso = today_local.isoformat()
 
-                    if should_sync:
-                        log_open_banking_debug(f"\n[AutoSync] Background scheduled sync started (Interval: {interval_hours}h)...")
-                        sync_open_banking_data(data)
+                # 1. Period & Weekly Changeover Auto-Sync
+                sync_on_changeover = ob_cfg.get("auto_sync_changeover", True)
+                if sync_on_changeover:
+                    changeover_info = check_is_changeover_day_py(data, today_local)
+                    if changeover_info.get("is_changeover"):
+                        last_chg_date = ob_cfg.get("last_changeover_sync_date")
+                        if last_chg_date != today_iso:
+                            target_time_str = ob_cfg.get("changeover_sync_time", "23:00")
+                            try:
+                                t_parts = [int(p) for p in str(target_time_str).split(":")]
+                                target_h, target_m = t_parts[0], t_parts[1] if len(t_parts) > 1 else 0
+                            except Exception:
+                                target_h, target_m = 23, 0
+
+                            now_local = datetime.datetime.now()
+                            if (now_local.hour > target_h) or (now_local.hour == target_h and now_local.minute >= target_m):
+                                should_sync = True
+                                sync_reason = f"Changeover Sync: {changeover_info.get('reason')} at {now_local.strftime('%H:%M')}"
+                                ob_cfg["last_changeover_sync_date"] = today_iso
+                                save_data(data)
+
+                # 2. Timed Interval Auto-Sync (if not already triggered by changeover)
+                if not should_sync:
+                    interval_hours = float(ob_cfg.get("auto_sync_interval_hours", 6))
+                    if interval_hours > 0:
+                        last_sync_str = ob_cfg.get("last_sync_timestamp")
+                        if not last_sync_str:
+                            should_sync = True
+                            sync_reason = f"Initial Interval Sync (Interval: {interval_hours}h)"
+                        else:
+                            try:
+                                clean_ts = last_sync_str.replace("Z", "+00:00")
+                                last_sync_dt = datetime.datetime.fromisoformat(clean_ts)
+                                if last_sync_dt.tzinfo is None:
+                                    last_sync_dt = last_sync_dt.replace(tzinfo=datetime.timezone.utc)
+                                now_dt = datetime.datetime.now(datetime.timezone.utc)
+                                diff_hours = (now_dt - last_sync_dt).total_seconds() / 3600.0
+                                if diff_hours >= interval_hours:
+                                    should_sync = True
+                                    sync_reason = f"Interval Sync ({interval_hours}h elapsed: {diff_hours:.1f}h)"
+                            except Exception as parse_err:
+                                log_open_banking_debug(f"[AutoSync] Timestamp parse notice: {parse_err}")
+                                should_sync = True
+                                sync_reason = f"Interval Sync (recovered from timestamp notice)"
+
+                if should_sync:
+                    log_open_banking_debug(f"\n[AutoSync] Background scheduled sync started ({sync_reason})...")
+                    sync_open_banking_data(data)
         except Exception as e:
             log_open_banking_debug(f"[AutoSync] Background scheduler exception: {e}")
 
         # Check every 60 seconds
         time.sleep(60)
+
 
 
 # Start background auto-sync thread
@@ -3247,6 +3417,11 @@ def openbanking_status():
         "has_credentials": bool(ob_cfg.get("secret_id")),
         "secret_id_masked": (ob_cfg.get("secret_id", "")[:4] + "••••" + ob_cfg.get("secret_id", "")[-4:]) if len(ob_cfg.get("secret_id", "")) > 8 else "••••",
         "auto_sync_interval_hours": ob_cfg.get("auto_sync_interval_hours", 6),
+        "auto_sync_changeover": ob_cfg.get("auto_sync_changeover", True),
+        "changeover_sync_time": ob_cfg.get("changeover_sync_time", "23:00"),
+        "sync_weekly_changeover": ob_cfg.get("sync_weekly_changeover", True),
+        "sync_period_changeover": ob_cfg.get("sync_period_changeover", True),
+        "last_changeover_sync_date": ob_cfg.get("last_changeover_sync_date"),
         "last_sync_timestamp": ob_cfg.get("last_sync_timestamp"),
         "last_sync_status": ob_cfg.get("last_sync_status", "idle"),
         "linked_accounts": ob_cfg.get("linked_accounts", []),
@@ -3279,6 +3454,18 @@ def openbanking_config():
         ob_cfg["redirect_uri"] = str(payload["redirect_uri"]).strip()
     if "auto_sync_interval_hours" in payload:
         ob_cfg["auto_sync_interval_hours"] = int(payload["auto_sync_interval_hours"])
+    if "auto_sync_changeover" in payload:
+        ob_cfg["auto_sync_changeover"] = bool(payload["auto_sync_changeover"])
+    if "changeover_sync_time" in payload:
+        ob_cfg["changeover_sync_time"] = str(payload["changeover_sync_time"]).strip()
+    if "sync_weekly_changeover" in payload:
+        ob_cfg["sync_weekly_changeover"] = bool(payload["sync_weekly_changeover"])
+    if "sync_period_changeover" in payload:
+        ob_cfg["sync_period_changeover"] = bool(payload["sync_period_changeover"])
+    if "live_daily_variance" in payload:
+        ob_cfg["live_daily_variance"] = bool(payload["live_daily_variance"])
+    if "debug_logging" in payload:
+        ob_cfg["debug_logging"] = bool(payload["debug_logging"])
 
     save_data(data)
     return jsonify({"success": True, "status": "saved"})

@@ -1333,8 +1333,16 @@ window.budgetApp = {
     cfg.open_banking.balance_type = balanceType;
     cfg.open_banking.secret_id = secId.trim();
     cfg.open_banking.secret_key = secKey.trim();
-    cfg.open_banking.redirect_uri = redirectUri.trim();
+    const changeoverSync = document.getElementById('cfg-openbanking-changeover-sync') ? document.getElementById('cfg-openbanking-changeover-sync').checked : (cfg.open_banking.auto_sync_changeover !== false);
+    const changeoverTime = document.getElementById('cfg-openbanking-changeover-time')?.value || cfg.open_banking.changeover_sync_time || '23:00';
+    const syncWeekly = document.getElementById('cfg-openbanking-sync-weekly') ? document.getElementById('cfg-openbanking-sync-weekly').checked : (cfg.open_banking.sync_weekly_changeover !== false);
+    const syncPeriod = document.getElementById('cfg-openbanking-sync-period') ? document.getElementById('cfg-openbanking-sync-period').checked : (cfg.open_banking.sync_period_changeover !== false);
+
     cfg.open_banking.auto_sync_interval_hours = isNaN(intervalVal) ? 6 : intervalVal;
+    cfg.open_banking.auto_sync_changeover = changeoverSync;
+    cfg.open_banking.changeover_sync_time = changeoverTime;
+    cfg.open_banking.sync_weekly_changeover = syncWeekly;
+    cfg.open_banking.sync_period_changeover = syncPeriod;
 
     await saveOpenBankingConfig({
       secret_id: secId.trim(),
@@ -1344,6 +1352,10 @@ window.budgetApp = {
       balance_type: balanceType,
       redirect_uri: redirectUri.trim(),
       auto_sync_interval_hours: isNaN(intervalVal) ? 6 : intervalVal,
+      auto_sync_changeover: changeoverSync,
+      changeover_sync_time: changeoverTime,
+      sync_weekly_changeover: syncWeekly,
+      sync_period_changeover: syncPeriod,
       enabled: true
     });
     cfg.open_banking.enabled = true;
@@ -1582,6 +1594,39 @@ window.budgetApp = {
     }
     saveBudget(appState.data);
     renderContent();
+  },
+
+  toggleOpenBankingChangeoverSync(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.auto_sync_changeover = !!enabled;
+    saveOpenBankingConfig({ auto_sync_changeover: !!enabled });
+    saveBudget(appState.data);
+    renderContent();
+  },
+
+  updateOpenBankingChangeoverTime(timeVal) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.changeover_sync_time = timeVal;
+    saveOpenBankingConfig({ changeover_sync_time: timeVal });
+    saveBudget(appState.data);
+  },
+
+  toggleOpenBankingSyncWeekly(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.sync_weekly_changeover = !!enabled;
+    saveOpenBankingConfig({ sync_weekly_changeover: !!enabled });
+    saveBudget(appState.data);
+  },
+
+  toggleOpenBankingSyncPeriod(enabled) {
+    const cfg = getSettings();
+    cfg.open_banking = cfg.open_banking || {};
+    cfg.open_banking.sync_period_changeover = !!enabled;
+    saveOpenBankingConfig({ sync_period_changeover: !!enabled });
+    saveBudget(appState.data);
   },
 
   toggleOpenBankingLiveDailyVariance(enabled) {
