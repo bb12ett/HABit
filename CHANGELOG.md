@@ -5,6 +5,34 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.11] - 2026-09-04
+
+### Added & Enhanced
+- **⚡ Master Scheduled Commitments Hub (`Scheduled Bills`)**:
+  - Transformed the Bills view from a single calendar year into a consolidated, rolling Master Commitments Hub.
+  - Added real-time Burn Rate KPI cards: Monthly Fixed Commitments, Monthly Scheduled Inflow, Net Regular Cashflow, and Total Annual Commitments.
+  - Dynamic Next Due Date countdown badges (`🚨 Today!`, `⏳ Tomorrow`, `in 3d`, etc.) with holiday and weekend adjustment rules.
+  - Contract & deal window tracking (`start_date` and `end_date`) with live timeline badges and automatic month filtering.
+  - Horizon Synchronization: added `syncMasterBillsAcrossHorizon()` and a 1-click **🔄 Sync All Sliding Months** button to instantly propagate master bills across all active and future months in the multi-year sliding window.
+- **🎉 Rolling 365-Day Budgets & Occasions Hub (`Budgets & Occasions`)**:
+  - Re-architected Birthdays & Celebrations into a continuous 365-day rolling timeline. Dates that have passed in the current calendar year wrap seamlessly to the next year with live countdowns rather than showing "Passed this year".
+  - Added smart filter pills: `All`, `⏳ Next 30 Days`, `📅 Next 90 Days`, `🗓️ Next 365 Days`, and `⏪ Passed Recently (Last 30 Days)`.
+  - Multi-Year Milestone Budgets & Sinking Funds: dynamic calculation of `monthly_spread` across calendar year boundaries (e.g. Sep '26 to Jun '27 = 10 months) with live Pacing Allocation badges (`📊 Pace: £X/mo (Y mos remaining)`).
+- **📅 Custom Timespans in Spend Analytics & Payday Cycle Alignment**:
+  - Replaced the fixed button bar with a flexible Timespan Toolbar featuring period stepping (`◀` / `▶`), native date pickers, quick offset chip (`⚡ -12 Mo`), and dynamic date range badges.
+  - "This Month", "Last Month", and stepping automatically align with monthly payday cycle boundaries rather than arbitrary calendar month boundaries.
+- **📈 Rolling 12-Month Annual Trajectory & Dedicated Savings Forecast Chart**:
+  - Annual Trajectory transformed into a rolling 12-month window with interactive timeline scrubber, stepping buttons, and gesture swipe/scroll controls.
+  - Dedicated Savings Chart inside the Annual Trajectory view with planned target curves, recorded actual check-ins, and forward compound growth trend forecasts with account switcher pills.
+- **⌨️ Desktop Arrow Navigation & Smooth Touch-Gesture Animations**:
+  - Added keyboard arrow key support (`ArrowLeft` / `ArrowRight`) and on-screen desktop arrow buttons flanking month pills, matching mobile touch swipe slide animations.
+- **🔄 Unarchived Month Navigation Restoration**:
+  - Restoring an archived month immediately adds it back into the top navigation bar pills and prevents auto-archive from hiding it.
+- **✨ Clean Dynamic Topbar Titles**:
+  - Removed calendar year suffixes from Overview, Budgets & Occasions, Scheduled Bills, Annual Trajectory, and Live Spend & Categories for clean, multi-year dynamic views.
+
+---
+
 ## [0.3.10] - 2026-09-04
 
 ### Added & Enhanced
