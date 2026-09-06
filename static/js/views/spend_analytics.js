@@ -489,9 +489,9 @@ export function renderSpendAnalyticsView(container) {
             Real-time categorization and breakdown of your bank card purchases, fuel, groceries, and living expenses.
           </p>
         </div>
-        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="spend-header-actions">
           <!-- Account selector -->
-          <select onchange="window.budgetApp.setSpendAnalyticsAccount(this.value)" style="font-size:11.5px; padding:5px 8px; border-radius:6px; font-weight:600;">
+          <select class="spend-account-select" onchange="window.budgetApp.setSpendAnalyticsAccount(this.value)" style="font-size:11.5px; padding:5px 8px; border-radius:6px; font-weight:600;">
             <option value="all" ${accountFilter === 'all' ? 'selected' : ''}>💳 All Accounts Combined</option>
             ${distinctAccounts.map(acc => `<option value="${acc}" ${accountFilter === acc ? 'selected' : ''}>${acc}</option>`).join('')}
           </select>
@@ -507,48 +507,54 @@ export function renderSpendAnalyticsView(container) {
       </div>
 
       <!-- TIMESPAN CONTROL TOOLBAR -->
-      <div class="spend-timespan-bar" style="margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; background:var(--bg-card, rgba(30, 41, 59, 0.5)); border:1px solid var(--border, rgba(255, 255, 255, 0.08)); border-radius:12px; padding:8px 12px; box-sizing:border-box;">
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <button class="btn secondary sm" onclick="window.budgetApp.shiftSpendTimeframe(-1)" title="Step 1 Period Earlier in History" style="height:32px; padding:0 12px; font-weight:700;">
-            ◀
-          </button>
-          <div class="spend-range-badge" ${isPaydayCycle && rangeInfo.monthName ? `onclick="window.budgetApp.openDateOverrideModal('${rangeInfo.monthName}')" title="Click to override payday period for ${rangeInfo.monthName}" style="cursor:pointer; background:var(--card-bg, #1e293b); border:1px solid var(--border, #334155); border-radius:9999px; padding:4px 14px; font-size:12.5px; font-weight:700; color:var(--heading, #f8fafc); display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,0.15); user-select:none;"` : `style="background:var(--card-bg, #1e293b); border:1px solid var(--border, #334155); border-radius:9999px; padding:4px 14px; font-size:12.5px; font-weight:700; color:var(--heading, #f8fafc); display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 4px rgba(0,0,0,0.15); user-select:none;"`}>
-            <span>📅 ${rangeBadgeText} ${isPaydayCycle && rangeInfo.monthName ? '✏️' : ''}</span>
-            <span style="font-size:11px; opacity:0.75; font-weight:500;">(${dayCount} ${dayCount === 1 ? 'day' : 'days'})</span>
+      <div class="spend-timespan-bar">
+        <div class="spend-stepper-wrap">
+          <div class="spend-stepper-controls">
+            <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(-1)" title="Step 1 Period Earlier in History">
+              ◀
+            </button>
+            <div class="spend-range-badge" ${isPaydayCycle && rangeInfo.monthName ? `onclick="window.budgetApp.openDateOverrideModal('${rangeInfo.monthName}')" title="Click to override payday period for ${rangeInfo.monthName}" style="cursor:pointer;"` : ''}>
+              <span class="spend-badge-text">📅 ${rangeBadgeText} ${isPaydayCycle && rangeInfo.monthName ? '✏️' : ''}</span>
+              <span class="spend-badge-days">(${dayCount} ${dayCount === 1 ? 'day' : 'days'})</span>
+            </div>
+            <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(1)" title="Step 1 Period Later in History">
+              ▶
+            </button>
           </div>
-          <button class="btn secondary sm" onclick="window.budgetApp.shiftSpendTimeframe(1)" title="Step 1 Period Later in History" style="height:32px; padding:0 12px; font-weight:700;">
-            ▶
-          </button>
-          <button class="btn secondary sm" onclick="window.budgetApp.resetSpendTimeframe()" title="Reset to This Month" style="height:32px; font-size:11.5px; font-weight:600;">
+          <button class="btn secondary sm spend-reset-btn desktop-only" onclick="window.budgetApp.resetSpendTimeframe()" title="Reset to This Month">
             This Month
           </button>
         </div>
 
-        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-          <label style="font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase;">Preset:</label>
-          <select id="spendPresetSelect" onchange="window.budgetApp.setSpendAnalyticsTimeframe(this.value)" style="height:32px; font-size:12px; padding:0 8px; border-radius:6px; font-weight:600;">
-            <option value="this_month" ${timeframe === 'this_month' ? 'selected' : ''}>📅 This Month</option>
-            <option value="last_month" ${timeframe === 'last_month' ? 'selected' : ''}>📅 Last Month</option>
-            <option value="active_week" ${timeframe === 'active_week' ? 'selected' : ''}>⚡ This Week</option>
-            <option value="last_7_days" ${timeframe === 'last_7_days' ? 'selected' : ''}>⚡ Last 7 Days</option>
-            <option value="last_30_days" ${timeframe === 'last_30_days' ? 'selected' : ''}>⚡ Last 30 Days</option>
-            <option value="last_90_days" ${timeframe === 'last_90_days' ? 'selected' : ''}>⚡ Last 90 Days</option>
-            <option value="rolling_12_months" ${timeframe === 'rolling_12_months' ? 'selected' : ''}>📈 Rolling 12 Months</option>
-            <option value="year_to_date" ${timeframe === 'year_to_date' ? 'selected' : ''}>📈 Year to Date</option>
-            <option value="all_time" ${timeframe === 'all_time' ? 'selected' : ''}>🌐 All Time</option>
-            <option value="custom" ${timeframe === 'custom' ? 'selected' : ''}>🗓️ Custom Range</option>
-          </select>
-
-          <div style="display:inline-flex; align-items:center; gap:6px; background:var(--card-bg); border:1px solid var(--border); border-radius:8px; padding:2px 8px;">
-            <span style="font-size:11px; color:var(--text-muted); font-weight:600;">From:</span>
-            <input type="date" id="spendRangeStart" value="${rangeInfo.startIso}" style="height:28px; font-size:11.5px; padding:0 4px; border:none; background:transparent; color:var(--heading);" onchange="window.budgetApp.setSpendCustomDateRange(this.value, document.getElementById('spendRangeEnd').value)">
-            <span style="font-size:11px; color:var(--text-muted); font-weight:600;">To:</span>
-            <input type="date" id="spendRangeEnd" value="${rangeInfo.endIso}" style="height:28px; font-size:11.5px; padding:0 4px; border:none; background:transparent; color:var(--heading);" onchange="window.budgetApp.setSpendCustomDateRange(document.getElementById('spendRangeStart').value, this.value)">
+        <div class="spend-options-wrap">
+          <div class="spend-preset-row">
+            <label class="spend-preset-label">Preset:</label>
+            <select id="spendPresetSelect" class="spend-preset-select" onchange="window.budgetApp.setSpendAnalyticsTimeframe(this.value)">
+              <option value="this_month" ${timeframe === 'this_month' ? 'selected' : ''}>📅 This Month</option>
+              <option value="last_month" ${timeframe === 'last_month' ? 'selected' : ''}>📅 Last Month</option>
+              <option value="active_week" ${timeframe === 'active_week' ? 'selected' : ''}>⚡ This Week</option>
+              <option value="last_7_days" ${timeframe === 'last_7_days' ? 'selected' : ''}>⚡ Last 7 Days</option>
+              <option value="last_30_days" ${timeframe === 'last_30_days' ? 'selected' : ''}>⚡ Last 30 Days</option>
+              <option value="last_90_days" ${timeframe === 'last_90_days' ? 'selected' : ''}>⚡ Last 90 Days</option>
+              <option value="rolling_12_months" ${timeframe === 'rolling_12_months' ? 'selected' : ''}>📈 Rolling 12 Months</option>
+              <option value="year_to_date" ${timeframe === 'year_to_date' ? 'selected' : ''}>📈 Year to Date</option>
+              <option value="all_time" ${timeframe === 'all_time' ? 'selected' : ''}>🌐 All Time</option>
+              <option value="custom" ${timeframe === 'custom' ? 'selected' : ''}>🗓️ Custom Range</option>
+            </select>
+            <button class="btn secondary sm spend-offset-btn" onclick="window.budgetApp.setSpendQuickOffset('minus_12_months')" title="Set Start Date to End Date minus 12 Months">
+              ⚡ -12 Mo
+            </button>
+            <button class="btn secondary sm spend-reset-btn mobile-only" onclick="window.budgetApp.resetSpendTimeframe()" title="Reset to This Month">
+              This Month
+            </button>
           </div>
 
-          <button class="btn secondary sm" onclick="window.budgetApp.setSpendQuickOffset('minus_12_months')" title="Set Start Date to End Date minus 12 Months" style="height:32px; font-size:11px; font-weight:600; padding:0 10px;">
-            ⚡ -12 Mo
-          </button>
+          <div class="spend-custom-dates">
+            <span class="spend-date-label">From:</span>
+            <input type="date" id="spendRangeStart" value="${rangeInfo.startIso}" onchange="window.budgetApp.setSpendCustomDateRange(this.value, document.getElementById('spendRangeEnd').value)">
+            <span class="spend-date-label">To:</span>
+            <input type="date" id="spendRangeEnd" value="${rangeInfo.endIso}" onchange="window.budgetApp.setSpendCustomDateRange(document.getElementById('spendRangeStart').value, this.value)">
+          </div>
         </div>
       </div>
     </div>
@@ -556,25 +562,25 @@ export function renderSpendAnalyticsView(container) {
     <!-- KPI METRICS SUMMARY -->
     <div class="kpi-grid" style="margin-bottom:16px;">
       <div class="kpi-card">
-        <div class="kpi-label">Total Outgoings (${dayCount} ${dayCount === 1 ? 'Day' : 'Days'})</div>
-        <div class="kpi-value" style="color:var(--curr-border);">${curr}${grandTotal.toFixed(2)}</div>
+        <div class="kpi-title">Total Outgoings (${dayCount} ${dayCount === 1 ? 'Day' : 'Days'})</div>
+        <div class="kpi-val" style="color:var(--curr-border);">${curr}${grandTotal.toFixed(2)}</div>
         <div class="kpi-sub">${transactionCount} transactions analyzed</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Daily Average Burn Rate</div>
-        <div class="kpi-value" style="color:var(--heading);">${curr}${avgDailySpend.toFixed(2)} <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">/ day</span></div>
+        <div class="kpi-title">Daily Average Burn Rate</div>
+        <div class="kpi-val">${curr}${avgDailySpend.toFixed(2)} <span style="font-size:12px; font-weight:normal; color:var(--text-muted);">/ day</span></div>
         <div class="kpi-sub">Calculated over ${dayCount} active days</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Top Spending Category</div>
-        <div class="kpi-value" style="color:${topCat ? topCat.category.color : 'var(--heading)'}; font-size:18px;">
+        <div class="kpi-title">Top Spending Category</div>
+        <div class="kpi-val" style="color:${topCat ? topCat.category.color : 'var(--heading)'}; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${topCat ? `${topCat.category.icon} ${topCat.category.label}` : 'None'}">
           ${topCat ? `${topCat.category.icon} ${topCat.category.label}` : 'None'}
         </div>
-        <div class="kpi-sub">${topCat ? `${curr}${topCat.totalAmount.toFixed(2)} (${topCat.percentage.toFixed(1)}% of total)` : 'No transactions recorded'}</div>
+        <div class="kpi-sub" title="${topCat ? `${curr}${topCat.totalAmount.toFixed(2)} (${topCat.percentage.toFixed(1)}% of total)` : ''}">${topCat ? `${curr}${topCat.totalAmount.toFixed(2)} (${topCat.percentage.toFixed(1)}% of total)` : 'No transactions recorded'}</div>
       </div>
       <div class="kpi-card">
-        <div class="kpi-label">Active Bank Accounts</div>
-        <div class="kpi-value" style="color:var(--green);">${linkedAccounts.length > 0 ? linkedAccounts.length : distinctAccounts.length} Linked</div>
+        <div class="kpi-title">Active Bank Accounts</div>
+        <div class="kpi-val green">${linkedAccounts.length > 0 ? linkedAccounts.length : distinctAccounts.length} Linked</div>
         <div class="kpi-sub">${cfg.open_banking?.enabled ? '🟢 Auto-Syncing live feeds' : 'Offline / Manual mode'}</div>
       </div>
     </div>

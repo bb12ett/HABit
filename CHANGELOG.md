@@ -5,6 +5,21 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.14] - 2026-09-06
+
+### Added & Enhanced
+- **📱 Spend Analytics Responsive Mobile Layout**:
+  - **Pinned Stepper Controls**: Unified `[ ◀ ]`, the payday range badge, and `[ ▶ ]` in a dedicated, no-wrap stepper row (`.spend-stepper-controls`). Prevents navigation arrows from breaking onto separate rows on mobile screens.
+  - **Structured 3-Tier Toolbar**: Streamlined the date control toolbar from a 6-row wrapped layout into 3 balanced rows (Stepper row, Preset dropdown & quick actions, and full-width Date range pickers).
+  - **Balanced Header Action Grid**: Aligned the account selector and action buttons (`🌐 Update Dictionary`, `🔄 Sync Bank`) into a symmetrical 2-column grid on mobile, removing orphaned button wraps.
+  - **Standardized KPI Cards**: Switched metric cards to standard `.kpi-title` and `.kpi-val` classes with ellipsis protection to prevent multi-line category names from clipping subtitles.
+  - **FAB & Scroll Clearance**: Halved the vertical footprint of top controls, moving KPI cards safely above the floating action button (`+`) upon initial page load and expanding bottom scroll padding.
+- **⚙️ Relocated Danger Zone & Factory Reset**:
+  - Moved **⚠️ Factory Reset** from the sidebar drawer to a dedicated **⚠️ Danger Zone** panel at the bottom of **Full Application Settings**.
+  - Prevents accidental database wipes when browsing themes or navigation options in the sidebar, while providing clear warning guidance and backup recommendations.
+
+---
+
 ## [0.3.13] - 2026-09-04
 
 ### Added & Enhanced

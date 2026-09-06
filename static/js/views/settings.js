@@ -873,6 +873,26 @@ export function renderSettingsView(container) {
             </div>
           </div>
         </div>
+
+        <!-- DANGER ZONE / FACTORY RESET PANEL -->
+        <div class="panel" style="margin-top:20px; border:1px solid rgba(239, 68, 68, 0.4); background:rgba(239, 68, 68, 0.04);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--red, #ef4444); display:flex; align-items:center; gap:8px;">
+                <span>⚠️</span> Danger Zone &amp; Factory Reset
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Permanently erase all budget data, transactions, bank accounts, and settings, returning the application to its original state.
+              </p>
+            </div>
+            <button id="factoryResetBtn" type="button" class="btn red" style="font-size:12px; padding:6px 14px; font-weight:700;" onclick="window.budgetApp.resetAllData();">
+              ⚠️ Factory Reset
+            </button>
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); line-height:1.4; background:rgba(0,0,0,0.12); padding:10px 12px; border-radius:6px; border:1px solid rgba(239, 68, 68, 0.2);">
+            <strong style="color:var(--red, #ef4444);">Irreversible Action:</strong> Factory Reset permanently purges all multi-year budgets, actuals, transactions, Open Banking connections, and merchant rules from both memory and local/server disk storage. Once confirmed, the app will reload and launch the 5-step Onboarding Setup Wizard. If you wish to preserve any data, please download an archive first via <strong>Export Backup</strong> above.
+          </div>
+        </div>
       </div>
 
       <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">

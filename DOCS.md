@@ -152,7 +152,7 @@ Switch themes anytime via the **Settings (☰)** side drawer or in the Setup Wiz
 **A:** Yes! HABit is packaged with multi-architecture support for `aarch64` (Raspberry Pi 3/4/5 64-bit, Home Assistant Green/Yellow), `amd64` (Intel/AMD NUC, Proxmox, x86_64 VMs), `armhf`, `armv7`, and `i386`.
 
 ### Q: How do I perform a complete reset?
-**A:** Open **Settings (☰)** > Scroll to the bottom > Click **⚠️ Factory Reset**. This will erase existing data and relaunch the Onboarding Wizard. (Always export a backup first!).
+**A:** Open **Settings (☰)** > Click **Full Application Settings** > Scroll to the bottom > In **⚠️ Danger Zone**, click **⚠️ Factory Reset**. This will erase existing data and relaunch the Onboarding Wizard. (Always export a backup first!).
 
 ---
 
