@@ -1475,13 +1475,27 @@ const LocalEngine = {
 
         if (isNaN(rawAmt)) continue;
 
+        const dateMatch = rawDesc.match(/(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/i);
+        let effectiveDate = rawDate;
+        if (dateMatch) {
+          let dStr = dateMatch[1];
+          if (dStr.includes('/')) {
+            const p = dStr.split('/');
+            effectiveDate = `${p[2]}-${p[1]}-${p[0]}`;
+          } else {
+            effectiveDate = dStr;
+          }
+        }
+        const cleanDesc = rawDesc.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, '').trim();
+
         const txnId = `local_${Date.now()}_${i}_${Math.abs(rawAmt).toFixed(2)}`;
         newTxns.push({
           transaction_id: txnId,
-          booking_date: rawDate,
-          amount: rawAmt,
-          payee_name: rawDesc,
-          description: rawDesc,
+          booking_date: effectiveDate,
+          cleared_date: rawDate,
+          payment_date: effectiveDate,
+          payee_name: cleanDesc || rawDesc,
+          description: cleanDesc || rawDesc,
           raw_info: rawDesc,
           account_name: mappedAccount || 'Current Account',
           owner: owner || 'Joint'
@@ -4051,9 +4065,30 @@ function setDynamicCategories(cats) {
 }
 
 // Pre-clean transaction text by removing payment gateway prefixes and standardizing whitespace
+function cleanPayeeTitle(str) {
+  if (!str) return '';
+  return str.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, '').trim();
+}
+
+function extractEmbeddedTransactionDate(str) {
+  if (!str) return null;
+  const m = str.match(/(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/i);
+  if (m) {
+    const d = m[1];
+    if (d.includes('/')) {
+      const p = d.split('/');
+      return `${p[2]}-${p[1]}-${p[0]}`;
+    }
+    return d;
+  }
+  return null;
+}
+
 function normalizeTransactionText(text) {
   if (!text || typeof text !== 'string') return '';
   let s = text.toLowerCase();
+  // Strip embedded ', Transaction Date: YYYY-MM-DD' from search tokens
+  s = s.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, ' ');
   // Strip common payment processor / aggregator prefixes (including multi-asterisks, Shopify SP)
   s = s.replace(/\b(?:sq\s*\*|iz\s*\*|zettle[\s_*]+|paypal\s*\*|crv\s*\*|sumup\s*\*+|sp\s*\*?|stripe\s*\*)\s*/gi, ' ');
   // Expand common bank statement truncations to canonical forms
@@ -4896,6 +4931,8 @@ if (typeof window !== 'undefined') {
   window.categorizeTransaction = categorizeTransaction;
   window.calculateCategoryBreakdown = calculateCategoryBreakdown;
   window.calculateMonthForecast = calculateMonthForecast;
+  window.cleanPayeeTitle = cleanPayeeTitle;
+  window.extractEmbeddedTransactionDate = extractEmbeddedTransactionDate;
 }
 
 // --- static/js/charts.js ---
@@ -14107,7 +14144,10 @@ function renderSpendAnalyticsView(container) {
                   <td style="text-align:center; padding:8px 4px;">
                     <input type="checkbox" class="spend-row-select" data-txnid="${t.transaction_id}" onchange="window.budgetApp.toggleSpendRowSelect('${t.transaction_id}', this.checked)">
                   </td>
-                  <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px; padding:8px;">${t.booking_date}</td>
+                  <td style="color:var(--text-muted); white-space:nowrap; font-size:11.5px; padding:8px;">
+                    ${t.booking_date}
+                    ${(t.cleared_date && t.cleared_date !== t.booking_date) ? `<div style="font-size:9.5px; opacity:0.75; color:var(--text-muted);" title="Cleared on statement: ${t.cleared_date}">Cleared: ${t.cleared_date}</div>` : ''}
+                  </td>
                   <td style="padding:8px;">
                     <strong style="color:var(--heading); font-size:12.5px;">${merchantDisp}</strong>
                     ${t.holiday_window_name ? `<span class="badge" style="background:rgba(56,189,248,0.15); color:var(--primary, #38bdf8); font-size:9.5px; padding:1px 5px; margin-left:4px; font-weight:600;" title="Auto-categorized by Holiday Window">🏖️ ${t.holiday_window_name}</span>` : ''}

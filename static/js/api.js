@@ -547,13 +547,27 @@ const LocalEngine = {
 
         if (isNaN(rawAmt)) continue;
 
+        const dateMatch = rawDesc.match(/(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/i);
+        let effectiveDate = rawDate;
+        if (dateMatch) {
+          let dStr = dateMatch[1];
+          if (dStr.includes('/')) {
+            const p = dStr.split('/');
+            effectiveDate = `${p[2]}-${p[1]}-${p[0]}`;
+          } else {
+            effectiveDate = dStr;
+          }
+        }
+        const cleanDesc = rawDesc.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, '').trim();
+
         const txnId = `local_${Date.now()}_${i}_${Math.abs(rawAmt).toFixed(2)}`;
         newTxns.push({
           transaction_id: txnId,
-          booking_date: rawDate,
-          amount: rawAmt,
-          payee_name: rawDesc,
-          description: rawDesc,
+          booking_date: effectiveDate,
+          cleared_date: rawDate,
+          payment_date: effectiveDate,
+          payee_name: cleanDesc || rawDesc,
+          description: cleanDesc || rawDesc,
           raw_info: rawDesc,
           account_name: mappedAccount || 'Current Account',
           owner: owner || 'Joint'

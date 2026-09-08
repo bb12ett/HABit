@@ -1863,9 +1863,30 @@ export function setDynamicCategories(cats) {
 }
 
 // Pre-clean transaction text by removing payment gateway prefixes and standardizing whitespace
+export function cleanPayeeTitle(str) {
+  if (!str) return '';
+  return str.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, '').trim();
+}
+
+export function extractEmbeddedTransactionDate(str) {
+  if (!str) return null;
+  const m = str.match(/(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/i);
+  if (m) {
+    const d = m[1];
+    if (d.includes('/')) {
+      const p = d.split('/');
+      return `${p[2]}-${p[1]}-${p[0]}`;
+    }
+    return d;
+  }
+  return null;
+}
+
 function normalizeTransactionText(text) {
   if (!text || typeof text !== 'string') return '';
   let s = text.toLowerCase();
+  // Strip embedded ', Transaction Date: YYYY-MM-DD' from search tokens
+  s = s.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, ' ');
   // Strip common payment processor / aggregator prefixes (including multi-asterisks, Shopify SP)
   s = s.replace(/\b(?:sq\s*\*|iz\s*\*|zettle[\s_*]+|paypal\s*\*|crv\s*\*|sumup\s*\*+|sp\s*\*?|stripe\s*\*)\s*/gi, ' ');
   // Expand common bank statement truncations to canonical forms
@@ -2708,4 +2729,6 @@ if (typeof window !== 'undefined') {
   window.categorizeTransaction = categorizeTransaction;
   window.calculateCategoryBreakdown = calculateCategoryBreakdown;
   window.calculateMonthForecast = calculateMonthForecast;
+  window.cleanPayeeTitle = cleanPayeeTitle;
+  window.extractEmbeddedTransactionDate = extractEmbeddedTransactionDate;
 }

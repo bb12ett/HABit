@@ -5,6 +5,28 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.16] - 2026-09-08
+
+### Added & Enhanced
+- **💳 True Payment & Purchase Date Resolution for Card & Bank Feeds**:
+  - **Multi-Tier Payment Date Resolution**: Prioritizes the true customer transaction/purchase date over the bank statement clearing date (`bookingDate`) across all budget tracking, pacing, and spend analytics.
+    - **Tier 1 (Direct Open Banking API)**: Inspects provider-level `transactionDate` / `transactionDateTime` (when returned by financial institutions).
+    - **Tier 2 (Narrative / Payee Embedded Date Extraction)**: UK credit card providers (including Halifax, Lloyds, Bank of Scotland, MBNA) intentionally embed the true card purchase date in the statement remittance narrative (e.g. `, Transaction Date: 2026-09-01`). HABit automatically extracts and standardizes this date using pattern parsing.
+    - **Tier 3 (Value Date)**: Utilizes `valueDate` / `valueDateTime` when it precedes or equals statement posting.
+    - **Tier 4 (Fallback)**: Defaults to `bookingDate` when no earlier transaction date is specified.
+  - **🧹 Clean Merchant & Payee Displays**:
+    - Automatically cleans ugly bank remittance strings by stripping embedded narrative tokens (e.g. `, Transaction Date: 2026-09-01`) from `payee_name` and `merchant_name` across the UI, while preserving raw statement text in `raw_info` for full audit trails.
+    - Cleaned transaction descriptions improve dictionary keyword matching and custom rule evaluations.
+  - **📋 Preserved Statement Clearing Date & Dual Display**:
+    - Stores the bank statement settlement date as `cleared_date`, ensuring full accounting reconciliation while tracking actual purchase day spending.
+    - In **Spend Analytics**, the Date column displays the true purchase date, and dynamically displays a subtle secondary indicator (`Cleared: YYYY-MM-DD`) when clearing occurs on a subsequent day or after a weekend.
+  - **🔄 Retroactive Normalization**:
+    - Automatically scans and normalizes existing stored transactions on startup/load and during bank sync passes, instantly correcting credit card purchases that cleared across weekend or month boundaries.
+  - **📁 Statement File Upload Parser Enhancement**:
+    - Updated CSV, OFX, and QIF statement import parsers in both frontend and backend to detect embedded transaction dates and clean merchant titles on upload.
+
+---
+
 ## [0.3.15] - 2026-09-08
 
 ### Added & Enhanced

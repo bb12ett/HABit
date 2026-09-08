@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.12")
+    return os.environ.get("APP_VERSION", "0.3.16")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -491,8 +491,13 @@ def load_data(year=None):
         years_dict[str(y)] = y_data
 
     avail_years = get_available_years()
+    for y_obj in years_dict.values():
+        if isinstance(y_obj, dict) and "open_banking_transactions" in y_obj:
+            normalize_existing_transactions_dates(y_obj["open_banking_transactions"])
+
     primary_year_data = years_dict.get(str(target_year)) or load_year_data(target_year, settings)
     txns = primary_year_data.get("open_banking_transactions", [])
+    normalize_existing_transactions_dates(txns)
     
     return {
         "settings": settings,
@@ -1749,6 +1754,102 @@ class GoCardlessClient:
 # ---------------------------------------------------------
 # STATEMENT FILE PARSER (CSV / OFX / QIF)
 # ---------------------------------------------------------
+
+
+# ---------------------------------------------------------
+# TRANSACTION PAYMENT DATE & MERCHANT CLEANING HELPERS
+# ---------------------------------------------------------
+
+def extract_transaction_date_and_clean_payee(raw_t_or_t, is_raw=True):
+    """
+    Extracts the true payment/purchase date and cleans the payee/merchant title.
+    Priority order:
+    1. Explicit API transactionDate / transactionDateTime
+    2. Embedded Narrative date (e.g. ', Transaction Date: YYYY-MM-DD' on credit cards)
+    3. Explicit API valueDate / valueDateTime
+    4. Statement bookingDate / clearing date
+    """
+    if not raw_t_or_t:
+        return datetime.date.today().isoformat(), None, "", ""
+
+    if is_raw:
+        api_booking_date = str(raw_t_or_t.get("bookingDate") or raw_t_or_t.get("bookingDateTime") or "")[:10]
+        api_tx_date = str(raw_t_or_t.get("transactionDate") or raw_t_or_t.get("transactionDateTime") or "")[:10]
+        api_value_date = str(raw_t_or_t.get("valueDate") or raw_t_or_t.get("valueDateTime") or "")[:10]
+        raw_info = str(raw_t_or_t.get("remittanceInformationUnstructured") or "")
+        payee = str(raw_t_or_t.get("creditorName") or raw_info or "Debit Transaction").strip()
+        merchant = str(raw_t_or_t.get("merchantName") or raw_t_or_t.get("creditorName") or "").strip()
+    else:
+        api_booking_date = str(raw_t_or_t.get("booking_date") or "")[:10]
+        api_tx_date = str(raw_t_or_t.get("payment_date") or raw_t_or_t.get("transaction_date") or "")[:10]
+        api_value_date = str(raw_t_or_t.get("value_date") or "")[:10]
+        raw_info = str(raw_t_or_t.get("raw_info") or raw_t_or_t.get("description") or "")
+        payee = str(raw_t_or_t.get("payee_name") or raw_info or "Debit Transaction").strip()
+        merchant = str(raw_t_or_t.get("merchant_name") or "").strip()
+
+    # Search for embedded date in narrative (e.g. ', Transaction Date: 2026-09-01')
+    embedded_date = None
+    search_text = f"{raw_info} {payee} {merchant}"
+    m = re.search(r'(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?P<dt>\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})', search_text, re.IGNORECASE)
+    if m:
+        dt_str = m.group('dt')
+        if '/' in dt_str:
+            parts = dt_str.split('/')
+            embedded_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        elif '-' in dt_str and len(dt_str.split('-')[0]) == 2:
+            parts = dt_str.split('-')
+            embedded_date = f"{parts[2]}-{parts[1]}-{parts[0]}"
+        else:
+            embedded_date = dt_str
+
+    # Determine effective payment date
+    if api_tx_date and len(api_tx_date) == 10:
+        payment_date = api_tx_date
+    elif embedded_date and len(embedded_date) == 10:
+        payment_date = embedded_date
+    elif api_value_date and len(api_value_date) == 10 and api_booking_date and api_value_date <= api_booking_date:
+        payment_date = api_value_date
+    elif api_booking_date and len(api_booking_date) == 10:
+        payment_date = api_booking_date
+    else:
+        payment_date = datetime.date.today().isoformat()
+
+    cleared_date = api_booking_date if (api_booking_date and len(api_booking_date) == 10) else payment_date
+
+    # Clean the payee and merchant strings (strip ', Transaction Date: ...')
+    clean_pattern = r'[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4}|\d{2}-\d{2}-\d{4})'
+    clean_payee = re.sub(clean_pattern, '', payee, flags=re.IGNORECASE).strip()
+    clean_merchant = re.sub(clean_pattern, '', merchant, flags=re.IGNORECASE).strip()
+
+    return payment_date, cleared_date, clean_payee or payee, clean_merchant or merchant
+
+def normalize_existing_transactions_dates(txns):
+    if not isinstance(txns, list):
+        return 0
+    updated = 0
+    for t in txns:
+        if not isinstance(t, dict):
+            continue
+        p_date, c_date, clean_p, clean_m = extract_transaction_date_and_clean_payee(t, is_raw=False)
+        orig_booking = t.get("booking_date")
+        changed = False
+        if p_date and p_date != orig_booking:
+            t["cleared_date"] = orig_booking or c_date
+            t["booking_date"] = p_date
+            t["payment_date"] = p_date
+            changed = True
+        elif not t.get("cleared_date"):
+            t["cleared_date"] = orig_booking or c_date
+
+        if clean_p and clean_p != t.get("payee_name"):
+            t["payee_name"] = clean_p
+            changed = True
+        if clean_m and clean_m != t.get("merchant_name"):
+            t["merchant_name"] = clean_m
+            changed = True
+        if changed:
+            updated += 1
+    return updated
 
 class StatementFileParser:
     @staticmethod
@@ -3096,19 +3197,21 @@ def sync_open_banking_data(data):
                         continue
 
                     amount_float = float(raw_t.get("transactionAmount", {}).get("amount", 0.0))
-                    payee = raw_t.get("creditorName") or raw_t.get("remittanceInformationUnstructured") or "Debit Transaction"
+                    pay_date, clear_date, clean_p, clean_m = extract_transaction_date_and_clean_payee(raw_t, is_raw=True)
 
                     clean_t = {
                         "transaction_id": tid,
                         "account_id": acc_id,
                         "account_name": disp_name,
                         "owner": item.get("owner", "Joint"),
-                        "booking_date": raw_t.get("bookingDate", datetime.date.today().isoformat()),
+                        "booking_date": pay_date,
+                        "cleared_date": clear_date,
+                        "payment_date": pay_date,
                         "amount": amount_float,
                         "currency": raw_t.get("transactionAmount", {}).get("currency", "GBP"),
-                        "payee_name": payee.strip(),
+                        "payee_name": clean_p,
                         "raw_info": raw_t.get("remittanceInformationUnstructured", ""),
-                        "merchant_name": raw_t.get("merchantName") or raw_t.get("creditorName", ""),
+                        "merchant_name": clean_m,
                         "classification": raw_t.get("transactionClassification", []),
                         "transaction_category": raw_t.get("transactionCategory"),
                         "matched_bill_id": None,
@@ -3126,6 +3229,11 @@ def sync_open_banking_data(data):
     # Retroactively normalize names and card transaction signs across all saved transactions
     is_card_map = {str(item.get("account_id")): (item.get("account_type") == "CARD" or "credit" in (item.get("mapped_habit_account_id") or "").lower()) for item in linked if item.get("account_id")}
     
+    # Retroactively normalize dates and merchant titles across all saved transactions
+    date_norm_count = normalize_existing_transactions_dates(all_txns)
+    if date_norm_count > 0:
+        log_open_banking_debug(f"Normalized true payment dates and titles for {date_norm_count} transactions.")
+
     # Run retroactive reconciliation across ALL transactions and ALL scheduled bills
     reconciled_matches = reconcile_transactions_and_bills(data)
     log_open_banking_debug(f"Reconciliation pass complete: {reconciled_matches} total bills matched.")
@@ -3536,6 +3644,8 @@ def openbanking_upload_statement():
     parsed_txns = StatementFileParser.parse_statement(content_str, filename)
     if not parsed_txns:
         return jsonify({"success": False, "error": "No valid transactions could be parsed from file"}), 400
+
+    normalize_existing_transactions_dates(parsed_txns)
 
     all_txns = data.setdefault("open_banking_transactions", [])
     existing_txn_ids = {t.get("transaction_id") for t in all_txns if t.get("transaction_id")}
