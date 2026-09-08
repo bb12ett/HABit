@@ -134,7 +134,7 @@ class IndexedDBStore {
 const localStore = new IndexedDBStore();
 
 // ---------------------------------------------------------
-// 2. RUNTIME ENVIRONMENT DETECTION
+// 2. RUNTIME ENVIRONMENT DETECTION & PERSISTENT STORAGE
 // ---------------------------------------------------------
 let _detectedMode = null; // 'ha' | 'local'
 
@@ -145,41 +145,83 @@ export function isCapacitorNative() {
   );
 }
 
+export function getPersistentStoragePreference() {
+  if (typeof window === 'undefined') return 'auto';
+  try {
+    const saved = localStorage.getItem('habit_storage_mode');
+    if (saved === 'ha' || saved === 'local' || saved === 'auto') return saved;
+  } catch (e) {}
+  return 'auto';
+}
+
 export function isStandaloneMode() {
+  const pref = getPersistentStoragePreference();
+  if (pref === 'local') return true;
+  if (pref === 'ha') return false;
   if (isCapacitorNative()) return true;
   if (typeof window === 'undefined') return false;
   if (window.location.protocol === 'file:') return true;
-  try {
-    const saved = localStorage.getItem('habit_storage_mode');
-    if (saved === 'local') return true;
-  } catch (e) {}
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return false;
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return true;
   return false;
 }
 
 export function getStorageMode() {
-  return _detectedMode || (isStandaloneMode() ? 'local' : 'ha');
+  if (_detectedMode) return _detectedMode;
+  const pref = getPersistentStoragePreference();
+  if (pref === 'ha') return 'ha';
+  if (pref === 'local') return 'local';
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return 'ha';
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return 'local';
+  return isStandaloneMode() ? 'local' : 'ha';
 }
 
 export function setStorageMode(mode) {
-  _detectedMode = mode;
+  _detectedMode = (mode === 'auto') ? null : mode;
   try {
     localStorage.setItem('habit_storage_mode', mode);
   } catch (e) {}
 }
 
-async function detectStorageEngine() {
+export async function detectStorageEngine() {
   if (_detectedMode) return _detectedMode;
 
-  if (isStandaloneMode()) {
+  const pref = getPersistentStoragePreference();
+  // 1. Explicit user override in localStorage wins
+  if (pref === 'local') {
     _detectedMode = 'local';
-    console.log('[StorageAdapter] Running in Local / Standalone mode.');
+    console.log('[StorageAdapter] Running in explicit Local / Standalone mode.');
+    return _detectedMode;
+  }
+  if (pref === 'ha') {
+    _detectedMode = 'ha';
+    console.log('[StorageAdapter] Running in explicit Home Assistant Server mode.');
     return _detectedMode;
   }
 
-  // Fast probe to verify Home Assistant Flask API presence
+  // 2. Client environment checks
+  if (isCapacitorNative() || (typeof window !== 'undefined' && window.location.protocol === 'file:')) {
+    _detectedMode = 'local';
+    console.log('[StorageAdapter] Running in Native / file: Standalone mode.');
+    return _detectedMode;
+  }
+
+  // 3. Server injection flag (Authoritative: served directly by Home Assistant Flask)
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') {
+    _detectedMode = 'ha';
+    console.log('[StorageAdapter] Connected to Home Assistant server (verified via server environment tag).');
+    return _detectedMode;
+  }
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') {
+    _detectedMode = 'local';
+    console.log('[StorageAdapter] Running in static / local distribution.');
+    return _detectedMode;
+  }
+
+  // 4. Fallback network probe only if environment is completely ambiguous
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1200);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
     const r = await fetch(getBaseApiUrl() + 'api/auth/status', {
       method: 'GET',
       cache: 'no-store',
@@ -188,15 +230,15 @@ async function detectStorageEngine() {
     clearTimeout(timeoutId);
     if (r.ok || r.status === 401) {
       _detectedMode = 'ha';
-      console.log('[StorageAdapter] Connected to Home Assistant server.');
+      console.log('[StorageAdapter] Connected to Home Assistant server via API probe.');
       return _detectedMode;
     }
   } catch (e) {
-    // Timeout or network unreachable -> fallback to Local
+    // Timeout or network unreachable
   }
 
-  _detectedMode = 'local';
-  console.log('[StorageAdapter] Home Assistant backend unreachable. Running in Local Standalone mode.');
+  _detectedMode = 'ha';
+  console.log('[StorageAdapter] Defaulting to Home Assistant server mode.');
   return _detectedMode;
 }
 
@@ -550,10 +592,30 @@ export async function fetchBudget(year) {
       }
     }
   } catch (e) {
-    console.error('fetchBudget error, falling back to local storage:', e);
-    return await LocalEngine.fetchBudget(year);
+    console.error('fetchBudget network error in HA mode:', e);
   }
   return null;
+}
+
+export async function cloneBudgetToLocal(data) {
+  if (!data) return false;
+  try {
+    return await LocalEngine.saveBudget(data);
+  } catch (e) {
+    console.error('cloneBudgetToLocal error:', e);
+    return false;
+  }
+}
+
+export async function cloneLocalToServer() {
+  try {
+    const localData = await LocalEngine.fetchBudget();
+    if (!localData || !localData.settings) return false;
+    return await saveBudget(localData);
+  } catch (e) {
+    console.error('cloneLocalToServer error:', e);
+    return false;
+  }
 }
 
 export async function saveBudget(state, year) {
@@ -954,3 +1016,243 @@ export async function suggestCategoryMerchant(merchant, category, notes = '') {
   }
   return { success: false };
 }
+
+// --- BACKUP & CLOUD API CLIENT ---
+
+export async function fetchBackupsListApi() {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const list = (await localStore.get('habit_snapshots')) || [];
+    const settings = (await localStore.get('habit_settings')) || {};
+    return {
+      backups: list,
+      auto_backup: settings.auto_backup || {
+        enabled: true,
+        frequency: 'daily',
+        time: '03:00',
+        retention_count: 14,
+        destinations: { local: true }
+      }
+    };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups`, {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('fetchBackupsListApi error:', e);
+  }
+  return { backups: [], auto_backup: {} };
+}
+
+export async function createManualBackupApi(destinations = null) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const full = await LocalEngine.exportFullBudgetBackupApi();
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = `habit_backup_${ts}.json`;
+    const list = (await localStore.get('habit_snapshots')) || [];
+    list.unshift({
+      filename: fname,
+      timestamp: new Date().toISOString(),
+      size: JSON.stringify(full).length,
+      size_formatted: `${Math.round(JSON.stringify(full).length / 1024)} KB`,
+      payload: full
+    });
+    while (list.length > 14) list.pop();
+    await localStore.set('habit_snapshots', list);
+    return { success: true, local: { status: 'success', filename: fname } };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/create`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destinations })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('createManualBackupApi error:', e);
+  }
+  return { success: false, error: 'Request failed' };
+}
+
+export async function restoreBackupApi(filename) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const list = (await localStore.get('habit_snapshots')) || [];
+    const item = list.find(b => b.filename === filename);
+    if (!item || !item.payload) return { error: 'Snapshot not found' };
+    await LocalEngine.importFullBudgetBackupApi(item.payload);
+    const data = await LocalEngine.fetchBudget();
+    return { status: 'restored', data };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/restore`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('restoreBackupApi error:', e);
+  }
+  return { error: 'Restore request failed' };
+}
+
+export async function deleteBackupApi(filename) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    let list = (await localStore.get('habit_snapshots')) || [];
+    list = list.filter(b => b.filename !== filename);
+    await localStore.set('habit_snapshots', list);
+    return { status: 'deleted' };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      cache: 'no-store'
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('deleteBackupApi error:', e);
+  }
+  return { error: 'Delete request failed' };
+}
+
+export async function saveBackupSettingsApi(payload) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const settings = (await localStore.get('habit_settings')) || {};
+    settings.auto_backup = { ...(settings.auto_backup || {}), ...payload };
+    await localStore.set('habit_settings', settings);
+    return { status: 'saved', auto_backup: settings.auto_backup };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backup/settings`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('saveBackupSettingsApi error:', e);
+  }
+  return { error: 'Save failed' };
+}
+
+export async function initOneDriveDeviceCodeApi(clientId = '') {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/devicecode`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { error: data.error || `HTTP ${r.status}: Failed to initiate OneDrive device login` };
+  } catch (e) {
+    console.error('initOneDriveDeviceCodeApi error:', e);
+    return { error: e.message || 'Failed to connect to backend' };
+  }
+}
+
+export async function pollOneDriveDeviceCodeApi(deviceCode, clientId = '') {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/poll`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_code: deviceCode, client_id: clientId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('pollOneDriveDeviceCodeApi error:', e);
+    return { status: 'error', error: e.message || 'Poll failed' };
+  }
+}
+
+export async function testOneDriveUploadApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/test`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('testOneDriveUploadApi error:', e);
+    return { status: 'error', error: e.message || 'Test upload failed' };
+  }
+}
+
+export async function disconnectOneDriveApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/disconnect`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('disconnectOneDriveApi error:', e);
+    return { status: 'error', error: e.message };
+  }
+}
+
+export async function saveGoogleDriveApi(serviceAccountJson, folderId) {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/save`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_account_json: serviceAccountJson, folder_id: folderId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { error: data.error || `HTTP ${r.status}: Failed to save Google Drive configuration` };
+  } catch (e) {
+    console.error('saveGoogleDriveApi error:', e);
+    return { error: e.message || 'Network error' };
+  }
+}
+
+export async function testGoogleDriveUploadApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/test`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('testGoogleDriveUploadApi error:', e);
+    return { status: 'error', error: e.message || 'Test upload failed' };
+  }
+}
+
+export async function disconnectGoogleDriveApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/disconnect`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('disconnectGoogleDriveApi error:', e);
+    return { status: 'error', error: e.message };
+  }
+}
+

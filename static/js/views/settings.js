@@ -1,5 +1,5 @@
 import { appState, getSettings, getAccountConfig, ALL_AVAILABLE_WIDGETS, isMultiUserEnabled, isPersonSalaryHidden, getPersonSettings, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner, hasPersonPin, isAccountVisibleToActiveUser } from '../state.js';
-import { getStorageMode } from '../api.js';
+import { getStorageMode, getPersistentStoragePreference } from '../api.js';
 
 export function renderSettingsView(container) {
   const cfg = getSettings();
@@ -10,6 +10,7 @@ export function renderSettingsView(container) {
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
   const storageMode = typeof getStorageMode === 'function' ? getStorageMode() : 'ha';
+  const storagePref = typeof getPersistentStoragePreference === 'function' ? getPersistentStoragePreference() : 'auto';
 
   // Visible accounts and members for current user persona
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
@@ -835,41 +836,181 @@ export function renderSettingsView(container) {
         </div>
 
         <!-- APPLICATION RUNTIME & UNIVERSAL STORAGE ADAPTER -->
-        <div class="panel" style="margin-top:20px;">
+        <div id="storageEngineSettingsPanel" class="panel" style="margin-top:20px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
             <div>
               <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
-                <span>📱</span> Application Runtime & Storage Engine
+                <span>📱</span> Application Runtime &amp; Storage Engine
               </h3>
               <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
-                HABit Universal Adapter automatically detects whether you are running inside Home Assistant or as a standalone mobile app.
+                Select how HABit stores your financial data. Your selection is strictly persistent across browser reloads.
               </p>
             </div>
-            <div>
+            <div style="display:flex; gap:6px; align-items:center;">
               <span class="badge" style="background:${storageMode === 'ha' ? 'rgba(16,185,129,0.2)' : 'rgba(56,189,248,0.2)'}; color:${storageMode === 'ha' ? 'var(--green)' : 'var(--primary)'}; border:1px solid ${storageMode === 'ha' ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.4)'}; padding:4px 10px; font-size:11px; font-weight:bold;">
-                ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
+                Active: ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
               </span>
             </div>
           </div>
 
-          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:12px;">
+            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:8px;">
+              Storage Engine Preference (Saved in Browser):
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+              <button type="button" class="btn ${storagePref === 'auto' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('auto')">
+                🔄 Auto-Detect ${storagePref === 'auto' ? '✓' : ''}
+              </button>
+              <button type="button" class="btn ${storagePref === 'ha' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('ha')">
+                🏠 Force Home Assistant (/data) ${storagePref === 'ha' ? '✓' : ''}
+              </button>
+              <button type="button" class="btn ${storagePref === 'local' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('local')">
+                📱 Force Standalone Local (IndexedDB) ${storagePref === 'local' ? '✓' : ''}
+              </button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">
+              ${storageMode === 'ha' 
+                ? '🏠 <strong>Home Assistant Mode:</strong> Data is saved directly to your Home Assistant host disk (<code>/data</code>) with live sensor entity broadcasting. Offline changes are not kept here.' 
+                : '📱 <strong>Standalone Local Mode:</strong> Data is isolated entirely within this device\'s in-browser IndexedDB storage. It does not sync to Home Assistant sensors or other devices.'}
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-top:4px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.copyServerDataToLocalPrompt()" title="Clone active server budget into browser IndexedDB for offline safety">
+                📋 Clone Server Data &rarr; Local Storage
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.exportFullBudgetBackup()" title="Download complete multi-year archive">
+                💾 Export Full Backup
+              </button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted);">
+              Preference: <code style="color:var(--primary); font-weight:bold;">${storagePref}</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- AUTOMATED BACKUP & CLOUD SYNC PANEL -->
+        <div class="panel" style="margin-top:20px; border:1px solid rgba(56, 189, 248, 0.3); background:rgba(56, 189, 248, 0.03);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>💾</span> Automated Backups &amp; Cloud Sync
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Scheduled rolling snapshots to local host storage and cloud accounts (Microsoft OneDrive &amp; Google Drive).
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button id="manualBackupNowBtn" type="button" class="btn primary" style="font-size:12px; padding:6px 14px; font-weight:700;" onclick="window.budgetApp.triggerManualBackup()">
+                ⚡ Backup Now
+              </button>
+            </div>
+          </div>
+
+          <!-- Schedule & Retention Configuration Form -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:14px;">
+            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span>Automated Schedule:</span>
+              <span id="backupStatusBadge" class="badge" style="font-size:11px; padding:3px 8px;">Checking status...</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; align-items:end;">
               <div>
-                <div style="font-size:12.5px; font-weight:600; color:var(--heading);">
-                  ${storageMode === 'ha' ? 'Connected to Home Assistant Storage (/data)' : 'Standalone Offline Storage (IndexedDB / Local)'}
-                </div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                  ${storageMode === 'ha' ? 'Persistent JSON storage on Home Assistant host disk with real-time sensor updates.' : 'Private on-device storage with zero external server requirements. 100% offline-first.'}
-                </div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Auto-Backup</label>
+                <select id="autoBackupEnabled" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="true" ${cfg.auto_backup?.enabled !== false ? 'selected' : ''}>✅ Enabled</option>
+                  <option value="false" ${cfg.auto_backup?.enabled === false ? 'selected' : ''}>⏸️ Disabled</option>
+                </select>
               </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleStorageModeOverride()">
-                  ${storageMode === 'ha' ? 'Switch to Standalone Local' : 'Auto-Detect Home Assistant'}
-                </button>
-                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.exportFullBudgetBackup()">
-                  💾 Export Full Backup
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Frequency</label>
+                <select id="autoBackupFreq" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="daily" ${cfg.auto_backup?.frequency === 'daily' ? 'selected' : ''}>📅 Daily</option>
+                  <option value="weekly" ${cfg.auto_backup?.frequency === 'weekly' ? 'selected' : ''}>📆 Weekly (Sunday)</option>
+                  <option value="on_change" ${cfg.auto_backup?.frequency === 'on_change' ? 'selected' : ''}>💾 On Every Budget Save</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Run Time (Local)</label>
+                <input type="time" id="autoBackupTime" value="${cfg.auto_backup?.time || '03:00'}" style="width:100%; font-size:12px; padding:6px 10px;">
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Retention</label>
+                <select id="autoBackupRetention" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="7" ${cfg.auto_backup?.retention_count === 7 ? 'selected' : ''}>Keep last 7 backups</option>
+                  <option value="14" ${!cfg.auto_backup?.retention_count || cfg.auto_backup?.retention_count === 14 ? 'selected' : ''}>Keep last 14 backups</option>
+                  <option value="30" ${cfg.auto_backup?.retention_count === 30 ? 'selected' : ''}>Keep last 30 backups</option>
+                  <option value="60" ${cfg.auto_backup?.retention_count === 60 ? 'selected' : ''}>Keep last 60 backups</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;" title="Subfolder name for this HA add-on instance to keep backups isolated">Instance Subfolder</label>
+                <input type="text" id="autoBackupInstance" value="${cfg.auto_backup?.instance_name || ''}" placeholder="${cfg.auto_backup?.active_instance_id || 'local_habit'}" style="width:100%; font-size:12px; padding:6px 10px;">
+              </div>
+            </div>
+            <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>Active path:</span>
+                <code id="autoBackupFolderDisplay" style="background:rgba(0,0,0,0.25); padding:2px 6px; border-radius:4px; color:var(--primary); font-family:monospace; font-size:11px;">/config/habit_backups/${cfg.auto_backup?.active_instance_id || 'local_habit'}</code>
+                <span style="font-size:10px; color:var(--text-muted);">(Isolates test vs git installs)</span>
+              </div>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 14px;" onclick="window.budgetApp.saveAutoBackupSchedule()">
+                Save Schedule Settings
+              </button>
+            </div>
+          </div>
+
+          <!-- Cloud Destinations Grid -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-bottom:14px;">
+            <!-- Microsoft OneDrive Card -->
+            <div id="onedriveConfigCard" style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:13px; font-weight:700; color:var(--heading); display:flex; align-items:center; gap:6px;">
+                  <span>☁️</span> Microsoft OneDrive
+                </div>
+                <span id="onedriveStatusBadge" class="badge" style="font-size:10px; padding:2px 6px;">Checking...</span>
+              </div>
+              <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px 0; line-height:1.4;">
+                Uploads backups to <code id="onedriveSubfolderDisplay">/Apps/HABit_Backups/${cfg.auto_backup?.active_instance_id || 'local_habit'}/</code> via Microsoft Device Code login (no Azure setup required).
+              </p>
+              <div id="onedriveActionArea" style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button type="button" class="btn primary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.connectOneDriveModal()">
+                  🔗 Connect Microsoft OneDrive
                 </button>
               </div>
+            </div>
+
+            <!-- Google Drive Card -->
+            <div id="gdriveConfigCard" style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:13px; font-weight:700; color:var(--heading); display:flex; align-items:center; gap:6px;">
+                  <span>📁</span> Google Drive
+                </div>
+                <span id="gdriveStatusBadge" class="badge" style="font-size:10px; padding:2px 6px;">Checking...</span>
+              </div>
+              <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px 0; line-height:1.4;">
+                Autonomous server uploads via Google Cloud Service Account JSON, or Home Assistant Google Drive Backup add-on.
+              </p>
+              <div id="gdriveActionArea" style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.openGoogleDriveModal()">
+                  ⚙️ Configure Google Drive
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Snapshots History Browser -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-size:12px; font-weight:700; color:var(--heading);">
+                📦 Snapshots on Host Disk (/data/backups):
+              </div>
+              <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.loadBackupsList()">
+                🔄 Refresh List
+              </button>
+            </div>
+            <div id="backupSnapshotsList" style="max-height:220px; overflow-y:auto; font-size:11.5px;">
+              <div style="color:var(--text-muted); padding:8px 0; text-align:center;">Loading snapshots...</div>
             </div>
           </div>
         </div>

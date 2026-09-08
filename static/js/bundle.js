@@ -1062,7 +1062,7 @@ class IndexedDBStore {
 const localStore = new IndexedDBStore();
 
 // ---------------------------------------------------------
-// 2. RUNTIME ENVIRONMENT DETECTION
+// 2. RUNTIME ENVIRONMENT DETECTION & PERSISTENT STORAGE
 // ---------------------------------------------------------
 let _detectedMode = null; // 'ha' | 'local'
 
@@ -1073,23 +1073,39 @@ function isCapacitorNative() {
   );
 }
 
+function getPersistentStoragePreference() {
+  if (typeof window === 'undefined') return 'auto';
+  try {
+    const saved = localStorage.getItem('habit_storage_mode');
+    if (saved === 'ha' || saved === 'local' || saved === 'auto') return saved;
+  } catch (e) {}
+  return 'auto';
+}
+
 function isStandaloneMode() {
+  const pref = getPersistentStoragePreference();
+  if (pref === 'local') return true;
+  if (pref === 'ha') return false;
   if (isCapacitorNative()) return true;
   if (typeof window === 'undefined') return false;
   if (window.location.protocol === 'file:') return true;
-  try {
-    const saved = localStorage.getItem('habit_storage_mode');
-    if (saved === 'local') return true;
-  } catch (e) {}
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return false;
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return true;
   return false;
 }
 
 function getStorageMode() {
-  return _detectedMode || (isStandaloneMode() ? 'local' : 'ha');
+  if (_detectedMode) return _detectedMode;
+  const pref = getPersistentStoragePreference();
+  if (pref === 'ha') return 'ha';
+  if (pref === 'local') return 'local';
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return 'ha';
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return 'local';
+  return isStandaloneMode() ? 'local' : 'ha';
 }
 
 function setStorageMode(mode) {
-  _detectedMode = mode;
+  _detectedMode = (mode === 'auto') ? null : mode;
   try {
     localStorage.setItem('habit_storage_mode', mode);
   } catch (e) {}
@@ -1098,16 +1114,42 @@ function setStorageMode(mode) {
 async function detectStorageEngine() {
   if (_detectedMode) return _detectedMode;
 
-  if (isStandaloneMode()) {
+  const pref = getPersistentStoragePreference();
+  // 1. Explicit user override in localStorage wins
+  if (pref === 'local') {
     _detectedMode = 'local';
-    console.log('[StorageAdapter] Running in Local / Standalone mode.');
+    console.log('[StorageAdapter] Running in explicit Local / Standalone mode.');
+    return _detectedMode;
+  }
+  if (pref === 'ha') {
+    _detectedMode = 'ha';
+    console.log('[StorageAdapter] Running in explicit Home Assistant Server mode.');
     return _detectedMode;
   }
 
-  // Fast probe to verify Home Assistant Flask API presence
+  // 2. Client environment checks
+  if (isCapacitorNative() || (typeof window !== 'undefined' && window.location.protocol === 'file:')) {
+    _detectedMode = 'local';
+    console.log('[StorageAdapter] Running in Native / file: Standalone mode.');
+    return _detectedMode;
+  }
+
+  // 3. Server injection flag (Authoritative: served directly by Home Assistant Flask)
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') {
+    _detectedMode = 'ha';
+    console.log('[StorageAdapter] Connected to Home Assistant server (verified via server environment tag).');
+    return _detectedMode;
+  }
+  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') {
+    _detectedMode = 'local';
+    console.log('[StorageAdapter] Running in static / local distribution.');
+    return _detectedMode;
+  }
+
+  // 4. Fallback network probe only if environment is completely ambiguous
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 1200);
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
     const r = await fetch(getBaseApiUrl() + 'api/auth/status', {
       method: 'GET',
       cache: 'no-store',
@@ -1116,15 +1158,15 @@ async function detectStorageEngine() {
     clearTimeout(timeoutId);
     if (r.ok || r.status === 401) {
       _detectedMode = 'ha';
-      console.log('[StorageAdapter] Connected to Home Assistant server.');
+      console.log('[StorageAdapter] Connected to Home Assistant server via API probe.');
       return _detectedMode;
     }
   } catch (e) {
-    // Timeout or network unreachable -> fallback to Local
+    // Timeout or network unreachable
   }
 
-  _detectedMode = 'local';
-  console.log('[StorageAdapter] Home Assistant backend unreachable. Running in Local Standalone mode.');
+  _detectedMode = 'ha';
+  console.log('[StorageAdapter] Defaulting to Home Assistant server mode.');
   return _detectedMode;
 }
 
@@ -1478,10 +1520,30 @@ async function fetchBudget(year) {
       }
     }
   } catch (e) {
-    console.error('fetchBudget error, falling back to local storage:', e);
-    return await LocalEngine.fetchBudget(year);
+    console.error('fetchBudget network error in HA mode:', e);
   }
   return null;
+}
+
+async function cloneBudgetToLocal(data) {
+  if (!data) return false;
+  try {
+    return await LocalEngine.saveBudget(data);
+  } catch (e) {
+    console.error('cloneBudgetToLocal error:', e);
+    return false;
+  }
+}
+
+async function cloneLocalToServer() {
+  try {
+    const localData = await LocalEngine.fetchBudget();
+    if (!localData || !localData.settings) return false;
+    return await saveBudget(localData);
+  } catch (e) {
+    console.error('cloneLocalToServer error:', e);
+    return false;
+  }
 }
 
 async function saveBudget(state, year) {
@@ -1882,6 +1944,246 @@ async function suggestCategoryMerchant(merchant, category, notes = '') {
   }
   return { success: false };
 }
+
+// --- BACKUP & CLOUD API CLIENT ---
+
+async function fetchBackupsListApi() {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const list = (await localStore.get('habit_snapshots')) || [];
+    const settings = (await localStore.get('habit_settings')) || {};
+    return {
+      backups: list,
+      auto_backup: settings.auto_backup || {
+        enabled: true,
+        frequency: 'daily',
+        time: '03:00',
+        retention_count: 14,
+        destinations: { local: true }
+      }
+    };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups`, {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('fetchBackupsListApi error:', e);
+  }
+  return { backups: [], auto_backup: {} };
+}
+
+async function createManualBackupApi(destinations = null) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const full = await LocalEngine.exportFullBudgetBackupApi();
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const fname = `habit_backup_${ts}.json`;
+    const list = (await localStore.get('habit_snapshots')) || [];
+    list.unshift({
+      filename: fname,
+      timestamp: new Date().toISOString(),
+      size: JSON.stringify(full).length,
+      size_formatted: `${Math.round(JSON.stringify(full).length / 1024)} KB`,
+      payload: full
+    });
+    while (list.length > 14) list.pop();
+    await localStore.set('habit_snapshots', list);
+    return { success: true, local: { status: 'success', filename: fname } };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/create`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ destinations })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('createManualBackupApi error:', e);
+  }
+  return { success: false, error: 'Request failed' };
+}
+
+async function restoreBackupApi(filename) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const list = (await localStore.get('habit_snapshots')) || [];
+    const item = list.find(b => b.filename === filename);
+    if (!item || !item.payload) return { error: 'Snapshot not found' };
+    await LocalEngine.importFullBudgetBackupApi(item.payload);
+    const data = await LocalEngine.fetchBudget();
+    return { status: 'restored', data };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/restore`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('restoreBackupApi error:', e);
+  }
+  return { error: 'Restore request failed' };
+}
+
+async function deleteBackupApi(filename) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    let list = (await localStore.get('habit_snapshots')) || [];
+    list = list.filter(b => b.filename !== filename);
+    await localStore.set('habit_snapshots', list);
+    return { status: 'deleted' };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backups/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      cache: 'no-store'
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('deleteBackupApi error:', e);
+  }
+  return { error: 'Delete request failed' };
+}
+
+async function saveBackupSettingsApi(payload) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    const settings = (await localStore.get('habit_settings')) || {};
+    settings.auto_backup = { ...(settings.auto_backup || {}), ...payload };
+    await localStore.set('habit_settings', settings);
+    return { status: 'saved', auto_backup: settings.auto_backup };
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/backup/settings`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.error('saveBackupSettingsApi error:', e);
+  }
+  return { error: 'Save failed' };
+}
+
+async function initOneDriveDeviceCodeApi(clientId = '') {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/devicecode`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_id: clientId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { error: data.error || `HTTP ${r.status}: Failed to initiate OneDrive device login` };
+  } catch (e) {
+    console.error('initOneDriveDeviceCodeApi error:', e);
+    return { error: e.message || 'Failed to connect to backend' };
+  }
+}
+
+async function pollOneDriveDeviceCodeApi(deviceCode, clientId = '') {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/poll`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_code: deviceCode, client_id: clientId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('pollOneDriveDeviceCodeApi error:', e);
+    return { status: 'error', error: e.message || 'Poll failed' };
+  }
+}
+
+async function testOneDriveUploadApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/test`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('testOneDriveUploadApi error:', e);
+    return { status: 'error', error: e.message || 'Test upload failed' };
+  }
+}
+
+async function disconnectOneDriveApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/onedrive/disconnect`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('disconnectOneDriveApi error:', e);
+    return { status: 'error', error: e.message };
+  }
+}
+
+async function saveGoogleDriveApi(serviceAccountJson, folderId) {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/save`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ service_account_json: serviceAccountJson, folder_id: folderId })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { error: data.error || `HTTP ${r.status}: Failed to save Google Drive configuration` };
+  } catch (e) {
+    console.error('saveGoogleDriveApi error:', e);
+    return { error: e.message || 'Network error' };
+  }
+}
+
+async function testGoogleDriveUploadApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/test`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('testGoogleDriveUploadApi error:', e);
+    return { status: 'error', error: e.message || 'Test upload failed' };
+  }
+}
+
+async function disconnectGoogleDriveApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/cloud/gdrive/disconnect`, {
+      method: 'POST',
+      cache: 'no-store'
+    });
+    const data = await r.json().catch(() => ({}));
+    if (r.ok) return data;
+    return { status: 'error', error: data.error || `HTTP ${r.status}` };
+  } catch (e) {
+    console.error('disconnectGoogleDriveApi error:', e);
+    return { status: 'error', error: e.message };
+  }
+}
+
 
 // --- static/js/calculations.js ---
 
@@ -13888,6 +14190,7 @@ function renderSettingsView(container) {
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
   const storageMode = typeof getStorageMode === 'function' ? getStorageMode() : 'ha';
+  const storagePref = typeof getPersistentStoragePreference === 'function' ? getPersistentStoragePreference() : 'auto';
 
   // Visible accounts and members for current user persona
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
@@ -14713,41 +15016,181 @@ function renderSettingsView(container) {
         </div>
 
         <!-- APPLICATION RUNTIME & UNIVERSAL STORAGE ADAPTER -->
-        <div class="panel" style="margin-top:20px;">
+        <div id="storageEngineSettingsPanel" class="panel" style="margin-top:20px;">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
             <div>
               <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
-                <span>📱</span> Application Runtime & Storage Engine
+                <span>📱</span> Application Runtime &amp; Storage Engine
               </h3>
               <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
-                HABit Universal Adapter automatically detects whether you are running inside Home Assistant or as a standalone mobile app.
+                Select how HABit stores your financial data. Your selection is strictly persistent across browser reloads.
               </p>
             </div>
-            <div>
+            <div style="display:flex; gap:6px; align-items:center;">
               <span class="badge" style="background:${storageMode === 'ha' ? 'rgba(16,185,129,0.2)' : 'rgba(56,189,248,0.2)'}; color:${storageMode === 'ha' ? 'var(--green)' : 'var(--primary)'}; border:1px solid ${storageMode === 'ha' ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.4)'}; padding:4px 10px; font-size:11px; font-weight:bold;">
-                ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
+                Active: ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
               </span>
             </div>
           </div>
 
-          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:12px;">
+            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:8px;">
+              Storage Engine Preference (Saved in Browser):
+            </div>
+            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
+              <button type="button" class="btn ${storagePref === 'auto' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('auto')">
+                🔄 Auto-Detect ${storagePref === 'auto' ? '✓' : ''}
+              </button>
+              <button type="button" class="btn ${storagePref === 'ha' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('ha')">
+                🏠 Force Home Assistant (/data) ${storagePref === 'ha' ? '✓' : ''}
+              </button>
+              <button type="button" class="btn ${storagePref === 'local' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('local')">
+                📱 Force Standalone Local (IndexedDB) ${storagePref === 'local' ? '✓' : ''}
+              </button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">
+              ${storageMode === 'ha' 
+                ? '🏠 <strong>Home Assistant Mode:</strong> Data is saved directly to your Home Assistant host disk (<code>/data</code>) with live sensor entity broadcasting. Offline changes are not kept here.' 
+                : '📱 <strong>Standalone Local Mode:</strong> Data is isolated entirely within this device\'s in-browser IndexedDB storage. It does not sync to Home Assistant sensors or other devices.'}
+            </div>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-top:4px;">
+            <div style="display:flex; gap:8px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.copyServerDataToLocalPrompt()" title="Clone active server budget into browser IndexedDB for offline safety">
+                📋 Clone Server Data &rarr; Local Storage
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.exportFullBudgetBackup()" title="Download complete multi-year archive">
+                💾 Export Full Backup
+              </button>
+            </div>
+            <div style="font-size:11px; color:var(--text-muted);">
+              Preference: <code style="color:var(--primary); font-weight:bold;">${storagePref}</code>
+            </div>
+          </div>
+        </div>
+
+        <!-- AUTOMATED BACKUP & CLOUD SYNC PANEL -->
+        <div class="panel" style="margin-top:20px; border:1px solid rgba(56, 189, 248, 0.3); background:rgba(56, 189, 248, 0.03);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>💾</span> Automated Backups &amp; Cloud Sync
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Scheduled rolling snapshots to local host storage and cloud accounts (Microsoft OneDrive &amp; Google Drive).
+              </p>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button id="manualBackupNowBtn" type="button" class="btn primary" style="font-size:12px; padding:6px 14px; font-weight:700;" onclick="window.budgetApp.triggerManualBackup()">
+                ⚡ Backup Now
+              </button>
+            </div>
+          </div>
+
+          <!-- Schedule & Retention Configuration Form -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:14px;">
+            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px;">
+              <span>Automated Schedule:</span>
+              <span id="backupStatusBadge" class="badge" style="font-size:11px; padding:3px 8px;">Checking status...</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:12px; align-items:end;">
               <div>
-                <div style="font-size:12.5px; font-weight:600; color:var(--heading);">
-                  ${storageMode === 'ha' ? 'Connected to Home Assistant Storage (/data)' : 'Standalone Offline Storage (IndexedDB / Local)'}
-                </div>
-                <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                  ${storageMode === 'ha' ? 'Persistent JSON storage on Home Assistant host disk with real-time sensor updates.' : 'Private on-device storage with zero external server requirements. 100% offline-first.'}
-                </div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Auto-Backup</label>
+                <select id="autoBackupEnabled" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="true" ${cfg.auto_backup?.enabled !== false ? 'selected' : ''}>✅ Enabled</option>
+                  <option value="false" ${cfg.auto_backup?.enabled === false ? 'selected' : ''}>⏸️ Disabled</option>
+                </select>
               </div>
-              <div style="display:flex; gap:8px; flex-wrap:wrap;">
-                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.toggleStorageModeOverride()">
-                  ${storageMode === 'ha' ? 'Switch to Standalone Local' : 'Auto-Detect Home Assistant'}
-                </button>
-                <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.exportFullBudgetBackup()">
-                  💾 Export Full Backup
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Frequency</label>
+                <select id="autoBackupFreq" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="daily" ${cfg.auto_backup?.frequency === 'daily' ? 'selected' : ''}>📅 Daily</option>
+                  <option value="weekly" ${cfg.auto_backup?.frequency === 'weekly' ? 'selected' : ''}>📆 Weekly (Sunday)</option>
+                  <option value="on_change" ${cfg.auto_backup?.frequency === 'on_change' ? 'selected' : ''}>💾 On Every Budget Save</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Run Time (Local)</label>
+                <input type="time" id="autoBackupTime" value="${cfg.auto_backup?.time || '03:00'}" style="width:100%; font-size:12px; padding:6px 10px;">
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">Retention</label>
+                <select id="autoBackupRetention" style="width:100%; font-size:12px; padding:6px 10px;">
+                  <option value="7" ${cfg.auto_backup?.retention_count === 7 ? 'selected' : ''}>Keep last 7 backups</option>
+                  <option value="14" ${!cfg.auto_backup?.retention_count || cfg.auto_backup?.retention_count === 14 ? 'selected' : ''}>Keep last 14 backups</option>
+                  <option value="30" ${cfg.auto_backup?.retention_count === 30 ? 'selected' : ''}>Keep last 30 backups</option>
+                  <option value="60" ${cfg.auto_backup?.retention_count === 60 ? 'selected' : ''}>Keep last 60 backups</option>
+                </select>
+              </div>
+              <div>
+                <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;" title="Subfolder name for this HA add-on instance to keep backups isolated">Instance Subfolder</label>
+                <input type="text" id="autoBackupInstance" value="${cfg.auto_backup?.instance_name || ''}" placeholder="${cfg.auto_backup?.active_instance_id || 'local_habit'}" style="width:100%; font-size:12px; padding:6px 10px;">
+              </div>
+            </div>
+            <div style="margin-top:12px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div style="font-size:11px; color:var(--text-muted); display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                <span>Active path:</span>
+                <code id="autoBackupFolderDisplay" style="background:rgba(0,0,0,0.25); padding:2px 6px; border-radius:4px; color:var(--primary); font-family:monospace; font-size:11px;">/config/habit_backups/${cfg.auto_backup?.active_instance_id || 'local_habit'}</code>
+                <span style="font-size:10px; color:var(--text-muted);">(Isolates test vs git installs)</span>
+              </div>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 14px;" onclick="window.budgetApp.saveAutoBackupSchedule()">
+                Save Schedule Settings
+              </button>
+            </div>
+          </div>
+
+          <!-- Cloud Destinations Grid -->
+          <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:12px; margin-bottom:14px;">
+            <!-- Microsoft OneDrive Card -->
+            <div id="onedriveConfigCard" style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:13px; font-weight:700; color:var(--heading); display:flex; align-items:center; gap:6px;">
+                  <span>☁️</span> Microsoft OneDrive
+                </div>
+                <span id="onedriveStatusBadge" class="badge" style="font-size:10px; padding:2px 6px;">Checking...</span>
+              </div>
+              <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px 0; line-height:1.4;">
+                Uploads backups to <code id="onedriveSubfolderDisplay">/Apps/HABit_Backups/${cfg.auto_backup?.active_instance_id || 'local_habit'}/</code> via Microsoft Device Code login (no Azure setup required).
+              </p>
+              <div id="onedriveActionArea" style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button type="button" class="btn primary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.connectOneDriveModal()">
+                  🔗 Connect Microsoft OneDrive
                 </button>
               </div>
+            </div>
+
+            <!-- Google Drive Card -->
+            <div id="gdriveConfigCard" style="background:rgba(0,0,0,0.15); border:1px solid var(--border); border-radius:var(--radius-card); padding:12px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <div style="font-size:13px; font-weight:700; color:var(--heading); display:flex; align-items:center; gap:6px;">
+                  <span>📁</span> Google Drive
+                </div>
+                <span id="gdriveStatusBadge" class="badge" style="font-size:10px; padding:2px 6px;">Checking...</span>
+              </div>
+              <p style="font-size:11px; color:var(--text-muted); margin:0 0 10px 0; line-height:1.4;">
+                Autonomous server uploads via Google Cloud Service Account JSON, or Home Assistant Google Drive Backup add-on.
+              </p>
+              <div id="gdriveActionArea" style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.openGoogleDriveModal()">
+                  ⚙️ Configure Google Drive
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Snapshots History Browser -->
+          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <div style="font-size:12px; font-weight:700; color:var(--heading);">
+                📦 Snapshots on Host Disk (/data/backups):
+              </div>
+              <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.loadBackupsList()">
+                🔄 Refresh List
+              </button>
+            </div>
+            <div id="backupSnapshotsList" style="max-height:220px; overflow-y:auto; font-size:11.5px;">
+              <div style="color:var(--text-muted); padding:8px 0; text-align:center;">Loading snapshots...</div>
             </div>
           </div>
         </div>
@@ -16465,6 +16908,9 @@ function renderContent() {
 
     if (appState.activeTab === 'Settings') {
       renderSettingsView(container);
+      if (window.budgetApp && typeof window.budgetApp.loadBackupsList === 'function') {
+        setTimeout(() => window.budgetApp.loadBackupsList(), 50);
+      }
       return;
     }
     if (appState.activeTab === 'Budgets') {
@@ -16790,8 +17236,16 @@ async function init() {
       });
     }
     const data = await fetchBudget();
+    const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
+    } else if (initialMode === 'ha') {
+      console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
+      const errEl = document.getElementById('errorBanner');
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.innerHTML = '⚠️ <strong>Connecting to Home Assistant Server...</strong> If this persists, verify that the HABit add-on is running, or check your connection.<br><button class="btn secondary" style="margin-top:6px; font-size:11px; padding:3px 10px;" onclick="window.location.reload()">Retry Connection</button>';
+      }
     }
 
     // Check for Open Banking redirect callback (OAuth code, req_id, state)
@@ -16849,8 +17303,14 @@ async function init() {
       console.warn('[Categories] Init categories notice:', catErr);
     }
 
+    this.updateStorageModeIndicator();
+
     if (!cfg.onboarding_complete) {
-      startOnboarding();
+      if (initialMode === 'ha' && (!data || Object.keys(data).length === 0)) {
+        console.warn('[BudgetApp] Suppressing onboarding: server data not reached.');
+      } else {
+        startOnboarding();
+      }
     } else {
       const now = new Date();
       if (!appState.data.years || !appState.data.years[appState.currentYear]) {
@@ -16935,7 +17395,13 @@ window.budgetApp = {
   renderYearMenu,
   updateTopBarTitle,
   showModal,
-  closeModal,
+  closeModal() {
+    if (this._odPollInterval) {
+      clearInterval(this._odPollInterval);
+      this._odPollInterval = null;
+    }
+    closeModal();
+  },
   openDateOverrideModal,
   openMoveItemModal,
   updateMoveWeekOptions,
@@ -18373,14 +18839,91 @@ window.budgetApp = {
     startOnboarding();
   },
 
+  updateStorageModeIndicator() {
+    const btn = document.getElementById('storageModeIndicatorBtn');
+    if (!btn) return;
+    const mode = getStorageMode();
+    if (mode === 'local') {
+      btn.style.display = 'inline-flex';
+      btn.title = 'Currently using Standalone Local Storage (IndexedDB). Click to manage storage settings.';
+    } else {
+      btn.style.display = 'none';
+    }
+  },
+
+  openStorageSettings() {
+    this.setPrimarySection('settings');
+    setTimeout(() => {
+      const el = document.getElementById('storageEngineSettingsPanel');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.boxShadow = '0 0 0 2px var(--primary, #38bdf8)';
+        setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+      }
+    }, 150);
+  },
+
+  async changeStorageEnginePreference(newMode) {
+    const currentPref = getPersistentStoragePreference();
+    if (currentPref === newMode) return;
+
+    if (newMode === 'local') {
+      const hasExistingData = appState.data && appState.data.years && Object.keys(appState.data.years).length > 0;
+      let shouldCopy = false;
+      if (hasExistingData) {
+        shouldCopy = confirm(
+          "Switch to Standalone Local (IndexedDB) Storage?\n\n" +
+          "Your active budget is currently loaded from Home Assistant. Would you like to copy your active budget into this browser/device's local storage now so your budget stays intact?"
+        );
+      }
+      if (shouldCopy) {
+        await cloneBudgetToLocal(appState.data);
+      }
+    } else if (newMode === 'ha') {
+      const haReachable = await (async () => {
+        try {
+          const r = await fetch(getBaseApiUrl() + 'api/auth/status', { cache: 'no-store' });
+          return r.ok || r.status === 401;
+        } catch (e) { return false; }
+      })();
+      if (!haReachable && (typeof window === 'undefined' || window.__HABIT_SERVER_ENV__ !== 'ha')) {
+        if (!confirm("Home Assistant server could not be confirmed reachable right now. Do you still want to set preference to Home Assistant?")) {
+          return;
+        }
+      }
+    }
+
+    setStorageMode(newMode);
+    console.log('[BudgetApp] Storage preference changed to:', newMode);
+    this.updateStorageModeIndicator();
+
+    const fresh = await fetchBudget(appState.currentYear);
+    if (fresh && typeof fresh === 'object' && Object.keys(fresh).length > 0) {
+      appState.data = fresh;
+    }
+    renderContent();
+  },
+
+  async copyServerDataToLocalPrompt() {
+    if (!appState.data || !appState.data.years) {
+      alert("No active budget data to clone.");
+      return;
+    }
+    const ok = confirm("Clone all current budget data, accounts, settings, and transactions into this device's local offline database (IndexedDB)?");
+    if (ok) {
+      const res = await cloneBudgetToLocal(appState.data);
+      if (res) {
+        alert("Active budget data successfully cloned to device local storage!");
+      } else {
+        alert("Failed to clone data to local storage.");
+      }
+    }
+  },
+
   async toggleStorageModeOverride() {
     const current = getStorageMode();
     const next = current === 'ha' ? 'local' : 'ha';
-    setStorageMode(next);
-    console.log('[BudgetApp] Storage mode switched to:', next);
-    const freshData = await fetchBudget(appState.currentYear);
-    if (freshData) appState.data = freshData;
-    renderContent();
+    await this.changeStorageEnginePreference(next);
   },
 
   exportFullBudgetBackup() {
@@ -18436,6 +18979,521 @@ window.budgetApp = {
       }
     };
     reader.readAsText(file);
+  },
+
+  _odPollInterval: null,
+
+  async loadBackupsList() {
+    const listEl = document.getElementById('backupSnapshotsList');
+    const badgeEl = document.getElementById('backupStatusBadge');
+    const odBadge = document.getElementById('onedriveStatusBadge');
+    const odActions = document.getElementById('onedriveActionArea');
+    const gdBadge = document.getElementById('gdriveStatusBadge');
+    const gdActions = document.getElementById('gdriveActionArea');
+
+    try {
+      const res = await fetchBackupsListApi();
+      const autoCfg = res.auto_backup || {};
+      const backups = res.backups || [];
+      const dests = autoCfg.destinations || {};
+      const od = dests.onedrive || {};
+      const gd = dests.gdrive || {};
+
+      // 1. Status Badge & Instance Path Display
+      if (autoCfg.active_instance_id) {
+        const folderDisp = document.getElementById('autoBackupFolderDisplay');
+        if (folderDisp) {
+          folderDisp.textContent = `/config/habit_backups/${autoCfg.active_instance_id}`;
+        }
+        const odFolderDisp = document.getElementById('onedriveSubfolderDisplay');
+        if (odFolderDisp) {
+          odFolderDisp.textContent = `/Apps/HABit_Backups/${autoCfg.active_instance_id}/`;
+        }
+        const instInput = document.getElementById('autoBackupInstance');
+        if (instInput && !instInput.value) {
+          instInput.placeholder = autoCfg.active_instance_id;
+        }
+      }
+
+      if (badgeEl) {
+        if (autoCfg.enabled === false) {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(156, 163, 175, 0.2)';
+          badgeEl.style.color = 'var(--text-muted)';
+          badgeEl.textContent = '⏸️ Scheduled Backups Paused';
+        } else if (autoCfg.last_backup_status === 'success') {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(16, 185, 129, 0.2)';
+          badgeEl.style.color = 'var(--green)';
+          const t = autoCfg.last_backup_time ? new Date(autoCfg.last_backup_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          badgeEl.textContent = `✅ Active (Last: ${t || 'OK'})`;
+        } else if (autoCfg.last_backup_status === 'partial') {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(245, 158, 11, 0.2)';
+          badgeEl.style.color = 'var(--yellow, #f59e0b)';
+          badgeEl.textContent = '⚠️ Partial Backup';
+        } else {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(56, 189, 248, 0.2)';
+          badgeEl.style.color = 'var(--primary)';
+          badgeEl.textContent = '✅ Scheduled Backups Ready';
+        }
+      }
+
+      // 2. OneDrive Card
+      if (odBadge && odActions) {
+        if (od.has_credentials || od.refresh_token) {
+          odBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+          odBadge.style.color = 'var(--green)';
+          odBadge.textContent = '✅ Connected';
+          odActions.innerHTML = `
+            <div style="font-size:11px; color:var(--text); width:100%; margin-bottom:6px; display:block;">
+              Account: <strong>${od.account_name || 'Microsoft Account'}</strong>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.testOneDriveUploadPrompt()">
+                ☁️ Test Upload
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px; color:var(--red, #ef4444);" onclick="window.budgetApp.disconnectOneDrivePrompt()">
+                Disconnect
+              </button>
+            </div>
+          `;
+        } else {
+          odBadge.style.background = 'rgba(156, 163, 175, 0.2)';
+          odBadge.style.color = 'var(--text-muted)';
+          odBadge.textContent = 'Not Linked';
+          odActions.innerHTML = `
+            <button type="button" class="btn primary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.connectOneDriveModal()">
+              🔗 Connect Microsoft OneDrive
+            </button>
+          `;
+        }
+      }
+
+      // 3. Google Drive Card
+      if (gdBadge && gdActions) {
+        if (gd.has_credentials || gd.service_account_json) {
+          gdBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+          gdBadge.style.color = 'var(--green)';
+          gdBadge.textContent = '✅ Configured';
+          gdActions.innerHTML = `
+            <div style="font-size:11px; color:var(--text); width:100%; margin-bottom:6px; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${gd.account_name || ''}">
+              SA: <strong>${gd.account_name || 'Service Account'}</strong>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.testGoogleDriveUploadPrompt()">
+                ☁️ Test Upload
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px; color:var(--red, #ef4444);" onclick="window.budgetApp.disconnectGoogleDrivePrompt()">
+                Disconnect
+              </button>
+            </div>
+          `;
+        } else {
+          gdBadge.style.background = 'rgba(156, 163, 175, 0.2)';
+          gdBadge.style.color = 'var(--text-muted)';
+          gdBadge.textContent = 'Not Configured';
+          gdActions.innerHTML = `
+            <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.openGoogleDriveModal()">
+              ⚙️ Configure Google Drive
+            </button>
+          `;
+        }
+      }
+
+      // 4. Snapshots List
+      if (listEl) {
+        if (!backups.length) {
+          listEl.innerHTML = `
+            <div style="color:var(--text-muted); padding:16px; text-align:center; font-style:italic;">
+              No snapshots on host disk yet. Click "⚡ Backup Now" above to generate your first snapshot!
+            </div>
+          `;
+        } else {
+          let html = `
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:11px;">
+                  <th style="padding:6px 8px;">Snapshot Date & Instance</th>
+                  <th style="padding:6px 8px;">Size</th>
+                  <th style="padding:6px 8px; text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+          `;
+          backups.forEach(b => {
+            const dateStr = b.timestamp ? new Date(b.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : b.filename;
+            const dlUrl = `${getBaseApiUrl()}api/backups/download/${encodeURIComponent(b.filename)}`;
+            const instBadge = b.instance ? (
+              b.is_current_instance
+                ? `<span style="font-size:9.5px; background:rgba(56,189,248,0.18); color:var(--primary); padding:1px 6px; border-radius:4px; margin-left:6px; font-weight:600;" title="Created by this instance">${b.instance} (this instance)</span>`
+                : `<span style="font-size:9.5px; background:rgba(156,163,175,0.18); color:var(--text-muted); padding:1px 6px; border-radius:4px; margin-left:6px;" title="Instance: ${b.instance}">${b.instance}</span>`
+            ) : '';
+            html += `
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                <td style="padding:8px 8px;">
+                  <div style="font-weight:600; color:var(--heading); display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                    <span>${dateStr}</span>
+                    ${instBadge}
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">${b.filename}</div>
+                </td>
+                <td style="padding:8px 8px; color:var(--text-muted); font-size:11px;">
+                  ${b.size_formatted || `${b.size} B`}
+                </td>
+                <td style="padding:8px 8px; text-align:right;">
+                  <div style="display:inline-flex; gap:6px;">
+                    <a href="${dlUrl}" download="${b.filename}" class="btn secondary" style="font-size:10.5px; padding:3px 8px; text-decoration:none;" title="Download JSON to device">
+                      ⬇️ Download
+                    </a>
+                    <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.restoreBackupSnapshot('${b.filename}')" title="Restore this snapshot">
+                      🔄 Restore
+                    </button>
+                    <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px; color:var(--red, #ef4444);" onclick="window.budgetApp.deleteBackupSnapshot('${b.filename}')" title="Delete snapshot">
+                      🗑️
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          });
+          html += `</tbody></table>`;
+          listEl.innerHTML = html;
+        }
+      }
+    } catch (err) {
+      console.error('Error loading backups list:', err);
+      if (listEl) listEl.innerHTML = `<div style="color:var(--red, #ef4444); padding:10px;">Failed to load backups: ${err.message}</div>`;
+    }
+  },
+
+  async triggerManualBackup() {
+    const btn = document.getElementById('manualBackupNowBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating Snapshot...';
+    }
+    try {
+      const res = await createManualBackupApi();
+      if (res && res.success) {
+        alert(`✅ Backup snapshot created successfully!\nFile: ${res.local?.filename || 'habit_backup.json'}\n` +
+          (res.onedrive?.status === 'success' ? '☁️ Uploaded to OneDrive: OK\n' : '') +
+          (res.gdrive?.status === 'success' ? '📁 Uploaded to Google Drive: OK\n' : ''));
+        await this.loadBackupsList();
+      } else {
+        alert(`Backup issue: ${res?.errors?.join(', ') || res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error creating backup: ${e.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ Backup Now';
+      }
+    }
+  },
+
+  async saveAutoBackupSchedule() {
+    const enabled = document.getElementById('autoBackupEnabled')?.value === 'true';
+    const frequency = document.getElementById('autoBackupFreq')?.value || 'daily';
+    const time = document.getElementById('autoBackupTime')?.value || '03:00';
+    const retention_count = parseInt(document.getElementById('autoBackupRetention')?.value || '14', 10);
+    const instance_name = document.getElementById('autoBackupInstance')?.value?.trim() || '';
+
+    try {
+      const res = await saveBackupSettingsApi({ enabled, frequency, time, retention_count, instance_name });
+      if (res && res.status === 'saved') {
+        alert('✅ Auto-backup schedule and instance settings updated successfully!');
+        const folderDisp = document.getElementById('autoBackupFolderDisplay');
+        if (folderDisp && res.auto_backup?.active_instance_id) {
+          folderDisp.textContent = `/config/habit_backups/${res.auto_backup.active_instance_id}`;
+        }
+        const odFolderDisp = document.getElementById('onedriveSubfolderDisplay');
+        if (odFolderDisp && res.auto_backup?.active_instance_id) {
+          odFolderDisp.textContent = `/Apps/HABit_Backups/${res.auto_backup.active_instance_id}/`;
+        }
+        await this.loadBackupsList();
+      } else {
+        alert('Failed to save auto-backup schedule.');
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async restoreBackupSnapshot(filename) {
+    if (!confirm(`⚠️ Are you sure you want to restore snapshot "${filename}"?\n\nThis will replace your current active budget, transactions, and settings with this historical snapshot.`)) {
+      return;
+    }
+    try {
+      const res = await restoreBackupApi(filename);
+      if (res && res.status === 'restored' && res.data) {
+        appState.data = res.data;
+        calculateAndSyncRollovers();
+        renderYearMenu();
+        renderNav();
+        renderContent();
+        alert(`✅ Successfully restored dataset from "${filename}"!`);
+      } else {
+        alert(`Failed to restore snapshot: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Restore error: ${e.message}`);
+    }
+  },
+
+  async deleteBackupSnapshot(filename) {
+    if (!confirm(`Permanently delete snapshot "${filename}" from host storage?`)) return;
+    try {
+      const res = await deleteBackupApi(filename);
+      if (res && res.status === 'deleted') {
+        await this.loadBackupsList();
+      } else {
+        alert(`Failed to delete snapshot: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Delete error: ${e.message}`);
+    }
+  },
+
+  copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("✅ Verification code copied to clipboard: " + text);
+      }).catch(() => {
+        prompt("Copy this verification code:", text);
+      });
+    } else {
+      prompt("Copy this verification code:", text);
+    }
+  },
+
+  async connectOneDriveModal() {
+    showModal({
+      title: 'Connect Microsoft OneDrive',
+      hideCalc: true,
+      body: `
+        <div style="text-align:center; padding:18px 0;">
+          <div style="font-size:36px; margin-bottom:12px;">☁️</div>
+          <h4 style="margin:0 0 8px 0; color:var(--heading);">Connecting to Microsoft...</h4>
+          <p style="font-size:12px; color:var(--text-muted); margin:0 0 16px 0;">
+            Requesting a Device Login Code from Microsoft. Please wait...
+          </p>
+          <div class="spinner" style="margin:20px auto;"></div>
+        </div>
+      `,
+      actions: `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>`
+    });
+
+    try {
+      const res = await initOneDriveDeviceCodeApi();
+      const bodyEl = document.getElementById('modalBody');
+      const actionsEl = document.getElementById('modalActions');
+      if (!bodyEl) return;
+
+      if (!res || !res.user_code) {
+        bodyEl.innerHTML = `
+          <div style="text-align:center; padding:14px 0;">
+            <div style="color:var(--red, #ef4444); font-size:28px; margin-bottom:8px;">❌</div>
+            <p style="font-size:13px; color:var(--text); line-height:1.4;">
+              Failed to initiate Microsoft Device Login.<br>
+              <small style="color:var(--text-muted);">${res?.error || 'Unable to reach Microsoft OAuth endpoint'}</small>
+            </p>
+          </div>
+        `;
+        if (actionsEl) {
+          actionsEl.innerHTML = `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`;
+        }
+        return;
+      }
+
+      const userCode = res.user_code;
+      const verifyUri = res.verification_uri || 'https://microsoft.com/devicelogin';
+      const deviceCode = res.device_code;
+      const interval = (res.interval || 5) * 1000;
+
+      bodyEl.innerHTML = `
+        <div style="padding:4px 0;">
+          <p style="font-size:12.5px; color:var(--text); line-height:1.5; margin:0 0 16px 0;">
+            Follow these two simple steps on your browser or mobile phone:
+          </p>
+          <div style="background:rgba(0,0,0,0.22); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px;">
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">
+              Step 1: Your Verification Code
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+              <code id="msUserCodeDisplay" style="font-size:22px; font-weight:bold; letter-spacing:2.5px; color:var(--primary); background:rgba(56,189,248,0.12); padding:6px 14px; border-radius:6px; border:2px dashed var(--primary); user-select:all; cursor:pointer;" onclick="window.budgetApp.copyTextToClipboard('${userCode}')" title="Click to copy">${userCode}</code>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:6px 10px;" onclick="window.budgetApp.copyTextToClipboard('${userCode}')">
+                📋 Copy Code
+              </button>
+            </div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">
+              Step 2: Sign In &amp; Approve
+            </div>
+            <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px 0;">
+              Open Microsoft's login portal in a new tab:
+            </p>
+            <a href="${verifyUri}" target="_blank" rel="noopener noreferrer" class="btn primary" style="display:inline-flex; align-items:center; gap:8px; font-size:12px; padding:8px 16px; text-decoration:none;">
+              <span>🌐</span> Open ${verifyUri} &rarr;
+            </a>
+          </div>
+          <div id="msPollStatus" style="font-size:11.5px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+            <span class="spinner" style="width:14px; height:14px; border-width:2px; display:inline-block;"></span>
+            <span>Waiting for you to sign in at Microsoft...</span>
+          </div>
+        </div>
+      `;
+
+      if (actionsEl) {
+        actionsEl.innerHTML = `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>`;
+      }
+
+      if (this._odPollInterval) clearInterval(this._odPollInterval);
+      this._odPollInterval = setInterval(async () => {
+        const pollRes = await pollOneDriveDeviceCodeApi(deviceCode);
+        const statusEl = document.getElementById('msPollStatus');
+        if (pollRes && pollRes.status === 'authorized') {
+          clearInterval(this._odPollInterval);
+          this._odPollInterval = null;
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color:var(--green); font-weight:bold;">✅ Success! Connected as ${pollRes.account_name || 'Microsoft Account'}.</span>`;
+          }
+          setTimeout(() => {
+            window.budgetApp.closeModal();
+            window.budgetApp.loadBackupsList();
+          }, 1800);
+        } else if (pollRes && pollRes.status === 'error') {
+          clearInterval(this._odPollInterval);
+          this._odPollInterval = null;
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color:var(--red, #ef4444);">❌ Connection error: ${pollRes.error || 'Failed'}</span>`;
+          }
+        }
+      }, interval);
+
+    } catch (e) {
+      const bodyEl = document.getElementById('modalBody');
+      if (bodyEl) bodyEl.innerHTML = `<p style="color:var(--red, #ef4444); padding:10px;">Error: ${e.message}</p>`;
+    }
+  },
+
+  async testOneDriveUploadPrompt() {
+    if (!confirm("Test uploading a small diagnostic file to Microsoft OneDrive?")) return;
+    try {
+      const res = await testOneDriveUploadApi();
+      if (res && res.status === 'success') {
+        alert(`✅ Test upload to OneDrive successful!\nFile: ${res.file}\nID: ${res.id}`);
+      } else {
+        alert(`❌ Test upload failed: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async disconnectOneDrivePrompt() {
+    if (!confirm("Disconnect Microsoft OneDrive? Scheduled backups will no longer upload to OneDrive.")) return;
+    try {
+      const res = await disconnectOneDriveApi();
+      if (res && res.status === 'disconnected') {
+        await this.loadBackupsList();
+        alert("OneDrive disconnected.");
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  openGoogleDriveModal() {
+    showModal({
+      title: 'Configure Google Drive',
+      hideCalc: true,
+      body: `
+        <div style="padding:4px 0;">
+          <p style="font-size:12px; color:var(--text-muted); margin:0 0 14px 0; line-height:1.45;">
+            Provide a Google Cloud Service Account JSON key to enable autonomous background backups to a designated Google Drive folder.
+          </p>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">
+              Target Google Drive Folder ID (Optional)
+            </label>
+            <input type="text" id="gdTargetFolderId" placeholder="e.g. 1a2B3c4D5e... (found in folder URL)" style="width:100%; font-size:12px; padding:6px 10px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-top:3px;">
+              Share this Google Drive folder with your service account email with "Editor" permissions.
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">
+              Service Account JSON Key Content
+            </label>
+            <textarea id="gdServiceAccountJson" rows="8" placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  "private_key": "-----BEGIN RSA PRIVATE KEY-----...",\n  "client_email": "..."\n}' style="width:100%; font-family:monospace; font-size:11px; padding:8px; box-sizing:border-box;"></textarea>
+          </div>
+        </div>
+      `,
+      actions: `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+        <button type="button" id="gdSaveBtn" class="btn primary" onclick="window.budgetApp.saveGoogleDriveConfig()">Save &amp; Verify</button>
+      `
+    });
+  },
+
+  async saveGoogleDriveConfig() {
+    const saJson = document.getElementById('gdServiceAccountJson')?.value?.trim();
+    const folderId = document.getElementById('gdTargetFolderId')?.value?.trim() || '';
+    if (!saJson) {
+      alert("Please paste your Google Service Account JSON content.");
+      return;
+    }
+    const saveBtn = document.getElementById('gdSaveBtn');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Verifying...';
+    }
+    try {
+      const res = await saveGoogleDriveApi(saJson, folderId);
+      if (res && res.status === 'saved') {
+        alert(`✅ Google Drive connected successfully!\nService Account: ${res.account_name}`);
+        this.closeModal();
+        await this.loadBackupsList();
+      } else {
+        alert(`❌ Verification failed: ${res?.error || 'Invalid configuration'}`);
+      }
+    } catch (e) {
+      alert(`Error saving configuration: ${e.message}`);
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & Verify';
+      }
+    }
+  },
+
+  async testGoogleDriveUploadPrompt() {
+    if (!confirm("Test uploading a small diagnostic file to Google Drive?")) return;
+    try {
+      const res = await testGoogleDriveUploadApi();
+      if (res && res.status === 'success') {
+        alert(`✅ Test upload to Google Drive successful!\nFile: ${res.file}\nID: ${res.id}`);
+      } else {
+        alert(`❌ Test upload failed: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async disconnectGoogleDrivePrompt() {
+    if (!confirm("Disconnect Google Drive?")) return;
+    try {
+      const res = await disconnectGoogleDriveApi();
+      if (res && res.status === 'disconnected') {
+        await this.loadBackupsList();
+        alert("Google Drive disconnected.");
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
   },
 
   toggleYearDropdown(e) {

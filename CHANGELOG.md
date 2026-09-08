@@ -5,6 +5,20 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.15] - 2026-09-08
+
+### Added & Enhanced
+- **💾 Instance-Linked Automated Backups & Cloud Sync**:
+  - **Local Host & File Editor Access**: Added `map: ["config:rw", "share:rw"]` to add-on permissions, enabling direct visibility of snapshots in Home Assistant File Editor and Samba (`/config/habit_backups/` and `/share/habit_backups/`).
+  - **Multi-Instance Isolation**: Automatically links backup subfolders and snapshot filenames to the add-on instance (`local_habit`, `1a6a99a4_habit`, or user-specified custom name). Prevents local testing builds and Git production builds from overwriting each other.
+  - **Isolated Retention Pruning**: Rolling retention policies now prune snapshots strictly within their own instance subfolder, protecting production backups from test environments.
+  - **Unified Snapshot Browser**: Settings table detects and displays snapshots across current and sibling instances with clear instance identification badges, supporting 1-click restore and direct file download.
+  - **☁️ Microsoft OneDrive Cloud Sync**: Integrated zero-config OAuth 2.0 Device Code login with automatic token refresh, uploading backups to `/Apps/HABit_Backups/{instance_id}/` with cloud retention management.
+  - **📁 Google Drive Cloud Sync**: Added headless Google Cloud Service Account integration for scheduled automated cloud uploads.
+  - **Modal Fix**: Standardized modal popup initialization for cloud authorization within Home Assistant Ingress.
+
+---
+
 ## [0.3.14] - 2026-09-06
 
 ### Added & Enhanced

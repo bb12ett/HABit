@@ -236,6 +236,34 @@ DEFAULT_SETTINGS = {
         "last_sync_timestamp": None,
         "last_sync_status": "idle",
         "linked_accounts": []
+    },
+    "auto_backup": {
+        "enabled": True,
+        "frequency": "daily",
+        "time": "03:00",
+        "weekly_day": 6,
+        "retention_count": 14,
+        "instance_name": "",
+        "destinations": {
+            "local": True,
+            "onedrive": {
+                "enabled": False,
+                "client_id": "04b07795-8ddb-461a-bbee-02f9e1bf7b46",
+                "refresh_token": "",
+                "account_name": "",
+                "folder": "HABit_Backups"
+            },
+            "gdrive": {
+                "enabled": False,
+                "auth_type": "service_account",
+                "service_account_json": "",
+                "folder_id": "",
+                "account_name": ""
+            }
+        },
+        "last_backup_time": None,
+        "last_backup_status": None,
+        "last_backup_error": None
     }
 }
 
@@ -4021,6 +4049,845 @@ def budget_import_api():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# =============================================================================
+# AUTOMATED BACKUP & CLOUD STORAGE ENGINE (LOCAL / ONEDRIVE / GOOGLE DRIVE)
+# =============================================================================
+
+BACKUPS_DIR = os.path.join(DATA_DIR, "backups")
+CONFIG_BACKUPS_BASE = "/config/habit_backups"
+SHARE_BACKUPS_BASE = "/share/habit_backups"
+
+_DETECTED_INSTANCE_SLUG = None
+
+def get_instance_identifier():
+    global _DETECTED_INSTANCE_SLUG
+    # 1. Check user-configured override in settings
+    try:
+        settings = load_settings()
+        inst = settings.get("auto_backup", {}).get("instance_name")
+        if inst and str(inst).strip():
+            return re.sub(r'[^a-zA-Z0-9_-]', '_', str(inst).strip())
+    except Exception:
+        pass
+
+    if _DETECTED_INSTANCE_SLUG:
+        return _DETECTED_INSTANCE_SLUG
+
+    # 2. Check Home Assistant Supervisor self-info API
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if token:
+        try:
+            req = urllib.request.Request(
+                "http://supervisor/addons/self/info",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json"
+                }
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                info = json.loads(resp.read().decode())
+                slug = info.get("data", {}).get("slug")
+                if slug:
+                    _DETECTED_INSTANCE_SLUG = re.sub(r'[^a-zA-Z0-9_-]', '_', slug)
+                    return _DETECTED_INSTANCE_SLUG
+        except Exception:
+            pass
+
+    # 3. Check HOSTNAME environment variable
+    hostname = os.environ.get("HOSTNAME", "").strip()
+    if hostname and ("habit" in hostname.lower() or "addon" in hostname.lower()):
+        _DETECTED_INSTANCE_SLUG = re.sub(r'[^a-zA-Z0-9_-]', '_', hostname)
+        return _DETECTED_INSTANCE_SLUG
+
+    # 4. Check folder name where code resides
+    try:
+        cur_dir = os.path.basename(os.path.dirname(os.path.abspath(__file__))).strip()
+        if cur_dir and cur_dir.lower() not in ["app", "data"]:
+            _DETECTED_INSTANCE_SLUG = re.sub(r'[^a-zA-Z0-9_-]', '_', cur_dir.lower())
+            return _DETECTED_INSTANCE_SLUG
+    except Exception:
+        pass
+
+    _DETECTED_INSTANCE_SLUG = "local_habit"
+    return _DETECTED_INSTANCE_SLUG
+
+def get_all_backup_dirs(create=False):
+    instance_id = get_instance_identifier()
+    dirs = [
+        os.path.join(DATA_DIR, "backups"),
+        os.path.join(CONFIG_BACKUPS_BASE, instance_id) if os.path.exists("/config") or create else None,
+        os.path.join(SHARE_BACKUPS_BASE, instance_id) if os.path.exists("/share") or (create and os.path.exists("/share")) else None
+    ]
+    valid_dirs = [d for d in dirs if d]
+    if create:
+        for d in valid_dirs:
+            try:
+                os.makedirs(d, exist_ok=True)
+            except Exception as e:
+                print(f"[Backup] Notice creating directory {d}: {e}")
+    return valid_dirs
+
+def get_backups_dir():
+    instance_id = get_instance_identifier()
+    d = os.path.join(CONFIG_BACKUPS_BASE, instance_id) if os.path.exists("/config") else os.path.join(DATA_DIR, "backups")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+def generate_full_backup_dict():
+    migrate_legacy_storage()
+    settings = load_settings()
+    all_years = get_available_years()
+    years_data = {}
+    for y in all_years:
+        years_data[str(y)] = load_year_data(y, settings)
+    return {
+        "version": APP_VERSION,
+        "instance_id": get_instance_identifier(),
+        "export_timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "settings": settings,
+        "current_year": settings.get("current_year", 2026),
+        "years": years_data
+    }
+
+def create_local_backup_snapshot(retention_count=14):
+    instance_id = get_instance_identifier()
+    dirs = get_all_backup_dirs(create=True)
+    bdir = os.path.join(DATA_DIR, "backups")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    ts = now.strftime("%Y-%m-%d_%H%M%S")
+    filename = f"habit_backup_{instance_id}_{ts}.json"
+    filepath = os.path.join(bdir, filename)
+    payload = generate_full_backup_dict()
+    payload_str = json.dumps(payload, indent=2, ensure_ascii=False)
+
+    # Save to /data/backups and instance subfolder /config/habit_backups/{instance_id}/
+    for d in dirs:
+        try:
+            os.makedirs(d, exist_ok=True)
+            target_file = os.path.join(d, filename)
+            tmp_target = target_file + ".tmp"
+            with open(tmp_target, "w", encoding="utf-8") as f:
+                f.write(payload_str)
+            os.replace(tmp_target, target_file)
+        except Exception as we:
+            print(f"[Backup] Notice writing backup to {d}: {we}")
+
+    # Prune older backups in all target directories
+    for d in dirs:
+        if not os.path.exists(d):
+            continue
+        try:
+            all_backups = sorted([f for f in os.listdir(d) if f.startswith("habit_backup_") and f.endswith(".json")])
+            if len(all_backups) > retention_count:
+                for old_file in all_backups[:-retention_count]:
+                    try:
+                        os.remove(os.path.join(d, old_file))
+                    except Exception as pe:
+                        print(f"[Backup] Prune error for {old_file} in {d}: {pe}")
+        except Exception as e:
+            print(f"[Backup] Prune check error in {d}: {e}")
+        
+    return filename, filepath, payload
+
+def list_local_backups():
+    instance_id = get_instance_identifier()
+    dirs = get_all_backup_dirs(create=False)
+    found = {}
+
+    # 1. First scan current instance directories
+    for d in dirs:
+        if not os.path.exists(d):
+            continue
+        for fname in sorted(os.listdir(d), reverse=True):
+            if fname.startswith("habit_backup_") and fname.endswith(".json") and fname not in found:
+                fpath = os.path.join(d, fname)
+                try:
+                    stat = os.stat(fpath)
+                    size = stat.st_size
+                    mtime = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc).isoformat()
+                    sz_str = f"{size / 1048576:.1f} MB" if size > 1048576 else (f"{size / 1024:.1f} KB" if size > 1024 else f"{size} B")
+                    found[fname] = {
+                        "filename": fname,
+                        "timestamp": mtime,
+                        "size": size,
+                        "size_formatted": sz_str,
+                        "instance": instance_id,
+                        "is_current_instance": True,
+                        "path": fpath
+                    }
+                except Exception:
+                    pass
+
+    # 2. Also scan /config/habit_backups root and sibling instance subdirectories
+    config_base = "/config/habit_backups"
+    if os.path.exists(config_base):
+        try:
+            for item in sorted(os.listdir(config_base), reverse=True):
+                subpath = os.path.join(config_base, item)
+                if os.path.isfile(subpath) and item.startswith("habit_backup_") and item.endswith(".json"):
+                    if item not in found:
+                        stat = os.stat(subpath)
+                        size = stat.st_size
+                        mtime = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc).isoformat()
+                        sz_str = f"{size / 1048576:.1f} MB" if size > 1048576 else (f"{size / 1024:.1f} KB" if size > 1024 else f"{size} B")
+                        found[item] = {
+                            "filename": item,
+                            "timestamp": mtime,
+                            "size": size,
+                            "size_formatted": sz_str,
+                            "instance": "global",
+                            "is_current_instance": False,
+                            "path": subpath
+                        }
+                elif os.path.isdir(subpath) and item != instance_id:
+                    for subfile in sorted(os.listdir(subpath), reverse=True):
+                        if subfile.startswith("habit_backup_") and subfile.endswith(".json") and subfile not in found:
+                            fpath = os.path.join(subpath, subfile)
+                            stat = os.stat(fpath)
+                            size = stat.st_size
+                            mtime = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc).isoformat()
+                            sz_str = f"{size / 1048576:.1f} MB" if size > 1048576 else (f"{size / 1024:.1f} KB" if size > 1024 else f"{size} B")
+                            found[subfile] = {
+                                "filename": subfile,
+                                "timestamp": mtime,
+                                "size": size,
+                                "size_formatted": sz_str,
+                                "instance": item,
+                                "is_current_instance": False,
+                                "path": fpath
+                            }
+        except Exception as ce:
+            print(f"[Backup] Notice scanning sibling backup folders: {ce}")
+
+    return sorted(list(found.values()), key=lambda x: x["filename"], reverse=True)
+
+def restore_local_backup(filename):
+    safe_name = os.path.basename(filename)
+    dirs = get_all_backup_dirs(create=False)
+    target_path = None
+    for d in dirs:
+        candidate = os.path.join(d, safe_name)
+        if os.path.exists(candidate):
+            target_path = candidate
+            break
+            
+    if not target_path and os.path.exists("/config/habit_backups"):
+        root_cand = os.path.join("/config/habit_backups", safe_name)
+        if os.path.exists(root_cand):
+            target_path = root_cand
+        else:
+            for item in os.listdir("/config/habit_backups"):
+                sub_cand = os.path.join("/config/habit_backups", item, safe_name)
+                if os.path.exists(sub_cand):
+                    target_path = sub_cand
+                    break
+
+    if not target_path:
+        raise FileNotFoundError(f"Backup file {safe_name} not found.")
+    with open(target_path, "r", encoding="utf-8") as f:
+        imported = json.load(f)
+    if not isinstance(imported, dict) or not imported.get("settings"):
+        raise ValueError("Invalid backup format")
+    
+    settings = imported.get("settings", {})
+    save_settings(settings)
+    
+    years_dict = imported.get("years", {})
+    all_txns = imported.get("open_banking_transactions", [])
+    current_y = imported.get("current_year", settings.get("current_year", 2026))
+    
+    for y_str, y_data in years_dict.items():
+        if str(y_str).isdigit():
+            if "open_banking_transactions" not in y_data and all_txns:
+                y_txns = [t for t in all_txns if str(t.get("booking_date", "")).startswith(str(y_str))]
+                y_data["open_banking_transactions"] = y_txns
+            save_year_data(int(y_str), y_data)
+            
+    return load_data(year=current_y)
+
+# --- MICROSOFT ONEDRIVE INTEGRATION ---
+ONEDRIVE_DEFAULT_CLIENT_ID = "04b07795-8ddb-461a-bbee-02f9e1bf7b46" # Azure CLI public native client
+ONEDRIVE_DEVICE_CODE_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/devicecode"
+ONEDRIVE_TOKEN_URL = "https://login.microsoftonline.com/common/oauth2/v2.0/token"
+
+def onedrive_init_device_code(client_id=None):
+    cid = (client_id or "").strip() or ONEDRIVE_DEFAULT_CLIENT_ID
+    data = urllib.parse.urlencode({
+        "client_id": cid,
+        "scope": "https://graph.microsoft.com/Files.ReadWrite offline_access"
+    }).encode("utf-8")
+    req = urllib.request.Request(ONEDRIVE_DEVICE_CODE_URL, data=data, headers={
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read().decode())
+
+def onedrive_poll_token(device_code, client_id=None):
+    cid = (client_id or "").strip() or ONEDRIVE_DEFAULT_CLIENT_ID
+    data = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        "client_id": cid,
+        "device_code": device_code
+    }).encode("utf-8")
+    req = urllib.request.Request(ONEDRIVE_TOKEN_URL, data=data, headers={
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            tokens = json.loads(resp.read().decode())
+            acc_name = "Microsoft Account"
+            try:
+                acc_req = urllib.request.Request("https://graph.microsoft.com/v1.0/me", headers={
+                    "Authorization": f"Bearer {tokens['access_token']}"
+                })
+                with urllib.request.urlopen(acc_req, timeout=10) as acc_resp:
+                    profile = json.loads(acc_resp.read().decode())
+                    acc_name = profile.get("userPrincipalName") or profile.get("mail") or profile.get("displayName") or acc_name
+            except Exception as me_err:
+                print(f"[OneDrive] Notice fetching profile: {me_err}")
+            return {"status": "authorized", "tokens": tokens, "account_name": acc_name}
+    except urllib.error.HTTPError as he:
+        try:
+            err_body = json.loads(he.read().decode())
+            err_code = err_body.get("error", "")
+            if err_code in ("authorization_pending", "slow_down"):
+                return {"status": "pending", "error": err_code}
+            return {"status": "error", "error": err_body.get("error_description", err_code)}
+        except Exception:
+            return {"status": "error", "error": str(he)}
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+def onedrive_get_access_token(refresh_token, client_id=None):
+    cid = (client_id or "").strip() or ONEDRIVE_DEFAULT_CLIENT_ID
+    data = urllib.parse.urlencode({
+        "grant_type": "refresh_token",
+        "client_id": cid,
+        "refresh_token": refresh_token,
+        "scope": "https://graph.microsoft.com/Files.ReadWrite offline_access"
+    }).encode("utf-8")
+    req = urllib.request.Request(ONEDRIVE_TOKEN_URL, data=data, headers={
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        tokens = json.loads(resp.read().decode())
+        return tokens.get("access_token"), tokens.get("refresh_token")
+
+def onedrive_upload_backup_file(filename, payload_dict_or_str, retention_count=14, refresh_token=None, client_id=None, folder_name="HABit_Backups"):
+    if not refresh_token:
+        settings = load_settings()
+        od_cfg = settings.get("auto_backup", {}).get("destinations", {}).get("onedrive", {})
+        refresh_token = od_cfg.get("refresh_token")
+        client_id = client_id or od_cfg.get("client_id")
+        folder_name = od_cfg.get("folder") or folder_name
+    if not refresh_token:
+        raise ValueError("OneDrive is not connected (missing refresh token).")
+        
+    access_token, new_refresh_token = onedrive_get_access_token(refresh_token, client_id)
+    if new_refresh_token and new_refresh_token != refresh_token:
+        settings = load_settings()
+        settings.setdefault("auto_backup", {}).setdefault("destinations", {}).setdefault("onedrive", {})["refresh_token"] = new_refresh_token
+        save_settings(settings)
+        
+    content_bytes = (payload_dict_or_str if isinstance(payload_dict_or_str, str) else json.dumps(payload_dict_or_str, indent=2, ensure_ascii=False)).encode("utf-8")
+    inst = get_instance_identifier()
+    base_folder = (folder_name or "HABit_Backups").strip("/\\")
+    safe_folder = f"{base_folder}/{inst}"
+    upload_url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{urllib.parse.quote(safe_folder)}/{urllib.parse.quote(filename)}:/content"
+    req = urllib.request.Request(upload_url, data=content_bytes, headers={
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json"
+    }, method="PUT")
+    
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        res = json.loads(resp.read().decode())
+        
+    # Prune OneDrive
+    try:
+        list_url = f"https://graph.microsoft.com/v1.0/me/drive/root:/{urllib.parse.quote(safe_folder)}:/children"
+        l_req = urllib.request.Request(list_url, headers={"Authorization": f"Bearer {access_token}"})
+        with urllib.request.urlopen(l_req, timeout=15) as l_resp:
+            children = json.loads(l_resp.read().decode()).get("value", [])
+            backup_items = [item for item in children if item.get("name", "").startswith("habit_backup_") and item.get("name", "").endswith(".json")]
+            backup_items.sort(key=lambda x: x.get("createdDateTime", x.get("name")))
+            if len(backup_items) > retention_count:
+                for old_item in backup_items[:-retention_count]:
+                    del_id = old_item.get("id")
+                    if del_id:
+                        d_req = urllib.request.Request(f"https://graph.microsoft.com/v1.0/me/drive/items/{del_id}", headers={"Authorization": f"Bearer {access_token}"}, method="DELETE")
+                        try:
+                            urllib.request.urlopen(d_req, timeout=10)
+                        except Exception as de:
+                            print(f"[OneDrive] Prune item error: {de}")
+    except Exception as pr_err:
+        print(f"[OneDrive] Retention prune notice: {pr_err}")
+        
+    return res
+
+# --- GOOGLE DRIVE INTEGRATION ---
+def gdrive_get_access_token_sa(sa_dict):
+    if not isinstance(sa_dict, dict) or not sa_dict.get("private_key") or not sa_dict.get("client_email"):
+        raise ValueError("Invalid Google Service Account JSON: missing client_email or private_key")
+    
+    from cryptography.hazmat.primitives.serialization import load_pem_private_key
+    from cryptography.hazmat.primitives.asymmetric import padding
+    from cryptography.hazmat.primitives import hashes
+    
+    now = int(time.time())
+    header = {"alg": "RS256", "typ": "JWT"}
+    claims = {
+        "iss": sa_dict["client_email"],
+        "scope": "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive",
+        "aud": "https://oauth2.googleapis.com/token",
+        "exp": now + 3600,
+        "iat": now
+    }
+    h_b64 = base64.urlsafe_b64encode(json.dumps(header).encode()).rstrip(b'=').decode()
+    c_b64 = base64.urlsafe_b64encode(json.dumps(claims).encode()).rstrip(b'=').decode()
+    signing_input = f"{h_b64}.{c_b64}".encode('ascii')
+    
+    priv_key = load_pem_private_key(sa_dict["private_key"].encode("utf-8"), password=None)
+    signature = priv_key.sign(signing_input, padding.PKCS1v15(), hashes.SHA256())
+    sig_b64 = base64.urlsafe_b64encode(signature).rstrip(b'=').decode()
+    signed_jwt = f"{h_b64}.{c_b64}.{sig_b64}"
+    
+    body = urllib.parse.urlencode({
+        "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+        "assertion": signed_jwt
+    }).encode("utf-8")
+    
+    req = urllib.request.Request("https://oauth2.googleapis.com/token", data=body, headers={
+        "Content-Type": "application/x-www-form-urlencoded"
+    })
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        res = json.loads(resp.read().decode())
+        return res.get("access_token")
+
+def gdrive_upload_backup_file(filename, payload_dict_or_str, retention_count=14, sa_dict=None, folder_id=None):
+    if not sa_dict:
+        settings = load_settings()
+        gd_cfg = settings.get("auto_backup", {}).get("destinations", {}).get("gdrive", {})
+        sa_raw = gd_cfg.get("service_account_json", "")
+        folder_id = folder_id or gd_cfg.get("folder_id")
+        if isinstance(sa_raw, str) and sa_raw.strip():
+            sa_dict = json.loads(sa_raw)
+        elif isinstance(sa_raw, dict):
+            sa_dict = sa_raw
+    if not sa_dict:
+        raise ValueError("Google Drive is not configured (missing Service Account JSON)")
+        
+    token = gdrive_get_access_token_sa(sa_dict)
+    content_bytes = (payload_dict_or_str if isinstance(payload_dict_or_str, str) else json.dumps(payload_dict_or_str, indent=2, ensure_ascii=False)).encode("utf-8")
+    
+    boundary = f"=====habit_gdrive_{uuid.uuid4().hex}====="
+    metadata = {"name": filename, "mimeType": "application/json"}
+    if folder_id:
+        metadata["parents"] = [folder_id]
+        
+    body = (
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        f"{json.dumps(metadata)}\r\n"
+        f"--{boundary}\r\n"
+        f"Content-Type: application/json\r\n\r\n"
+    ).encode("utf-8") + content_bytes + f"\r\n--{boundary}--\r\n".encode("utf-8")
+    
+    upload_url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
+    req = urllib.request.Request(upload_url, data=body, headers={
+        "Authorization": f"Bearer {token}",
+        "Content-Type": f"multipart/related; boundary={boundary}"
+    })
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        upload_res = json.loads(resp.read().decode())
+        
+    # Prune Google Drive
+    if folder_id:
+        try:
+            q_str = urllib.parse.quote(f"'{folder_id}' in parents and trashed = false")
+            list_url = f"https://www.googleapis.com/drive/v3/files?q={q_str}&fields=files(id,name,createdTime)&orderBy=createdTime"
+            l_req = urllib.request.Request(list_url, headers={"Authorization": f"Bearer {token}"})
+            with urllib.request.urlopen(l_req, timeout=15) as l_resp:
+                files = json.loads(l_resp.read().decode()).get("files", [])
+                backup_files = [f for f in files if f.get("name", "").startswith("habit_backup_") and f.get("name", "").endswith(".json")]
+                if len(backup_files) > retention_count:
+                    for old_f in backup_files[:-retention_count]:
+                        del_id = old_f.get("id")
+                        if del_id:
+                            d_req = urllib.request.Request(f"https://www.googleapis.com/drive/v3/files/{del_id}", headers={"Authorization": f"Bearer {token}"}, method="DELETE")
+                            try:
+                                urllib.request.urlopen(d_req, timeout=10)
+                            except Exception as de:
+                                print(f"[GDrive] Prune error: {de}")
+        except Exception as pe:
+            print(f"[GDrive] Prune notice: {pe}")
+            
+    return upload_res
+
+# --- UNIFIED BACKUP DISPATCHER ---
+def perform_full_backup_job(trigger="manual", requested_destinations=None):
+    settings = load_settings()
+    auto_cfg = settings.setdefault("auto_backup", {})
+    retention = int(auto_cfg.get("retention_count", 14))
+    dests = auto_cfg.setdefault("destinations", {})
+    
+    results = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "trigger": trigger,
+        "local": None,
+        "onedrive": None,
+        "gdrive": None,
+        "success": True,
+        "errors": []
+    }
+    
+    # 1. Local snapshot
+    try:
+        fname, fpath, payload = create_local_backup_snapshot(retention_count=retention)
+        results["local"] = {"status": "success", "filename": fname, "path": fpath}
+    except Exception as le:
+        results["local"] = {"status": "error", "error": str(le)}
+        results["errors"].append(f"Local: {le}")
+        results["success"] = False
+        return results
+        
+    # 2. OneDrive
+    od_cfg = dests.get("onedrive", {})
+    od_enabled = od_cfg.get("enabled", False)
+    if requested_destinations and "onedrive" in requested_destinations:
+        od_enabled = True
+    if od_enabled and od_cfg.get("refresh_token"):
+        try:
+            od_res = onedrive_upload_backup_file(fname, payload, retention_count=retention)
+            results["onedrive"] = {"status": "success", "id": od_res.get("id")}
+        except Exception as oe:
+            results["onedrive"] = {"status": "error", "error": str(oe)}
+            results["errors"].append(f"OneDrive: {oe}")
+            results["success"] = False
+            
+    # 3. Google Drive
+    gd_cfg = dests.get("gdrive", {})
+    gd_enabled = gd_cfg.get("enabled", False)
+    if requested_destinations and "gdrive" in requested_destinations:
+        gd_enabled = True
+    if gd_enabled and gd_cfg.get("service_account_json"):
+        try:
+            gd_res = gdrive_upload_backup_file(fname, payload, retention_count=retention)
+            results["gdrive"] = {"status": "success", "id": gd_res.get("id")}
+        except Exception as ge:
+            results["gdrive"] = {"status": "error", "error": str(ge)}
+            results["errors"].append(f"GDrive: {ge}")
+            results["success"] = False
+            
+    # Update settings status
+    auto_cfg["last_backup_time"] = results["timestamp"]
+    auto_cfg["last_backup_status"] = "success" if results["success"] else ("partial" if results["local"].get("status") == "success" else "failed")
+    auto_cfg["last_backup_error"] = "; ".join(results["errors"]) if results["errors"] else None
+    save_settings(settings)
+    
+    return results
+
+def background_backup_scheduler():
+    while True:
+        try:
+            settings = load_settings()
+            auto_cfg = settings.get("auto_backup", {})
+            if auto_cfg.get("enabled", False):
+                freq = auto_cfg.get("frequency", "daily")
+                now = datetime.datetime.now()
+                target_time_str = auto_cfg.get("time", "03:00")
+                try:
+                    parts = target_time_str.split(":")
+                    target_h, target_m = int(parts[0]), int(parts[1])
+                except Exception:
+                    target_h, target_m = 3, 0
+                    
+                last_backup_str = auto_cfg.get("last_backup_time")
+                last_backup_date = None
+                if last_backup_str:
+                    try:
+                        last_backup_date = datetime.datetime.fromisoformat(last_backup_str.replace("Z", "+00:00")).astimezone().date()
+                    except Exception:
+                        pass
+                        
+                today = now.date()
+                should_run = False
+                
+                if freq == "daily":
+                    if last_backup_date != today and (now.hour > target_h or (now.hour == target_h and now.minute >= target_m)):
+                        should_run = True
+                elif freq == "weekly":
+                    target_day = int(auto_cfg.get("weekly_day", 6))
+                    if now.weekday() == target_day and last_backup_date != today and (now.hour > target_h or (now.hour == target_h and now.minute >= target_m)):
+                        should_run = True
+                        
+                if should_run:
+                    print(f"[BackupScheduler] Running scheduled auto-backup ({freq} at {target_time_str})...")
+                    perform_full_backup_job(trigger="scheduled")
+        except Exception as e:
+            print(f"[BackupScheduler] Exception in scheduler thread: {e}")
+            
+        time.sleep(60)
+
+# Start background backup scheduler thread
+try:
+    _backup_thread = threading.Thread(target=background_backup_scheduler, daemon=True, name="AutoBackupScheduler")
+    _backup_thread.start()
+except Exception as _bth_err:
+    print(f"Notice: Failed to start auto-backup scheduler thread: {_bth_err}")
+
+def get_sanitized_backup_config(settings):
+    auto_cfg = copy.deepcopy(settings.get("auto_backup", {}))
+    # Add instance identifier details
+    auto_cfg["instance_name"] = auto_cfg.get("instance_name", "")
+    active_inst = get_instance_identifier()
+    auto_cfg["active_instance_id"] = active_inst
+    auto_cfg["config_path"] = f"/config/habit_backups/{active_inst}"
+    auto_cfg["share_path"] = f"/share/habit_backups/{active_inst}"
+
+    dests = auto_cfg.setdefault("destinations", {})
+    od = dests.setdefault("onedrive", {})
+    has_od = bool(od.get("refresh_token"))
+    od["has_credentials"] = has_od
+    od["refresh_token"] = "••••••••" if has_od else ""
+    
+    gd = dests.setdefault("gdrive", {})
+    sa_json = gd.get("service_account_json", "")
+    has_gd = bool(sa_json)
+    gd["has_credentials"] = has_gd
+    gd["service_account_json"] = "••••••••" if has_gd else ""
+    return auto_cfg
+
+@app.route("/api/backups", methods=["GET"])
+def get_backups_api():
+    try:
+        settings = load_settings()
+        backups = list_local_backups()
+        return jsonify({
+            "backups": backups,
+            "auto_backup": get_sanitized_backup_config(settings)
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/backups/create", methods=["POST"])
+def create_backup_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        destinations = data.get("destinations")
+        res = perform_full_backup_job(trigger="manual", requested_destinations=destinations)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/backups/restore", methods=["POST"])
+def restore_backup_api():
+    try:
+        data = request.get_json(force=True) or {}
+        filename = data.get("filename")
+        if not filename:
+            return jsonify({"error": "Missing filename"}), 400
+        composite = restore_local_backup(filename)
+        return jsonify({"status": "restored", "data": composite})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/backups/download/<path:filename>", methods=["GET"])
+def download_backup_api(filename):
+    try:
+        safe_name = os.path.basename(filename)
+        dirs = get_all_backup_dirs(create=False)
+        for d in dirs:
+            fpath = os.path.join(d, safe_name)
+            if os.path.exists(fpath):
+                return send_from_directory(d, safe_name, as_attachment=True)
+        # Check /config/habit_backups root and sibling instance subdirectories
+        if os.path.exists("/config/habit_backups"):
+            root_cand = os.path.join("/config/habit_backups", safe_name)
+            if os.path.exists(root_cand):
+                return send_from_directory("/config/habit_backups", safe_name, as_attachment=True)
+            for item in os.listdir("/config/habit_backups"):
+                sub = os.path.join("/config/habit_backups", item)
+                if os.path.isdir(sub) and os.path.exists(os.path.join(sub, safe_name)):
+                    return send_from_directory(sub, safe_name, as_attachment=True)
+        return jsonify({"error": "File not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 404
+
+@app.route("/api/backups/<path:filename>", methods=["DELETE"])
+def delete_backup_api(filename):
+    try:
+        safe_name = os.path.basename(filename)
+        dirs = get_all_backup_dirs(create=False)
+        deleted = False
+        for d in dirs:
+            fpath = os.path.join(d, safe_name)
+            if os.path.exists(fpath):
+                try:
+                    os.remove(fpath)
+                    deleted = True
+                except Exception as de:
+                    print(f"[Backup] Delete error for {fpath}: {de}")
+        # Also check root /config/habit_backups and sibling dirs
+        if os.path.exists("/config/habit_backups"):
+            root_cand = os.path.join("/config/habit_backups", safe_name)
+            if os.path.exists(root_cand):
+                try:
+                    os.remove(root_cand)
+                    deleted = True
+                except Exception as de:
+                    print(f"[Backup] Delete error for {root_cand}: {de}")
+            for item in os.listdir("/config/habit_backups"):
+                sub = os.path.join("/config/habit_backups", item)
+                if os.path.isdir(sub):
+                    cand = os.path.join(sub, safe_name)
+                    if os.path.exists(cand):
+                        try:
+                            os.remove(cand)
+                            deleted = True
+                        except Exception as de:
+                            print(f"[Backup] Delete error for {cand}: {de}")
+        if deleted:
+            return jsonify({"status": "deleted", "filename": safe_name})
+        return jsonify({"error": "File not found"}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/backup/settings", methods=["POST"])
+def save_backup_settings_api():
+    try:
+        payload = request.get_json(force=True) or {}
+        settings = load_settings()
+        auto_cfg = settings.setdefault("auto_backup", {})
+        for field in ["enabled", "frequency", "time", "weekly_day", "retention_count"]:
+            if field in payload:
+                auto_cfg[field] = payload[field]
+        if "instance_name" in payload:
+            raw_inst = str(payload["instance_name"]).strip()
+            auto_cfg["instance_name"] = re.sub(r'[^a-zA-Z0-9_-]', '_', raw_inst) if raw_inst else ""
+        if "destinations" in payload and isinstance(payload["destinations"], dict):
+            dests = auto_cfg.setdefault("destinations", {})
+            for k, v in payload["destinations"].items():
+                if isinstance(v, dict):
+                    dests.setdefault(k, {}).update(v)
+                else:
+                    dests[k] = v
+        save_settings(settings)
+        return jsonify({"status": "saved", "auto_backup": get_sanitized_backup_config(settings)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/cloud/onedrive/devicecode", methods=["POST"])
+def onedrive_devicecode_api():
+    try:
+        data = request.get_json(silent=True) or {}
+        client_id = data.get("client_id")
+        res = onedrive_init_device_code(client_id)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/cloud/onedrive/poll", methods=["POST"])
+def onedrive_poll_api():
+    try:
+        data = request.get_json(force=True) or {}
+        device_code = data.get("device_code")
+        client_id = data.get("client_id")
+        if not device_code:
+            return jsonify({"error": "Missing device_code"}), 400
+        res = onedrive_poll_token(device_code, client_id)
+        if res.get("status") == "authorized":
+            tokens = res.get("tokens", {})
+            settings = load_settings()
+            od_cfg = settings.setdefault("auto_backup", {}).setdefault("destinations", {}).setdefault("onedrive", {})
+            od_cfg["enabled"] = True
+            od_cfg["refresh_token"] = tokens.get("refresh_token", "")
+            od_cfg["account_name"] = res.get("account_name", "Microsoft Account")
+            if client_id:
+                od_cfg["client_id"] = client_id.strip()
+            save_settings(settings)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/cloud/onedrive/test", methods=["POST"])
+def onedrive_test_api():
+    try:
+        fname = f"habit_test_onedrive_{int(time.time())}.json"
+        test_payload = {"test": True, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "version": APP_VERSION}
+        res = onedrive_upload_backup_file(fname, test_payload, retention_count=2)
+        return jsonify({"status": "success", "file": fname, "id": res.get("id")})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/cloud/onedrive/disconnect", methods=["POST"])
+def onedrive_disconnect_api():
+    try:
+        settings = load_settings()
+        od_cfg = settings.setdefault("auto_backup", {}).setdefault("destinations", {}).setdefault("onedrive", {})
+        od_cfg["enabled"] = False
+        od_cfg["refresh_token"] = ""
+        od_cfg["account_name"] = ""
+        save_settings(settings)
+        return jsonify({"status": "disconnected"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/cloud/gdrive/save", methods=["POST"])
+def gdrive_save_api():
+    try:
+        payload = request.get_json(force=True) or {}
+        sa_raw = payload.get("service_account_json", "")
+        folder_id = payload.get("folder_id", "").strip()
+        
+        sa_dict = None
+        if isinstance(sa_raw, str) and sa_raw.strip():
+            sa_dict = json.loads(sa_raw)
+        elif isinstance(sa_raw, dict):
+            sa_dict = sa_raw
+            
+        if not sa_dict or not sa_dict.get("private_key") or not sa_dict.get("client_email"):
+            return jsonify({"error": "Invalid Service Account JSON. Ensure private_key and client_email exist."}), 400
+            
+        # Verify access token can be obtained
+        token = gdrive_get_access_token_sa(sa_dict)
+        client_email = sa_dict.get("client_email", "")
+        
+        settings = load_settings()
+        gd_cfg = settings.setdefault("auto_backup", {}).setdefault("destinations", {}).setdefault("gdrive", {})
+        gd_cfg["enabled"] = True
+        gd_cfg["service_account_json"] = json.dumps(sa_dict) if isinstance(sa_dict, dict) else sa_raw
+        gd_cfg["folder_id"] = folder_id
+        gd_cfg["account_name"] = client_email
+        save_settings(settings)
+        
+        return jsonify({"status": "saved", "account_name": client_email, "folder_id": folder_id})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/cloud/gdrive/test", methods=["POST"])
+def gdrive_test_api():
+    try:
+        fname = f"habit_test_gdrive_{int(time.time())}.json"
+        test_payload = {"test": True, "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(), "version": APP_VERSION}
+        res = gdrive_upload_backup_file(fname, test_payload, retention_count=2)
+        return jsonify({"status": "success", "file": fname, "id": res.get("id")})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/cloud/gdrive/disconnect", methods=["POST"])
+def gdrive_disconnect_api():
+    try:
+        settings = load_settings()
+        gd_cfg = settings.setdefault("auto_backup", {}).setdefault("destinations", {}).setdefault("gdrive", {})
+        gd_cfg["enabled"] = False
+        gd_cfg["service_account_json"] = ""
+        gd_cfg["folder_id"] = ""
+        gd_cfg["account_name"] = ""
+        save_settings(settings)
+        return jsonify({"status": "disconnected"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/ha/sensors", methods=["GET", "POST"])
 def ha_sensors_api():
     data = load_data()
@@ -4034,8 +4901,8 @@ def ha_sensors_api():
         "sensors": sensors
     })
 
-@app.route("/", defaults={"path": ""}, methods=["GET", "POST"])
-@app.route("/<path:path>", methods=["GET", "POST"])
+@app.route("/", defaults={"path": ""}, methods=["GET", "POST", "DELETE", "PUT"])
+@app.route("/<path:path>", methods=["GET", "POST", "DELETE", "PUT"])
 def catch_all(path):
     if path.endswith("api/version"):
         return jsonify({"build_id": BUILD_ID, "version": APP_VERSION})
@@ -4069,6 +4936,47 @@ def catch_all(path):
 
     if path.endswith("api/openbanking/status"):
         return openbanking_status()
+
+    if path.endswith("api/backups"):
+        return get_backups_api()
+
+    if path.endswith("api/backups/create"):
+        return create_backup_api()
+
+    if path.endswith("api/backups/restore"):
+        return restore_backup_api()
+
+    if "api/backups/download/" in path:
+        fname = path.split("api/backups/download/", 1)[1]
+        return download_backup_api(fname)
+
+    if "api/backups/" in path and request.method == "DELETE":
+        fname = path.split("api/backups/", 1)[1]
+        return delete_backup_api(fname)
+
+    if path.endswith("api/backup/settings"):
+        return save_backup_settings_api()
+
+    if path.endswith("api/cloud/onedrive/devicecode"):
+        return onedrive_devicecode_api()
+
+    if path.endswith("api/cloud/onedrive/poll"):
+        return onedrive_poll_api()
+
+    if path.endswith("api/cloud/onedrive/test"):
+        return onedrive_test_api()
+
+    if path.endswith("api/cloud/onedrive/disconnect"):
+        return onedrive_disconnect_api()
+
+    if path.endswith("api/cloud/gdrive/save"):
+        return gdrive_save_api()
+
+    if path.endswith("api/cloud/gdrive/test"):
+        return gdrive_test_api()
+
+    if path.endswith("api/cloud/gdrive/disconnect"):
+        return gdrive_disconnect_api()
     
     if path.startswith("static/"):
         resp = make_response(send_from_directory("static", path[7:]))

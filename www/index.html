@@ -728,6 +728,7 @@
     })();
   </script>
       <script>
+      window.__HABIT_SERVER_ENV__ = "local";
       window.__BUILD_ID__ = "1788678234";
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then(function(registrations) {
@@ -844,6 +845,10 @@
             </div>
 
             <div class="top-nav-right">
+              <!-- STORAGE ENGINE MODE BADGE (Shown when in standalone local mode) -->
+              <button id="storageModeIndicatorBtn" class="btn" style="display:none; background:rgba(56,189,248,0.16); color:var(--primary, #38bdf8); border:1px solid rgba(56,189,248,0.4); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.openStorageSettings()" title="Currently in Standalone Local Storage mode. Click to manage storage settings.">
+                <span class="btn-icon">📱</span><span class="btn-text"> Local Storage</span>
+              </button>
               <!-- OPEN BANKING SYNC ERROR INDICATOR -->
               <button id="openBankingSyncErrorBtn" class="btn" style="display:none; background:rgba(239,68,68,0.18); color:var(--red, #ef4444); border:1px solid rgba(239,68,68,0.45); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.handleOpenBankingSyncErrorClick()" title="Open Banking Sync Error. Click to view Settings & Logs.">
                 <span class="btn-icon">⚠️</span><span class="btn-text"> Sync Error</span>
@@ -1016,7 +1021,7 @@
             <img src="static/img/banner_light.png" alt="HABit Logo" class="drawer-banner-img logo-light-mode">
           </a>
           <div class="drawer-version-text">
-            <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:none;" title="Open HABit Help on GitHub">v0.3.14 &bull; Help & Documentation ↗</a>
+            <a href="https://github.com/bb12ett/HABit#readme" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:none;" title="Open HABit Help on GitHub">v0.3.15 &bull; Help & Documentation ↗</a>
           </div>
           <div class="drawer-version-text" style="margin-top:4px;">
             <a href="javascript:void(0)" onclick="window.budgetApp.openDisclaimerModal()" style="color:var(--text-muted); text-decoration:none; font-size:10.5px;" title="View Financial Disclaimer & Terms">⚖️ Financial Disclaimer</a>

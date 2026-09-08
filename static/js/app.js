@@ -49,7 +49,23 @@ import {
   exportFullBudgetBackupApi,
   importFullBudgetBackupApi,
   getStorageMode,
-  setStorageMode
+  setStorageMode,
+  getPersistentStoragePreference,
+  cloneBudgetToLocal,
+  cloneLocalToServer,
+  getBaseApiUrl,
+  fetchBackupsListApi,
+  createManualBackupApi,
+  restoreBackupApi,
+  deleteBackupApi,
+  saveBackupSettingsApi,
+  initOneDriveDeviceCodeApi,
+  pollOneDriveDeviceCodeApi,
+  testOneDriveUploadApi,
+  disconnectOneDriveApi,
+  saveGoogleDriveApi,
+  testGoogleDriveUploadApi,
+  disconnectGoogleDriveApi
 } from './api.js';
 
 import {
@@ -634,6 +650,9 @@ export function renderContent() {
 
     if (appState.activeTab === 'Settings') {
       renderSettingsView(container);
+      if (window.budgetApp && typeof window.budgetApp.loadBackupsList === 'function') {
+        setTimeout(() => window.budgetApp.loadBackupsList(), 50);
+      }
       return;
     }
     if (appState.activeTab === 'Budgets') {
@@ -959,8 +978,16 @@ export async function init() {
       });
     }
     const data = await fetchBudget();
+    const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
+    } else if (initialMode === 'ha') {
+      console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
+      const errEl = document.getElementById('errorBanner');
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.innerHTML = '⚠️ <strong>Connecting to Home Assistant Server...</strong> If this persists, verify that the HABit add-on is running, or check your connection.<br><button class="btn secondary" style="margin-top:6px; font-size:11px; padding:3px 10px;" onclick="window.location.reload()">Retry Connection</button>';
+      }
     }
 
     // Check for Open Banking redirect callback (OAuth code, req_id, state)
@@ -1018,8 +1045,14 @@ export async function init() {
       console.warn('[Categories] Init categories notice:', catErr);
     }
 
+    this.updateStorageModeIndicator();
+
     if (!cfg.onboarding_complete) {
-      startOnboarding();
+      if (initialMode === 'ha' && (!data || Object.keys(data).length === 0)) {
+        console.warn('[BudgetApp] Suppressing onboarding: server data not reached.');
+      } else {
+        startOnboarding();
+      }
     } else {
       const now = new Date();
       if (!appState.data.years || !appState.data.years[appState.currentYear]) {
@@ -1104,7 +1137,13 @@ window.budgetApp = {
   renderYearMenu,
   updateTopBarTitle,
   showModal,
-  closeModal,
+  closeModal() {
+    if (this._odPollInterval) {
+      clearInterval(this._odPollInterval);
+      this._odPollInterval = null;
+    }
+    closeModal();
+  },
   openDateOverrideModal,
   openMoveItemModal,
   updateMoveWeekOptions,
@@ -2542,14 +2581,91 @@ window.budgetApp = {
     startOnboarding();
   },
 
+  updateStorageModeIndicator() {
+    const btn = document.getElementById('storageModeIndicatorBtn');
+    if (!btn) return;
+    const mode = getStorageMode();
+    if (mode === 'local') {
+      btn.style.display = 'inline-flex';
+      btn.title = 'Currently using Standalone Local Storage (IndexedDB). Click to manage storage settings.';
+    } else {
+      btn.style.display = 'none';
+    }
+  },
+
+  openStorageSettings() {
+    this.setPrimarySection('settings');
+    setTimeout(() => {
+      const el = document.getElementById('storageEngineSettingsPanel');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        el.style.boxShadow = '0 0 0 2px var(--primary, #38bdf8)';
+        setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+      }
+    }, 150);
+  },
+
+  async changeStorageEnginePreference(newMode) {
+    const currentPref = getPersistentStoragePreference();
+    if (currentPref === newMode) return;
+
+    if (newMode === 'local') {
+      const hasExistingData = appState.data && appState.data.years && Object.keys(appState.data.years).length > 0;
+      let shouldCopy = false;
+      if (hasExistingData) {
+        shouldCopy = confirm(
+          "Switch to Standalone Local (IndexedDB) Storage?\n\n" +
+          "Your active budget is currently loaded from Home Assistant. Would you like to copy your active budget into this browser/device's local storage now so your budget stays intact?"
+        );
+      }
+      if (shouldCopy) {
+        await cloneBudgetToLocal(appState.data);
+      }
+    } else if (newMode === 'ha') {
+      const haReachable = await (async () => {
+        try {
+          const r = await fetch(getBaseApiUrl() + 'api/auth/status', { cache: 'no-store' });
+          return r.ok || r.status === 401;
+        } catch (e) { return false; }
+      })();
+      if (!haReachable && (typeof window === 'undefined' || window.__HABIT_SERVER_ENV__ !== 'ha')) {
+        if (!confirm("Home Assistant server could not be confirmed reachable right now. Do you still want to set preference to Home Assistant?")) {
+          return;
+        }
+      }
+    }
+
+    setStorageMode(newMode);
+    console.log('[BudgetApp] Storage preference changed to:', newMode);
+    this.updateStorageModeIndicator();
+
+    const fresh = await fetchBudget(appState.currentYear);
+    if (fresh && typeof fresh === 'object' && Object.keys(fresh).length > 0) {
+      appState.data = fresh;
+    }
+    renderContent();
+  },
+
+  async copyServerDataToLocalPrompt() {
+    if (!appState.data || !appState.data.years) {
+      alert("No active budget data to clone.");
+      return;
+    }
+    const ok = confirm("Clone all current budget data, accounts, settings, and transactions into this device's local offline database (IndexedDB)?");
+    if (ok) {
+      const res = await cloneBudgetToLocal(appState.data);
+      if (res) {
+        alert("Active budget data successfully cloned to device local storage!");
+      } else {
+        alert("Failed to clone data to local storage.");
+      }
+    }
+  },
+
   async toggleStorageModeOverride() {
     const current = getStorageMode();
     const next = current === 'ha' ? 'local' : 'ha';
-    setStorageMode(next);
-    console.log('[BudgetApp] Storage mode switched to:', next);
-    const freshData = await fetchBudget(appState.currentYear);
-    if (freshData) appState.data = freshData;
-    renderContent();
+    await this.changeStorageEnginePreference(next);
   },
 
   exportFullBudgetBackup() {
@@ -2605,6 +2721,521 @@ window.budgetApp = {
       }
     };
     reader.readAsText(file);
+  },
+
+  _odPollInterval: null,
+
+  async loadBackupsList() {
+    const listEl = document.getElementById('backupSnapshotsList');
+    const badgeEl = document.getElementById('backupStatusBadge');
+    const odBadge = document.getElementById('onedriveStatusBadge');
+    const odActions = document.getElementById('onedriveActionArea');
+    const gdBadge = document.getElementById('gdriveStatusBadge');
+    const gdActions = document.getElementById('gdriveActionArea');
+
+    try {
+      const res = await fetchBackupsListApi();
+      const autoCfg = res.auto_backup || {};
+      const backups = res.backups || [];
+      const dests = autoCfg.destinations || {};
+      const od = dests.onedrive || {};
+      const gd = dests.gdrive || {};
+
+      // 1. Status Badge & Instance Path Display
+      if (autoCfg.active_instance_id) {
+        const folderDisp = document.getElementById('autoBackupFolderDisplay');
+        if (folderDisp) {
+          folderDisp.textContent = `/config/habit_backups/${autoCfg.active_instance_id}`;
+        }
+        const odFolderDisp = document.getElementById('onedriveSubfolderDisplay');
+        if (odFolderDisp) {
+          odFolderDisp.textContent = `/Apps/HABit_Backups/${autoCfg.active_instance_id}/`;
+        }
+        const instInput = document.getElementById('autoBackupInstance');
+        if (instInput && !instInput.value) {
+          instInput.placeholder = autoCfg.active_instance_id;
+        }
+      }
+
+      if (badgeEl) {
+        if (autoCfg.enabled === false) {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(156, 163, 175, 0.2)';
+          badgeEl.style.color = 'var(--text-muted)';
+          badgeEl.textContent = '⏸️ Scheduled Backups Paused';
+        } else if (autoCfg.last_backup_status === 'success') {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(16, 185, 129, 0.2)';
+          badgeEl.style.color = 'var(--green)';
+          const t = autoCfg.last_backup_time ? new Date(autoCfg.last_backup_time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+          badgeEl.textContent = `✅ Active (Last: ${t || 'OK'})`;
+        } else if (autoCfg.last_backup_status === 'partial') {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(245, 158, 11, 0.2)';
+          badgeEl.style.color = 'var(--yellow, #f59e0b)';
+          badgeEl.textContent = '⚠️ Partial Backup';
+        } else {
+          badgeEl.className = 'badge';
+          badgeEl.style.background = 'rgba(56, 189, 248, 0.2)';
+          badgeEl.style.color = 'var(--primary)';
+          badgeEl.textContent = '✅ Scheduled Backups Ready';
+        }
+      }
+
+      // 2. OneDrive Card
+      if (odBadge && odActions) {
+        if (od.has_credentials || od.refresh_token) {
+          odBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+          odBadge.style.color = 'var(--green)';
+          odBadge.textContent = '✅ Connected';
+          odActions.innerHTML = `
+            <div style="font-size:11px; color:var(--text); width:100%; margin-bottom:6px; display:block;">
+              Account: <strong>${od.account_name || 'Microsoft Account'}</strong>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.testOneDriveUploadPrompt()">
+                ☁️ Test Upload
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px; color:var(--red, #ef4444);" onclick="window.budgetApp.disconnectOneDrivePrompt()">
+                Disconnect
+              </button>
+            </div>
+          `;
+        } else {
+          odBadge.style.background = 'rgba(156, 163, 175, 0.2)';
+          odBadge.style.color = 'var(--text-muted)';
+          odBadge.textContent = 'Not Linked';
+          odActions.innerHTML = `
+            <button type="button" class="btn primary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.connectOneDriveModal()">
+              🔗 Connect Microsoft OneDrive
+            </button>
+          `;
+        }
+      }
+
+      // 3. Google Drive Card
+      if (gdBadge && gdActions) {
+        if (gd.has_credentials || gd.service_account_json) {
+          gdBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+          gdBadge.style.color = 'var(--green)';
+          gdBadge.textContent = '✅ Configured';
+          gdActions.innerHTML = `
+            <div style="font-size:11px; color:var(--text); width:100%; margin-bottom:6px; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${gd.account_name || ''}">
+              SA: <strong>${gd.account_name || 'Service Account'}</strong>
+            </div>
+            <div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px;" onclick="window.budgetApp.testGoogleDriveUploadPrompt()">
+                ☁️ Test Upload
+              </button>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:4px 10px; color:var(--red, #ef4444);" onclick="window.budgetApp.disconnectGoogleDrivePrompt()">
+                Disconnect
+              </button>
+            </div>
+          `;
+        } else {
+          gdBadge.style.background = 'rgba(156, 163, 175, 0.2)';
+          gdBadge.style.color = 'var(--text-muted)';
+          gdBadge.textContent = 'Not Configured';
+          gdActions.innerHTML = `
+            <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.openGoogleDriveModal()">
+              ⚙️ Configure Google Drive
+            </button>
+          `;
+        }
+      }
+
+      // 4. Snapshots List
+      if (listEl) {
+        if (!backups.length) {
+          listEl.innerHTML = `
+            <div style="color:var(--text-muted); padding:16px; text-align:center; font-style:italic;">
+              No snapshots on host disk yet. Click "⚡ Backup Now" above to generate your first snapshot!
+            </div>
+          `;
+        } else {
+          let html = `
+            <table style="width:100%; border-collapse:collapse; text-align:left;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--border); color:var(--text-muted); font-size:11px;">
+                  <th style="padding:6px 8px;">Snapshot Date & Instance</th>
+                  <th style="padding:6px 8px;">Size</th>
+                  <th style="padding:6px 8px; text-align:right;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+          `;
+          backups.forEach(b => {
+            const dateStr = b.timestamp ? new Date(b.timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : b.filename;
+            const dlUrl = `${getBaseApiUrl()}api/backups/download/${encodeURIComponent(b.filename)}`;
+            const instBadge = b.instance ? (
+              b.is_current_instance
+                ? `<span style="font-size:9.5px; background:rgba(56,189,248,0.18); color:var(--primary); padding:1px 6px; border-radius:4px; margin-left:6px; font-weight:600;" title="Created by this instance">${b.instance} (this instance)</span>`
+                : `<span style="font-size:9.5px; background:rgba(156,163,175,0.18); color:var(--text-muted); padding:1px 6px; border-radius:4px; margin-left:6px;" title="Instance: ${b.instance}">${b.instance}</span>`
+            ) : '';
+            html += `
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
+                <td style="padding:8px 8px;">
+                  <div style="font-weight:600; color:var(--heading); display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                    <span>${dateStr}</span>
+                    ${instBadge}
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted); font-family:monospace;">${b.filename}</div>
+                </td>
+                <td style="padding:8px 8px; color:var(--text-muted); font-size:11px;">
+                  ${b.size_formatted || `${b.size} B`}
+                </td>
+                <td style="padding:8px 8px; text-align:right;">
+                  <div style="display:inline-flex; gap:6px;">
+                    <a href="${dlUrl}" download="${b.filename}" class="btn secondary" style="font-size:10.5px; padding:3px 8px; text-decoration:none;" title="Download JSON to device">
+                      ⬇️ Download
+                    </a>
+                    <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.restoreBackupSnapshot('${b.filename}')" title="Restore this snapshot">
+                      🔄 Restore
+                    </button>
+                    <button type="button" class="btn secondary" style="font-size:10.5px; padding:3px 8px; color:var(--red, #ef4444);" onclick="window.budgetApp.deleteBackupSnapshot('${b.filename}')" title="Delete snapshot">
+                      🗑️
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          });
+          html += `</tbody></table>`;
+          listEl.innerHTML = html;
+        }
+      }
+    } catch (err) {
+      console.error('Error loading backups list:', err);
+      if (listEl) listEl.innerHTML = `<div style="color:var(--red, #ef4444); padding:10px;">Failed to load backups: ${err.message}</div>`;
+    }
+  },
+
+  async triggerManualBackup() {
+    const btn = document.getElementById('manualBackupNowBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '⏳ Creating Snapshot...';
+    }
+    try {
+      const res = await createManualBackupApi();
+      if (res && res.success) {
+        alert(`✅ Backup snapshot created successfully!\nFile: ${res.local?.filename || 'habit_backup.json'}\n` +
+          (res.onedrive?.status === 'success' ? '☁️ Uploaded to OneDrive: OK\n' : '') +
+          (res.gdrive?.status === 'success' ? '📁 Uploaded to Google Drive: OK\n' : ''));
+        await this.loadBackupsList();
+      } else {
+        alert(`Backup issue: ${res?.errors?.join(', ') || res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error creating backup: ${e.message}`);
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '⚡ Backup Now';
+      }
+    }
+  },
+
+  async saveAutoBackupSchedule() {
+    const enabled = document.getElementById('autoBackupEnabled')?.value === 'true';
+    const frequency = document.getElementById('autoBackupFreq')?.value || 'daily';
+    const time = document.getElementById('autoBackupTime')?.value || '03:00';
+    const retention_count = parseInt(document.getElementById('autoBackupRetention')?.value || '14', 10);
+    const instance_name = document.getElementById('autoBackupInstance')?.value?.trim() || '';
+
+    try {
+      const res = await saveBackupSettingsApi({ enabled, frequency, time, retention_count, instance_name });
+      if (res && res.status === 'saved') {
+        alert('✅ Auto-backup schedule and instance settings updated successfully!');
+        const folderDisp = document.getElementById('autoBackupFolderDisplay');
+        if (folderDisp && res.auto_backup?.active_instance_id) {
+          folderDisp.textContent = `/config/habit_backups/${res.auto_backup.active_instance_id}`;
+        }
+        const odFolderDisp = document.getElementById('onedriveSubfolderDisplay');
+        if (odFolderDisp && res.auto_backup?.active_instance_id) {
+          odFolderDisp.textContent = `/Apps/HABit_Backups/${res.auto_backup.active_instance_id}/`;
+        }
+        await this.loadBackupsList();
+      } else {
+        alert('Failed to save auto-backup schedule.');
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async restoreBackupSnapshot(filename) {
+    if (!confirm(`⚠️ Are you sure you want to restore snapshot "${filename}"?\n\nThis will replace your current active budget, transactions, and settings with this historical snapshot.`)) {
+      return;
+    }
+    try {
+      const res = await restoreBackupApi(filename);
+      if (res && res.status === 'restored' && res.data) {
+        appState.data = res.data;
+        calculateAndSyncRollovers();
+        renderYearMenu();
+        renderNav();
+        renderContent();
+        alert(`✅ Successfully restored dataset from "${filename}"!`);
+      } else {
+        alert(`Failed to restore snapshot: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Restore error: ${e.message}`);
+    }
+  },
+
+  async deleteBackupSnapshot(filename) {
+    if (!confirm(`Permanently delete snapshot "${filename}" from host storage?`)) return;
+    try {
+      const res = await deleteBackupApi(filename);
+      if (res && res.status === 'deleted') {
+        await this.loadBackupsList();
+      } else {
+        alert(`Failed to delete snapshot: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Delete error: ${e.message}`);
+    }
+  },
+
+  copyTextToClipboard(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert("✅ Verification code copied to clipboard: " + text);
+      }).catch(() => {
+        prompt("Copy this verification code:", text);
+      });
+    } else {
+      prompt("Copy this verification code:", text);
+    }
+  },
+
+  async connectOneDriveModal() {
+    showModal({
+      title: 'Connect Microsoft OneDrive',
+      hideCalc: true,
+      body: `
+        <div style="text-align:center; padding:18px 0;">
+          <div style="font-size:36px; margin-bottom:12px;">☁️</div>
+          <h4 style="margin:0 0 8px 0; color:var(--heading);">Connecting to Microsoft...</h4>
+          <p style="font-size:12px; color:var(--text-muted); margin:0 0 16px 0;">
+            Requesting a Device Login Code from Microsoft. Please wait...
+          </p>
+          <div class="spinner" style="margin:20px auto;"></div>
+        </div>
+      `,
+      actions: `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>`
+    });
+
+    try {
+      const res = await initOneDriveDeviceCodeApi();
+      const bodyEl = document.getElementById('modalBody');
+      const actionsEl = document.getElementById('modalActions');
+      if (!bodyEl) return;
+
+      if (!res || !res.user_code) {
+        bodyEl.innerHTML = `
+          <div style="text-align:center; padding:14px 0;">
+            <div style="color:var(--red, #ef4444); font-size:28px; margin-bottom:8px;">❌</div>
+            <p style="font-size:13px; color:var(--text); line-height:1.4;">
+              Failed to initiate Microsoft Device Login.<br>
+              <small style="color:var(--text-muted);">${res?.error || 'Unable to reach Microsoft OAuth endpoint'}</small>
+            </p>
+          </div>
+        `;
+        if (actionsEl) {
+          actionsEl.innerHTML = `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>`;
+        }
+        return;
+      }
+
+      const userCode = res.user_code;
+      const verifyUri = res.verification_uri || 'https://microsoft.com/devicelogin';
+      const deviceCode = res.device_code;
+      const interval = (res.interval || 5) * 1000;
+
+      bodyEl.innerHTML = `
+        <div style="padding:4px 0;">
+          <p style="font-size:12.5px; color:var(--text); line-height:1.5; margin:0 0 16px 0;">
+            Follow these two simple steps on your browser or mobile phone:
+          </p>
+          <div style="background:rgba(0,0,0,0.22); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px;">
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">
+              Step 1: Your Verification Code
+            </div>
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+              <code id="msUserCodeDisplay" style="font-size:22px; font-weight:bold; letter-spacing:2.5px; color:var(--primary); background:rgba(56,189,248,0.12); padding:6px 14px; border-radius:6px; border:2px dashed var(--primary); user-select:all; cursor:pointer;" onclick="window.budgetApp.copyTextToClipboard('${userCode}')" title="Click to copy">${userCode}</code>
+              <button type="button" class="btn secondary" style="font-size:11px; padding:6px 10px;" onclick="window.budgetApp.copyTextToClipboard('${userCode}')">
+                📋 Copy Code
+              </button>
+            </div>
+            <div style="font-size:11px; font-weight:700; color:var(--text-muted); text-transform:uppercase; margin-bottom:6px;">
+              Step 2: Sign In &amp; Approve
+            </div>
+            <p style="font-size:11.5px; color:var(--text-muted); margin:0 0 10px 0;">
+              Open Microsoft's login portal in a new tab:
+            </p>
+            <a href="${verifyUri}" target="_blank" rel="noopener noreferrer" class="btn primary" style="display:inline-flex; align-items:center; gap:8px; font-size:12px; padding:8px 16px; text-decoration:none;">
+              <span>🌐</span> Open ${verifyUri} &rarr;
+            </a>
+          </div>
+          <div id="msPollStatus" style="font-size:11.5px; color:var(--text-muted); display:flex; align-items:center; gap:8px;">
+            <span class="spinner" style="width:14px; height:14px; border-width:2px; display:inline-block;"></span>
+            <span>Waiting for you to sign in at Microsoft...</span>
+          </div>
+        </div>
+      `;
+
+      if (actionsEl) {
+        actionsEl.innerHTML = `<button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>`;
+      }
+
+      if (this._odPollInterval) clearInterval(this._odPollInterval);
+      this._odPollInterval = setInterval(async () => {
+        const pollRes = await pollOneDriveDeviceCodeApi(deviceCode);
+        const statusEl = document.getElementById('msPollStatus');
+        if (pollRes && pollRes.status === 'authorized') {
+          clearInterval(this._odPollInterval);
+          this._odPollInterval = null;
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color:var(--green); font-weight:bold;">✅ Success! Connected as ${pollRes.account_name || 'Microsoft Account'}.</span>`;
+          }
+          setTimeout(() => {
+            window.budgetApp.closeModal();
+            window.budgetApp.loadBackupsList();
+          }, 1800);
+        } else if (pollRes && pollRes.status === 'error') {
+          clearInterval(this._odPollInterval);
+          this._odPollInterval = null;
+          if (statusEl) {
+            statusEl.innerHTML = `<span style="color:var(--red, #ef4444);">❌ Connection error: ${pollRes.error || 'Failed'}</span>`;
+          }
+        }
+      }, interval);
+
+    } catch (e) {
+      const bodyEl = document.getElementById('modalBody');
+      if (bodyEl) bodyEl.innerHTML = `<p style="color:var(--red, #ef4444); padding:10px;">Error: ${e.message}</p>`;
+    }
+  },
+
+  async testOneDriveUploadPrompt() {
+    if (!confirm("Test uploading a small diagnostic file to Microsoft OneDrive?")) return;
+    try {
+      const res = await testOneDriveUploadApi();
+      if (res && res.status === 'success') {
+        alert(`✅ Test upload to OneDrive successful!\nFile: ${res.file}\nID: ${res.id}`);
+      } else {
+        alert(`❌ Test upload failed: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async disconnectOneDrivePrompt() {
+    if (!confirm("Disconnect Microsoft OneDrive? Scheduled backups will no longer upload to OneDrive.")) return;
+    try {
+      const res = await disconnectOneDriveApi();
+      if (res && res.status === 'disconnected') {
+        await this.loadBackupsList();
+        alert("OneDrive disconnected.");
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  openGoogleDriveModal() {
+    showModal({
+      title: 'Configure Google Drive',
+      hideCalc: true,
+      body: `
+        <div style="padding:4px 0;">
+          <p style="font-size:12px; color:var(--text-muted); margin:0 0 14px 0; line-height:1.45;">
+            Provide a Google Cloud Service Account JSON key to enable autonomous background backups to a designated Google Drive folder.
+          </p>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">
+              Target Google Drive Folder ID (Optional)
+            </label>
+            <input type="text" id="gdTargetFolderId" placeholder="e.g. 1a2B3c4D5e... (found in folder URL)" style="width:100%; font-size:12px; padding:6px 10px;">
+            <div style="font-size:10.5px; color:var(--text-muted); margin-top:3px;">
+              Share this Google Drive folder with your service account email with "Editor" permissions.
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:14px;">
+            <label style="font-size:11px; font-weight:bold; color:var(--text-muted); display:block; margin-bottom:4px;">
+              Service Account JSON Key Content
+            </label>
+            <textarea id="gdServiceAccountJson" rows="8" placeholder='{\n  "type": "service_account",\n  "project_id": "...",\n  "private_key": "-----BEGIN RSA PRIVATE KEY-----...",\n  "client_email": "..."\n}' style="width:100%; font-family:monospace; font-size:11px; padding:8px; box-sizing:border-box;"></textarea>
+          </div>
+        </div>
+      `,
+      actions: `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+        <button type="button" id="gdSaveBtn" class="btn primary" onclick="window.budgetApp.saveGoogleDriveConfig()">Save &amp; Verify</button>
+      `
+    });
+  },
+
+  async saveGoogleDriveConfig() {
+    const saJson = document.getElementById('gdServiceAccountJson')?.value?.trim();
+    const folderId = document.getElementById('gdTargetFolderId')?.value?.trim() || '';
+    if (!saJson) {
+      alert("Please paste your Google Service Account JSON content.");
+      return;
+    }
+    const saveBtn = document.getElementById('gdSaveBtn');
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = 'Verifying...';
+    }
+    try {
+      const res = await saveGoogleDriveApi(saJson, folderId);
+      if (res && res.status === 'saved') {
+        alert(`✅ Google Drive connected successfully!\nService Account: ${res.account_name}`);
+        this.closeModal();
+        await this.loadBackupsList();
+      } else {
+        alert(`❌ Verification failed: ${res?.error || 'Invalid configuration'}`);
+      }
+    } catch (e) {
+      alert(`Error saving configuration: ${e.message}`);
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save & Verify';
+      }
+    }
+  },
+
+  async testGoogleDriveUploadPrompt() {
+    if (!confirm("Test uploading a small diagnostic file to Google Drive?")) return;
+    try {
+      const res = await testGoogleDriveUploadApi();
+      if (res && res.status === 'success') {
+        alert(`✅ Test upload to Google Drive successful!\nFile: ${res.file}\nID: ${res.id}`);
+      } else {
+        alert(`❌ Test upload failed: ${res?.error || 'Unknown error'}`);
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
+  },
+
+  async disconnectGoogleDrivePrompt() {
+    if (!confirm("Disconnect Google Drive?")) return;
+    try {
+      const res = await disconnectGoogleDriveApi();
+      if (res && res.status === 'disconnected') {
+        await this.loadBackupsList();
+        alert("Google Drive disconnected.");
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
   },
 
   toggleYearDropdown(e) {
