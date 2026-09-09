@@ -2165,14 +2165,11 @@ export function calculateCategoryBreakdown(transactions, timeframe = 'this_month
     startDate = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0, 0);
     endDate = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59, 999);
   } else if (timeframe === 'last_7_days') {
-    startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
   } else if (timeframe === 'last_30_days') {
-    startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0);
   } else if (timeframe === 'last_90_days') {
-    startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89, 0, 0, 0, 0);
   } else if (timeframe === 'rolling_12_months') {
     startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
   } else if (timeframe === 'year_to_date') {
@@ -2678,8 +2675,11 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
   // Cycle progress
   let cycleStart = schedule.weeks[0]?.startDate || new Date(year, mIdx, 1);
   let cycleEnd = schedule.weeks[schedule.weeks.length - 1]?.endDate || new Date(year, mIdx + 1, 0);
-  let totalCycleDays = Math.max(1, Math.round((cycleEnd.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+  const cStartMid = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate());
+  const cEndMid = new Date(cycleEnd.getFullYear(), cycleEnd.getMonth(), cycleEnd.getDate());
+  const nowMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let totalCycleDays = Math.max(1, Math.round(Math.abs(cEndMid.getTime() - cStartMid.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((nowMid.getTime() - cStartMid.getTime()) / (1000 * 60 * 60 * 24)) + 1));
   let percentElapsed = Math.min(100, Math.max(0, Math.round((elapsedCycleDays / totalCycleDays) * 100)));
 
   return {

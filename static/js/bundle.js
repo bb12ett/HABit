@@ -4367,14 +4367,11 @@ function calculateCategoryBreakdown(transactions, timeframe = 'this_month', acco
     startDate = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0, 0);
     endDate = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59, 999);
   } else if (timeframe === 'last_7_days') {
-    startDate = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6, 0, 0, 0, 0);
   } else if (timeframe === 'last_30_days') {
-    startDate = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29, 0, 0, 0, 0);
   } else if (timeframe === 'last_90_days') {
-    startDate = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
-    startDate.setHours(0, 0, 0, 0);
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89, 0, 0, 0, 0);
   } else if (timeframe === 'rolling_12_months') {
     startDate = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 0, 0, 0, 0);
   } else if (timeframe === 'year_to_date') {
@@ -4880,8 +4877,11 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
   // Cycle progress
   let cycleStart = schedule.weeks[0]?.startDate || new Date(year, mIdx, 1);
   let cycleEnd = schedule.weeks[schedule.weeks.length - 1]?.endDate || new Date(year, mIdx + 1, 0);
-  let totalCycleDays = Math.max(1, Math.round((cycleEnd.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((now.getTime() - cycleStart.getTime()) / (1000 * 60 * 60 * 24)) + 1));
+  const cStartMid = new Date(cycleStart.getFullYear(), cycleStart.getMonth(), cycleStart.getDate());
+  const cEndMid = new Date(cycleEnd.getFullYear(), cycleEnd.getMonth(), cycleEnd.getDate());
+  const nowMid = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let totalCycleDays = Math.max(1, Math.round(Math.abs(cEndMid.getTime() - cStartMid.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+  let elapsedCycleDays = Math.max(0, Math.min(totalCycleDays, Math.round((nowMid.getTime() - cStartMid.getTime()) / (1000 * 60 * 60 * 24)) + 1));
   let percentElapsed = Math.min(100, Math.max(0, Math.round((elapsedCycleDays / totalCycleDays) * 100)));
 
   return {
@@ -13345,6 +13345,18 @@ function formatDateIso(d) {
   return `${y}-${m}-${day}`;
 }
 
+function parseIsoDate(str) {
+  if (!str) return null;
+  if (str instanceof Date) return isNaN(str.getTime()) ? null : str;
+  const parts = String(str).split('T')[0].split('-');
+  if (parts.length < 3) return new Date(str);
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10) - 1;
+  const d = parseInt(parts[2], 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return new Date(str);
+  return new Date(y, m, d);
+}
+
 function formatShortDate(d) {
   if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
   const day = d.getDate();
@@ -13428,17 +13440,17 @@ function getActiveSpendTimeframeRange() {
     label = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
     monthName = months[prevM];
   } else if (timeframe === 'last_7_days') {
-    const s = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000));
+    const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6);
     startIso = formatDateIso(s);
     endIso = formatDateIso(now);
     label = 'Last 7 Days';
   } else if (timeframe === 'last_30_days') {
-    const s = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000));
+    const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 29);
     startIso = formatDateIso(s);
     endIso = formatDateIso(now);
     label = 'Last 30 Days';
   } else if (timeframe === 'last_90_days') {
-    const s = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000));
+    const s = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 89);
     startIso = formatDateIso(s);
     endIso = formatDateIso(now);
     label = 'Last 90 Days';
@@ -13531,20 +13543,14 @@ function shiftSpendTimeframe(direction) {
     appState.spendCustomLabel = `Payday: ${sched.dateRangeStr} (${sched.numWeeks} Wks)`;
   } else {
     const currentRange = getActiveSpendTimeframeRange();
-    const parseParts = str => {
-      if (!str) return null;
-      const parts = str.split('-');
-      if (parts.length < 3) return null;
-      return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-    };
-
-    const sDate = parseParts(currentRange.startIso) || new Date();
-    const eDate = parseParts(currentRange.endIso) || new Date();
-
-    const spanMs = Math.max(24 * 60 * 60 * 1000, eDate.getTime() - sDate.getTime());
-    const shiftMs = spanMs * direction;
-    const newS = new Date(sDate.getTime() + shiftMs);
-    const newE = new Date(eDate.getTime() + shiftMs);
+    const sDate = parseIsoDate(currentRange.startIso) || new Date();
+    const eDate = parseIsoDate(currentRange.endIso) || new Date();
+    const sMid = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate());
+    const eMid = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate());
+    const spanDays = Math.max(1, Math.round(Math.abs(eMid.getTime() - sMid.getTime()) / (24 * 60 * 60 * 1000)) + 1);
+    const shiftDays = spanDays * direction;
+    const newS = new Date(sMid.getFullYear(), sMid.getMonth(), sMid.getDate() + shiftDays);
+    const newE = new Date(eMid.getFullYear(), eMid.getMonth(), eMid.getDate() + shiftDays);
     appState.spendFilterTimeframe = 'custom';
     appState.spendCustomStartDate = formatDateIso(newS);
     appState.spendCustomEndDate = formatDateIso(newE);
@@ -13570,14 +13576,7 @@ function resetSpendTimeframe() {
 
 function setSpendQuickOffset(offsetType) {
   const currentRange = getActiveSpendTimeframeRange();
-  const parseParts = str => {
-    if (!str) return null;
-    const parts = str.split('-');
-    if (parts.length < 3) return null;
-    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-  };
-
-  let endDate = parseParts(currentRange.endIso) || new Date();
+  let endDate = parseIsoDate(currentRange.endIso) || new Date();
 
   if (offsetType === 'minus_12_months') {
     const s = new Date(endDate.getFullYear() - 1, endDate.getMonth(), endDate.getDate());
@@ -13730,9 +13729,11 @@ function renderSpendAnalyticsView(container) {
   );
 
   const now = new Date();
-  const sDate = breakdown.startDate || (rangeInfo.startIso ? new Date(rangeInfo.startIso) : new Date(now.getFullYear(), now.getMonth(), 1));
-  const eDate = breakdown.endDate || (rangeInfo.endIso ? new Date(rangeInfo.endIso) : now);
-  const dayCount = Math.max(1, Math.round((Math.abs(eDate.getTime() - sDate.getTime())) / (1000 * 60 * 60 * 24)) + 1);
+  const sDate = breakdown.startDate || (rangeInfo.startIso ? parseIsoDate(rangeInfo.startIso) : new Date(now.getFullYear(), now.getMonth(), 1));
+  const eDate = breakdown.endDate || (rangeInfo.endIso ? parseIsoDate(rangeInfo.endIso) : now);
+  const sMidnight = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate());
+  const eMidnight = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate());
+  const dayCount = Math.max(1, Math.round(Math.abs(eMidnight.getTime() - sMidnight.getTime()) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailySpend = grandTotal / dayCount;
 
   let isPaydayCycle = false;

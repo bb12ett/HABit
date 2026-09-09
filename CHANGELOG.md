@@ -5,6 +5,19 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.17] - 2026-09-09
+
+### Fixed
+- **🗓️ Spend Analytics Calendar Day Count & Burn Rate Accuracy**:
+  - Corrected an off-by-one error in `spend_analytics.js` where the end date's `23:59:59` timestamp compounded with a `+ 1` day difference offset, causing custom date ranges (e.g. 2 days) to display as 3 days (and single days as 2 days).
+  - Normalized both start and end timestamps to calendar midnight before computing date differences, ensuring accurate day counts across all custom and preset timeframes.
+  - Corrected the **Daily Average Burn Rate** calculation (`grandTotal / dayCount`) so pacing metrics are divided by the true active day count.
+  - Standardized date string parsing to prevent UTC timezone boundary shifts.
+  - Adjusted `last_7_days`, `last_30_days`, and `last_90_days` presets to span exact calendar intervals inclusive of the current date.
+  - Stepping custom date ranges forward or backward now advances by the exact day span without duplicate overlapping days.
+
+---
+
 ## [0.3.16] - 2026-09-08
 
 ### Added & Enhanced
