@@ -1,5 +1,5 @@
 import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear } from '../state.js';
-import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek } from '../calculations.js';
+import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek, getOccasionDate, getOccasionIcon } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
 export function showModal(opts) {
@@ -183,27 +183,27 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
       <!-- SECTION 1: DIRECT DEBIT / SCHEDULED RECURRING -->
       <div id="conv-section-scheduled">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Description</label>
-            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
-            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Type</label>
-            <select id="conv-sched-type" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
+            <select id="conv-sched-type" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
               <option value="expense" ${!isIncome ? 'selected' : ''}>- Outgoing Bill / Direct Debit</option>
               <option value="income" ${isIncome ? 'selected' : ''}>+ Inflow / Scheduled Income</option>
             </select>
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Cadence / Frequency</label>
-            <select id="conv-sched-freq" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
+            <select id="conv-sched-freq" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
               <option value="monthly" selected>📅 Monthly Direct Debit (Ongoing)</option>
               <option value="weekly">🔄 Weekly</option>
               <option value="biweekly">🔄 Bi-Weekly (Every 2 Weeks)</option>
@@ -217,23 +217,23 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div id="conv-sched-day-box">
+          <div id="conv-sched-day-box" style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Day of Month</label>
-            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div id="conv-sched-month-box" style="display:none;">
+          <div id="conv-sched-month-box" style="display:none; min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Month</label>
-            <select id="conv-sched-month" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-month" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
             </select>
           </div>
-          <div id="conv-sched-interval-box" style="display:none;">
+          <div id="conv-sched-interval-box" style="display:none; min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Interval (N)</label>
-            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; margin-top:2px;">
+            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Account</label>
-            <select id="conv-sched-acc" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
               ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
               ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -242,17 +242,17 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Holiday Adjustment</label>
-            <select id="conv-sched-holiday-rule" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-holiday-rule" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <option value="following" ${!isIncome ? 'selected' : ''}>➡️ Following Workday</option>
               <option value="previous" ${isIncome ? 'selected' : ''}>⬅️ Previous Workday</option>
               <option value="exact">⏸️ Exact Date</option>
             </select>
           </div>
-          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''}">
+          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''} min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Transfer To (Standing Order)</label>
-            <select id="conv-sched-transfer" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-transfer" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <option value="none">None (Standard Bill)</option>
               ${(cfg.savings_accounts || []).map(s => `<option value="${s}">📈 ${s}</option>`).join('')}
             </select>
@@ -277,14 +277,35 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
 
         <!-- New Occasion Fields -->
         <div id="conv-bday-new-fields">
+          <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Date Schedule Type</label>
+            <select id="conv-bday-rule" onchange="window.budgetApp.onConvertOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-top:2px;">
+              <option value="fixed">📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+              <option value="uk_mothers_day">💐 UK Mother's Day (4th Sun of Lent)</option>
+              <option value="fathers_day">👔 Father's Day (3rd Sun in June)</option>
+              <option value="us_mothers_day">🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+              <option value="easter_sunday">🐣 Easter Sunday</option>
+              <option value="good_friday">✝️ Good Friday</option>
+              <option value="easter_monday">🐣 Easter Monday</option>
+              <option value="black_friday">🛍️ Black Friday</option>
+              <option value="cyber_monday">💻 Cyber Monday</option>
+              <option value="thanksgiving_us">🦃 Thanksgiving (US)</option>
+            </select>
+          </div>
+
+          <div id="conv-bday-dynamic-preview" style="display:none; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+            🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+            <span id="conv-bday-dynamic-date-text"></span>
+          </div>
+
           <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Person / Occasion Name</label>
-              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; margin-top:2px;">
+              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
             </div>
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Occasion Category</label>
-              <select id="conv-bday-cat" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-cat" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 <option value="Birthday" selected>🎂 Birthday</option>
                 <option value="Anniversary">💍 Anniversary</option>
                 <option value="Holiday">🎄 Holiday</option>
@@ -293,26 +314,27 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:8px;">
-            <div>
+          <div id="conv-bday-fixed-date-inputs" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Month</label>
-              <select id="conv-bday-month" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-month" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
               </select>
             </div>
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Day of Month</label>
-              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
-            </div>
-            <div>
-              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
-              <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
             </div>
           </div>
 
           <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
+            <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
+          </div>
+
+          <div style="margin-bottom:8px;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
-            <select id="conv-bday-acc" style="width:100%; margin-top:2px;">
+            <select id="conv-bday-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
               ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
               ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -325,25 +347,27 @@ export function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
           <div id="conv-bday-existing-fields" style="display:none;">
             <div style="margin-bottom:8px;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Select Occasion</label>
-              <select id="conv-bday-select" style="width:100%; margin-top:2px;">
-                ${existingBirthdays.map((b, bIdx) => `
-                  <option value="${bIdx}">${b.name} (${b.month} ${b.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>
-                `).join('')}
+              <select id="conv-bday-select" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
+                ${existingBirthdays.map((b, bIdx) => {
+                  const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((o, yr) => ({ month: o.month, day: o.day })));
+                  const occ = occFn(b, appState.currentYear);
+                  return `<option value="${bIdx}">${b.name} (${occ.month} ${occ.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>`;
+                }).join('')}
               </select>
             </div>
             <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
-              <div>
+              <div style="min-width:0;">
                 <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift / Spend Description</label>
-                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               </div>
-              <div>
+              <div style="min-width:0;">
                 <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
-                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
               </div>
             </div>
             <div style="margin-bottom:8px;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
-              <select id="conv-bday-spend-acc" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-spend-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
                 ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
                 ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -1273,34 +1297,53 @@ export function openAddBirthdayModal() {
   showModal({
     title: "🎂 Add Birthday or Occasion",
     body: `
-      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
-      <input type="text" id="bday-name" placeholder="e.g. Mum's Birthday, Wedding Anniversary" style="margin-bottom:8px;">
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Date Schedule Type</label>
+      <select id="bday-rule" onchange="window.budgetApp.onOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-bottom:8px;">
+        <option value="fixed">📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+        <option value="uk_mothers_day">💐 UK Mother's Day (4th Sun of Lent)</option>
+        <option value="fathers_day">👔 Father's Day (3rd Sun in June)</option>
+        <option value="us_mothers_day">🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+        <option value="easter_sunday">🐣 Easter Sunday</option>
+        <option value="good_friday">✝️ Good Friday</option>
+        <option value="easter_monday">🐣 Easter Monday</option>
+        <option value="black_friday">🛍️ Black Friday</option>
+        <option value="cyber_monday">💻 Cyber Monday</option>
+        <option value="thanksgiving_us">🦃 Thanksgiving (US)</option>
+      </select>
 
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <div style="flex:1;">
+      <div id="bday-dynamic-preview" style="display:none; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+        🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+        <span id="bday-dynamic-date-text"></span>
+      </div>
+
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
+      <input type="text" id="bday-name" placeholder="e.g. Mum's Birthday, Wedding Anniversary" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
+
+      <div id="bday-fixed-date-inputs" style="display:flex; gap:8px; margin-bottom:8px; width:100%; max-width:100%; box-sizing:border-box;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Month</label>
-          <select id="bday-month" style="width:100%;">
+          <select id="bday-month" style="width:100%; max-width:100%; box-sizing:border-box;">
             ${months.map(m => `<option value="${m}" ${m === appState.activeTab ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
         </div>
-        <div style="flex:1;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Day of Month</label>
-          <input type="number" min="1" max="31" id="bday-day" value="1" style="width:100%;">
+          <input type="number" min="1" max="31" id="bday-day" value="1" style="width:100%; max-width:100%; box-sizing:border-box;">
         </div>
       </div>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Gift Budget Allocation (${curr})</label>
-      <input type="number" step="0.01" id="bday-budget" placeholder="100.00" style="margin-bottom:8px;">
+      <input type="number" step="0.01" id="bday-budget" placeholder="100.00" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Paid From Account</label>
-      <select id="bday-account" style="margin-bottom:8px;">
+      <select id="bday-account" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}">${a}</option>`).join('')}</optgroup>
         ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</optgroup>` : ''}
         ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}">${s}</option>`).join('')}</optgroup>` : ''}
       </select>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Category</label>
-      <select id="bday-cat" style="margin-bottom:8px;">
+      <select id="bday-cat" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <option value="Birthday">🎂 Birthday</option>
         <option value="Anniversary">💍 Anniversary</option>
         <option value="Holiday">🎄 Holiday</option>
@@ -1321,30 +1364,56 @@ export function openEditBirthdayModal(bIdx) {
   const b = birthdays[bIdx];
   if (!b) return;
 
+  const curRule = b.date_rule || 'fixed';
+  const isDyn = curRule !== 'fixed';
+  const curYear = appState.currentYear || new Date().getFullYear();
+  const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1 })));
+  const occDate = occFn(b, curYear);
+  const nextOcc = occFn(b, curYear + 1);
+
   showModal({
     title: `✏️ Edit: ${b.name}`,
     body: `
-      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
-      <input type="text" id="bday-name" value="${b.name}" style="margin-bottom:8px;">
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Date Schedule Type</label>
+      <select id="bday-rule" onchange="window.budgetApp.onOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-bottom:8px;">
+        <option value="fixed" ${curRule === 'fixed' ? 'selected' : ''}>📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+        <option value="uk_mothers_day" ${curRule === 'uk_mothers_day' ? 'selected' : ''}>💐 UK Mother's Day (4th Sun of Lent)</option>
+        <option value="fathers_day" ${curRule === 'fathers_day' ? 'selected' : ''}>👔 Father's Day (3rd Sun in June)</option>
+        <option value="us_mothers_day" ${curRule === 'us_mothers_day' ? 'selected' : ''}>🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+        <option value="easter_sunday" ${curRule === 'easter_sunday' ? 'selected' : ''}>🐣 Easter Sunday</option>
+        <option value="good_friday" ${curRule === 'good_friday' ? 'selected' : ''}>✝️ Good Friday</option>
+        <option value="easter_monday" ${curRule === 'easter_monday' ? 'selected' : ''}>🐣 Easter Monday</option>
+        <option value="black_friday" ${curRule === 'black_friday' ? 'selected' : ''}>🛍️ Black Friday</option>
+        <option value="cyber_monday" ${curRule === 'cyber_monday' ? 'selected' : ''}>💻 Cyber Monday</option>
+        <option value="thanksgiving_us" ${curRule === 'thanksgiving_us' ? 'selected' : ''}>🦃 Thanksgiving (US)</option>
+      </select>
 
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <div style="flex:1;">
+      <div id="bday-dynamic-preview" style="display:${isDyn ? 'block' : 'none'}; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+        🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+        <span id="bday-dynamic-date-text">Calculated for <strong>${curYear}</strong>: <strong>${occDate.day} ${occDate.month}</strong> &bull; Next (${curYear + 1}): <strong>${nextOcc.day} ${nextOcc.month}</strong></span>
+      </div>
+
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
+      <input type="text" id="bday-name" value="${b.name}" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
+
+      <div id="bday-fixed-date-inputs" style="display:${isDyn ? 'none' : 'flex'}; gap:8px; margin-bottom:8px; width:100%; max-width:100%; box-sizing:border-box;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Month</label>
-          <select id="bday-month" style="width:100%;">
+          <select id="bday-month" style="width:100%; max-width:100%; box-sizing:border-box;">
             ${months.map(m => `<option value="${m}" ${m === b.month ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
         </div>
-        <div style="flex:1;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Day of Month</label>
-          <input type="number" min="1" max="31" id="bday-day" value="${b.day || 1}" style="width:100%;">
+          <input type="number" min="1" max="31" id="bday-day" value="${b.day || 1}" style="width:100%; max-width:100%; box-sizing:border-box;">
         </div>
       </div>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Gift Budget Allocation (${curr})</label>
-      <input type="number" step="0.01" id="bday-budget" value="${b.budget_amount || 0}" style="margin-bottom:8px;">
+      <input type="number" step="0.01" id="bday-budget" value="${b.budget_amount || 0}" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Paid From Account</label>
-      <select id="bday-account" style="margin-bottom:8px;">
+      <select id="bday-account" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${a === b.account ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
         ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${c.name === b.account ? 'selected' : ''}>${c.name}</option>`).join('')}</optgroup>` : ''}
         ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${s === b.account ? 'selected' : ''}>${s}</option>`).join('')}</optgroup>` : ''}
@@ -1416,10 +1485,9 @@ export function openQuickBirthdaySpendModal() {
 
   // Enrich birthdays with original index, dates, and diffDays relative to today
   const enriched = birthdays.map((b, originalIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10) || 1;
-    const bDate = new Date(appState.currentYear, mIdx, day, 0, 0, 0, 0);
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1, dateObj: new Date(yr, 0, 1) })));
+    const occ = occFn(b, appState.currentYear);
+    const bDate = occ.dateObj;
     const diffDays = Math.round((bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const budget = Number(b.budget_amount) || 0;
@@ -1427,6 +1495,8 @@ export function openQuickBirthdaySpendModal() {
     return {
       ...b,
       originalIdx,
+      month: occ.month,
+      day: occ.day,
       dateObj: bDate,
       diffDays,
       spent,

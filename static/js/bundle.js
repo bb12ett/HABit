@@ -2348,6 +2348,111 @@ function getEaster(year) {
   return new Date(year, month - 1, day);
 }
 
+function getOccasionDate(occasion, year = (appState && appState.currentYear ? appState.currentYear : new Date().getFullYear())) {
+  if (!occasion) return { month: 'Jan', day: 1, dateObj: new Date(year, 0, 1), isMovable: false, rule: 'fixed' };
+  const y = parseInt(year, 10) || new Date().getFullYear();
+  const rule = occasion.date_rule || 'fixed';
+
+  if (rule === 'uk_mothers_day') {
+    // 4th Sunday of Lent (Laetare Sunday) = exactly 3 weeks (21 days) before Easter Sunday
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() - 21);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'fathers_day') {
+    // 3rd Sunday in June
+    const d = new Date(y, 5, 1);
+    while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 14);
+    return { month: months[5], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'us_mothers_day') {
+    // 2nd Sunday in May
+    const d = new Date(y, 4, 1);
+    while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 7);
+    return { month: months[4], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'easter_sunday') {
+    const d = getEaster(y);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'good_friday') {
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() - 2);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'easter_monday') {
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() + 1);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'thanksgiving_us') {
+    // 4th Thursday in November
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 21);
+    return { month: months[10], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'black_friday') {
+    // Friday after 4th Thursday in November
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 22);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'cyber_monday') {
+    // Monday after Black Friday
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 25);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+
+  // Fallback to static month and day
+  let mIdx = months.indexOf(occasion.month);
+  if (mIdx === -1) {
+    mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(occasion.month || '').toLowerCase().substring(0, 3)));
+  }
+  if (mIdx === -1) mIdx = 0;
+  const day = parseInt(occasion.day || 1, 10);
+  return {
+    month: months[mIdx],
+    day,
+    dateObj: new Date(y, mIdx, day),
+    isMovable: false,
+    rule: 'fixed'
+  };
+}
+
+function getOccasionIcon(occasion) {
+  if (!occasion) return '🎂';
+  const rule = occasion.date_rule || 'fixed';
+  if (rule === 'uk_mothers_day' || rule === 'us_mothers_day') return '💐';
+  if (rule === 'fathers_day') return '👔';
+  if (rule === 'easter_sunday' || rule === 'easter_monday') return '🐣';
+  if (rule === 'good_friday') return '✝️';
+  if (rule === 'thanksgiving_us') return '🦃';
+  if (rule === 'black_friday' || rule === 'cyber_monday') return '🛍️';
+
+  const cat = (occasion.category || '').toLowerCase();
+  const name = (occasion.name || '').toLowerCase();
+
+  if (cat === 'birthday' || name.includes('birthday') || name.includes('bday')) return '🎂';
+  if (cat.includes('anniversary') || name.includes('anniversary')) return '💍';
+  if (cat.includes('holiday') || name.includes('christmas') || name.includes('xmas')) return '🎄';
+  if (name.includes('mother') || name.includes('mum') || name.includes('mom')) return '💐';
+  if (name.includes('father') || name.includes('dad')) return '👔';
+  if (name.includes('easter')) return '🐣';
+  if (cat.includes('celebration') || cat.includes('occasion')) return '🎉';
+
+  return '🎂';
+}
+
+
 function getBankHolidays(year, countryCode) {
   if (countryCode === 'none') return [];
   const holidays = [];
@@ -3545,6 +3650,8 @@ if (typeof window !== 'undefined') {
   window.getPreviousWorkingDay = getPreviousWorkingDay;
   window.getBankHolidays = getBankHolidays;
   window.getEaster = getEaster;
+  window.getOccasionDate = getOccasionDate;
+  window.getOccasionIcon = getOccasionIcon;
   window.getYearlyBudgetItemsForMonth = getYearlyBudgetItemsForMonth;
   window.getBirthdayItemsForMonth = getBirthdayItemsForMonth;
   window.getBirthdaysForWeek = getBirthdaysForWeek;
@@ -3721,11 +3828,11 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
   const endMs = new Date(schedule.endDate.getFullYear(), schedule.endDate.getMonth(), schedule.endDate.getDate(), 23, 59, 59).getTime();
 
   birthdays.forEach((b, bIdx) => {
-    let bMIdx = months.indexOf(b.month);
-    if (bMIdx === -1) bMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month || '').toLowerCase().substring(0, 3)));
-    if (bMIdx === -1) bMIdx = 0;
-    const bDate = new Date(year, bMIdx, parseInt(b.day || 1, 10));
+    const occ = getOccasionDate(b, year);
+    const bMIdx = months.indexOf(occ.month);
+    const bDate = occ.dateObj;
     const bMs = bDate.getTime();
+    const icon = getOccasionIcon(b);
 
     const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const remaining = Math.max(0, (Number(b.budget_amount) || 0) - spent);
@@ -3771,11 +3878,11 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
     if (bMs >= startMs && bMs <= endMs) {
       if (remaining > 0) {
         items.push({
-          desc: `🎂 ${b.name}`,
-          rawDesc: `🎂 ${b.name}`,
-          due_day: bDate.getDate(),
-          exact_date: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
-          actualPaymentDate: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
+          desc: `${icon} ${b.name}`,
+          rawDesc: `${icon} ${b.name}`,
+          due_day: occ.day,
+          exact_date: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(occ.day).padStart(2, '0')}`,
+          actualPaymentDate: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(occ.day).padStart(2, '0')}`,
           amount: remaining,
           account: b.account || cfg.current_accounts[0],
           isBirthday: true,
@@ -3792,7 +3899,7 @@ function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYear) {
           matched_payee: b.matched_payee,
           source_type: 'birthday',
           raw_target: b,
-          actualDateStr: `${bDate.getDate()} ${months[bMIdx]}`
+          actualDateStr: `${occ.day} ${months[bMIdx]}`
         });
       }
     }
@@ -3808,14 +3915,12 @@ function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = appState.
   const items = [];
 
   (birthdays || []).forEach((b, bIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) {
-      mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month).toLowerCase().substring(0, 3)));
-    }
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10);
-    const targetDate = new Date(year, mIdx, day);
+    const occ = getOccasionDate(b, year);
+    const mIdx = months.indexOf(occ.month);
+    const day = occ.day;
+    const targetDate = occ.dateObj;
     const bTime = targetDate.getTime();
+    const icon = getOccasionIcon(b);
 
     const spent = (b.transactions || []).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     const remaining = Math.max(0, (Number(b.budget_amount) || 0) - spent);
@@ -3865,8 +3970,8 @@ function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = appState.
           originalIdx: bIdx,
           isBirthday: true,
           is_budget_item: true,
-          desc: `🎂 ${b.name}`,
-          rawDesc: `🎂 ${b.name}`,
+          desc: `${icon} ${b.name}`,
+          rawDesc: `${icon} ${b.name}`,
           due_day: day,
           exact_date: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
           actualPaymentDate: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
@@ -3900,14 +4005,12 @@ function getBirthdayOccasionsForWeek(birthdays, weekObj, monthSchedule, year = a
   const occasions = [];
 
   (birthdays || []).forEach((b, bIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) {
-      mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month).toLowerCase().substring(0, 3)));
-    }
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10);
-    const targetDate = new Date(year, mIdx, day);
+    const occ = getOccasionDate(b, year);
+    const mIdx = months.indexOf(occ.month);
+    const day = occ.day;
+    const targetDate = occ.dateObj;
     const bTime = targetDate.getTime();
+    const icon = getOccasionIcon(b);
 
     if (bTime >= wStartTime && bTime <= wEndTime) {
       const spent = (b.transactions || []).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
@@ -3916,6 +4019,7 @@ function getBirthdayOccasionsForWeek(birthdays, weekObj, monthSchedule, year = a
         ...b,
         originalIdx: bIdx,
         isBirthday: true,
+        icon,
         due_day: day,
         account: b.account || cfg.current_accounts[0],
         amount: Math.max(0, remaining),
@@ -5845,27 +5949,27 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
       <!-- SECTION 1: DIRECT DEBIT / SCHEDULED RECURRING -->
       <div id="conv-section-scheduled">
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Description</label>
-            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+            <input type="text" id="conv-sched-desc" value="${cleanDesc}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
-            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+            <input type="number" step="0.01" id="conv-sched-amt" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Type</label>
-            <select id="conv-sched-type" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
+            <select id="conv-sched-type" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;" onchange="window.budgetApp.updateConvertSchedType(this.value)">
               <option value="expense" ${!isIncome ? 'selected' : ''}>- Outgoing Bill / Direct Debit</option>
               <option value="income" ${isIncome ? 'selected' : ''}>+ Inflow / Scheduled Income</option>
             </select>
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Cadence / Frequency</label>
-            <select id="conv-sched-freq" style="width:100%; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
+            <select id="conv-sched-freq" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-top:2px;" onchange="window.budgetApp.updateConvertFrequencyFields(this.value)">
               <option value="monthly" selected>📅 Monthly Direct Debit (Ongoing)</option>
               <option value="weekly">🔄 Weekly</option>
               <option value="biweekly">🔄 Bi-Weekly (Every 2 Weeks)</option>
@@ -5879,23 +5983,23 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div id="conv-sched-day-box">
+          <div id="conv-sched-day-box" style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Day of Month</label>
-            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
+            <input type="number" min="1" max="31" id="conv-sched-due-day" value="${defaultDueDay}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div id="conv-sched-month-box" style="display:none;">
+          <div id="conv-sched-month-box" style="display:none; min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Due Month</label>
-            <select id="conv-sched-month" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-month" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
             </select>
           </div>
-          <div id="conv-sched-interval-box" style="display:none;">
+          <div id="conv-sched-interval-box" style="display:none; min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Interval (N)</label>
-            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; margin-top:2px;">
+            <input type="number" min="1" max="52" id="conv-sched-interval" value="2" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
           </div>
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Account</label>
-            <select id="conv-sched-acc" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
               ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
               ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -5904,17 +6008,17 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
-          <div>
+          <div style="min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Holiday Adjustment</label>
-            <select id="conv-sched-holiday-rule" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-holiday-rule" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <option value="following" ${!isIncome ? 'selected' : ''}>➡️ Following Workday</option>
               <option value="previous" ${isIncome ? 'selected' : ''}>⬅️ Previous Workday</option>
               <option value="exact">⏸️ Exact Date</option>
             </select>
           </div>
-          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''}">
+          <div id="conv-sched-transfer-box" style="${isIncome ? 'display:none;' : ''} min-width:0;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Transfer To (Standing Order)</label>
-            <select id="conv-sched-transfer" style="width:100%; margin-top:2px;">
+            <select id="conv-sched-transfer" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <option value="none">None (Standard Bill)</option>
               ${(cfg.savings_accounts || []).map(s => `<option value="${s}">📈 ${s}</option>`).join('')}
             </select>
@@ -5939,14 +6043,35 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
 
         <!-- New Occasion Fields -->
         <div id="conv-bday-new-fields">
+          <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Date Schedule Type</label>
+            <select id="conv-bday-rule" onchange="window.budgetApp.onConvertOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-top:2px;">
+              <option value="fixed">📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+              <option value="uk_mothers_day">💐 UK Mother's Day (4th Sun of Lent)</option>
+              <option value="fathers_day">👔 Father's Day (3rd Sun in June)</option>
+              <option value="us_mothers_day">🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+              <option value="easter_sunday">🐣 Easter Sunday</option>
+              <option value="good_friday">✝️ Good Friday</option>
+              <option value="easter_monday">🐣 Easter Monday</option>
+              <option value="black_friday">🛍️ Black Friday</option>
+              <option value="cyber_monday">💻 Cyber Monday</option>
+              <option value="thanksgiving_us">🦃 Thanksgiving (US)</option>
+            </select>
+          </div>
+
+          <div id="conv-bday-dynamic-preview" style="display:none; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+            🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+            <span id="conv-bday-dynamic-date-text"></span>
+          </div>
+
           <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Person / Occasion Name</label>
-              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; margin-top:2px;">
+              <input type="text" id="conv-bday-name" value="${cleanDesc}" placeholder="e.g. Mum's Birthday" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
             </div>
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Occasion Category</label>
-              <select id="conv-bday-cat" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-cat" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 <option value="Birthday" selected>🎂 Birthday</option>
                 <option value="Anniversary">💍 Anniversary</option>
                 <option value="Holiday">🎄 Holiday</option>
@@ -5955,26 +6080,27 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-bottom:8px;">
-            <div>
+          <div id="conv-bday-fixed-date-inputs" style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Month</label>
-              <select id="conv-bday-month" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-month" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 ${months.map(m => `<option value="${m}" ${m === sourceMonth ? 'selected' : ''}>${m}</option>`).join('')}
               </select>
             </div>
-            <div>
+            <div style="min-width:0;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Day of Month</label>
-              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; margin-top:2px;">
-            </div>
-            <div>
-              <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
-              <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+              <input type="number" min="1" max="31" id="conv-bday-day" value="${defaultDueDay}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
             </div>
           </div>
 
           <div style="margin-bottom:8px;">
+            <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift Budget (${curr})</label>
+            <input type="number" step="0.01" id="conv-bday-budget" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
+          </div>
+
+          <div style="margin-bottom:8px;">
             <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
-            <select id="conv-bday-acc" style="width:100%; margin-top:2px;">
+            <select id="conv-bday-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
               ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
               ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -5987,25 +6113,27 @@ function openConvertItemModal(sourceMonth, sourceWeek, itemIdx) {
           <div id="conv-bday-existing-fields" style="display:none;">
             <div style="margin-bottom:8px;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Select Occasion</label>
-              <select id="conv-bday-select" style="width:100%; margin-top:2px;">
-                ${existingBirthdays.map((b, bIdx) => `
-                  <option value="${bIdx}">${b.name} (${b.month} ${b.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>
-                `).join('')}
+              <select id="conv-bday-select" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
+                ${existingBirthdays.map((b, bIdx) => {
+                  const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((o, yr) => ({ month: o.month, day: o.day })));
+                  const occ = occFn(b, appState.currentYear);
+                  return `<option value="${bIdx}">${b.name} (${occ.month} ${occ.day}) - Budget: ${curr}${Number(b.budget_amount || 0).toFixed(2)}</option>`;
+                }).join('')}
               </select>
             </div>
             <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:8px; margin-bottom:8px;">
-              <div>
+              <div style="min-width:0;">
                 <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Gift / Spend Description</label>
-                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; margin-top:2px;">
+                <input type="text" id="conv-bday-spend-desc" value="${cleanDesc}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
               </div>
-              <div>
+              <div style="min-width:0;">
                 <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Amount (${curr})</label>
-                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; margin-top:2px; font-weight:bold;">
+                <input type="number" step="0.01" id="conv-bday-spend-amt" value="${itemAmt}" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px; font-weight:bold;">
               </div>
             </div>
             <div style="margin-bottom:8px;">
               <label style="font-size:10.5px; text-transform:uppercase; font-weight:bold; color:var(--text-muted);">Paid From Account</label>
-              <select id="conv-bday-spend-acc" style="width:100%; margin-top:2px;">
+              <select id="conv-bday-spend-acc" style="width:100%; max-width:100%; box-sizing:border-box; margin-top:2px;">
                 <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${itemAcc === a ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
                 ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${itemAcc === c.name ? 'selected' : ''}>💳 ${c.name}</option>`).join('')}</optgroup>` : ''}
                 ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${itemAcc === s ? 'selected' : ''}>💰 ${s}</option>`).join('')}</optgroup>` : ''}
@@ -6935,34 +7063,53 @@ function openAddBirthdayModal() {
   showModal({
     title: "🎂 Add Birthday or Occasion",
     body: `
-      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
-      <input type="text" id="bday-name" placeholder="e.g. Mum's Birthday, Wedding Anniversary" style="margin-bottom:8px;">
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Date Schedule Type</label>
+      <select id="bday-rule" onchange="window.budgetApp.onOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-bottom:8px;">
+        <option value="fixed">📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+        <option value="uk_mothers_day">💐 UK Mother's Day (4th Sun of Lent)</option>
+        <option value="fathers_day">👔 Father's Day (3rd Sun in June)</option>
+        <option value="us_mothers_day">🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+        <option value="easter_sunday">🐣 Easter Sunday</option>
+        <option value="good_friday">✝️ Good Friday</option>
+        <option value="easter_monday">🐣 Easter Monday</option>
+        <option value="black_friday">🛍️ Black Friday</option>
+        <option value="cyber_monday">💻 Cyber Monday</option>
+        <option value="thanksgiving_us">🦃 Thanksgiving (US)</option>
+      </select>
 
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <div style="flex:1;">
+      <div id="bday-dynamic-preview" style="display:none; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+        🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+        <span id="bday-dynamic-date-text"></span>
+      </div>
+
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
+      <input type="text" id="bday-name" placeholder="e.g. Mum's Birthday, Wedding Anniversary" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
+
+      <div id="bday-fixed-date-inputs" style="display:flex; gap:8px; margin-bottom:8px; width:100%; max-width:100%; box-sizing:border-box;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Month</label>
-          <select id="bday-month" style="width:100%;">
+          <select id="bday-month" style="width:100%; max-width:100%; box-sizing:border-box;">
             ${months.map(m => `<option value="${m}" ${m === appState.activeTab ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
         </div>
-        <div style="flex:1;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Day of Month</label>
-          <input type="number" min="1" max="31" id="bday-day" value="1" style="width:100%;">
+          <input type="number" min="1" max="31" id="bday-day" value="1" style="width:100%; max-width:100%; box-sizing:border-box;">
         </div>
       </div>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Gift Budget Allocation (${curr})</label>
-      <input type="number" step="0.01" id="bday-budget" placeholder="100.00" style="margin-bottom:8px;">
+      <input type="number" step="0.01" id="bday-budget" placeholder="100.00" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Paid From Account</label>
-      <select id="bday-account" style="margin-bottom:8px;">
+      <select id="bday-account" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}">${a}</option>`).join('')}</optgroup>
         ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}">${c.name}</option>`).join('')}</optgroup>` : ''}
         ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}">${s}</option>`).join('')}</optgroup>` : ''}
       </select>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Category</label>
-      <select id="bday-cat" style="margin-bottom:8px;">
+      <select id="bday-cat" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <option value="Birthday">🎂 Birthday</option>
         <option value="Anniversary">💍 Anniversary</option>
         <option value="Holiday">🎄 Holiday</option>
@@ -6983,30 +7130,56 @@ function openEditBirthdayModal(bIdx) {
   const b = birthdays[bIdx];
   if (!b) return;
 
+  const curRule = b.date_rule || 'fixed';
+  const isDyn = curRule !== 'fixed';
+  const curYear = appState.currentYear || new Date().getFullYear();
+  const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1 })));
+  const occDate = occFn(b, curYear);
+  const nextOcc = occFn(b, curYear + 1);
+
   showModal({
     title: `✏️ Edit: ${b.name}`,
     body: `
-      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
-      <input type="text" id="bday-name" value="${b.name}" style="margin-bottom:8px;">
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Date Schedule Type</label>
+      <select id="bday-rule" onchange="window.budgetApp.onOccasionRuleChange(this.value)" style="width:100%; max-width:100%; box-sizing:border-box; text-overflow:ellipsis; margin-bottom:8px;">
+        <option value="fixed" ${curRule === 'fixed' ? 'selected' : ''}>📅 Fixed Calendar Date (e.g. Birthday, Christmas)</option>
+        <option value="uk_mothers_day" ${curRule === 'uk_mothers_day' ? 'selected' : ''}>💐 UK Mother's Day (4th Sun of Lent)</option>
+        <option value="fathers_day" ${curRule === 'fathers_day' ? 'selected' : ''}>👔 Father's Day (3rd Sun in June)</option>
+        <option value="us_mothers_day" ${curRule === 'us_mothers_day' ? 'selected' : ''}>🌸 US / Intl Mother's Day (2nd Sun in May)</option>
+        <option value="easter_sunday" ${curRule === 'easter_sunday' ? 'selected' : ''}>🐣 Easter Sunday</option>
+        <option value="good_friday" ${curRule === 'good_friday' ? 'selected' : ''}>✝️ Good Friday</option>
+        <option value="easter_monday" ${curRule === 'easter_monday' ? 'selected' : ''}>🐣 Easter Monday</option>
+        <option value="black_friday" ${curRule === 'black_friday' ? 'selected' : ''}>🛍️ Black Friday</option>
+        <option value="cyber_monday" ${curRule === 'cyber_monday' ? 'selected' : ''}>💻 Cyber Monday</option>
+        <option value="thanksgiving_us" ${curRule === 'thanksgiving_us' ? 'selected' : ''}>🦃 Thanksgiving (US)</option>
+      </select>
 
-      <div style="display:flex; gap:8px; margin-bottom:8px;">
-        <div style="flex:1;">
+      <div id="bday-dynamic-preview" style="display:${isDyn ? 'block' : 'none'}; margin-bottom:8px; padding:6px 10px; border-radius:6px; background:rgba(168, 85, 247, 0.12); border:1px solid rgba(168, 85, 247, 0.3); font-size:11px; color:#c084fc; width:100%; max-width:100%; box-sizing:border-box; word-break:break-word;">
+        🗓️ <strong>Dynamic Occasion</strong>: Date shifts automatically each year.<br>
+        <span id="bday-dynamic-date-text">Calculated for <strong>${curYear}</strong>: <strong>${occDate.day} ${occDate.month}</strong> &bull; Next (${curYear + 1}): <strong>${nextOcc.day} ${nextOcc.month}</strong></span>
+      </div>
+
+      <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Person / Occasion Name</label>
+      <input type="text" id="bday-name" value="${b.name}" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
+
+      <div id="bday-fixed-date-inputs" style="display:${isDyn ? 'none' : 'flex'}; gap:8px; margin-bottom:8px; width:100%; max-width:100%; box-sizing:border-box;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Month</label>
-          <select id="bday-month" style="width:100%;">
+          <select id="bday-month" style="width:100%; max-width:100%; box-sizing:border-box;">
             ${months.map(m => `<option value="${m}" ${m === b.month ? 'selected' : ''}>${m}</option>`).join('')}
           </select>
         </div>
-        <div style="flex:1;">
+        <div style="flex:1; min-width:0;">
           <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Day of Month</label>
-          <input type="number" min="1" max="31" id="bday-day" value="${b.day || 1}" style="width:100%;">
+          <input type="number" min="1" max="31" id="bday-day" value="${b.day || 1}" style="width:100%; max-width:100%; box-sizing:border-box;">
         </div>
       </div>
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Gift Budget Allocation (${curr})</label>
-      <input type="number" step="0.01" id="bday-budget" value="${b.budget_amount || 0}" style="margin-bottom:8px;">
+      <input type="number" step="0.01" id="bday-budget" value="${b.budget_amount || 0}" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
 
       <label style="font-size:11px; text-transform:uppercase; font-weight:bold;">Paid From Account</label>
-      <select id="bday-account" style="margin-bottom:8px;">
+      <select id="bday-account" style="width:100%; max-width:100%; box-sizing:border-box; margin-bottom:8px;">
         <optgroup label="Current Accounts">${cfg.current_accounts.map(a => `<option value="${a}" ${a === b.account ? 'selected' : ''}>${a}</option>`).join('')}</optgroup>
         ${(cfg.credit_accounts || []).length > 0 ? `<optgroup label="Credit Cards">${cfg.credit_accounts.map(c => `<option value="${c.name}" ${c.name === b.account ? 'selected' : ''}>${c.name}</option>`).join('')}</optgroup>` : ''}
         ${(cfg.savings_accounts || []).length > 0 ? `<optgroup label="Savings Accounts">${cfg.savings_accounts.map(s => `<option value="${s}" ${s === b.account ? 'selected' : ''}>${s}</option>`).join('')}</optgroup>` : ''}
@@ -7078,10 +7251,9 @@ function openQuickBirthdaySpendModal() {
 
   // Enrich birthdays with original index, dates, and diffDays relative to today
   const enriched = birthdays.map((b, originalIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10) || 1;
-    const bDate = new Date(appState.currentYear, mIdx, day, 0, 0, 0, 0);
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1, dateObj: new Date(yr, 0, 1) })));
+    const occ = occFn(b, appState.currentYear);
+    const bDate = occ.dateObj;
     const diffDays = Math.round((bDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
     const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const budget = Number(b.budget_amount) || 0;
@@ -7089,6 +7261,8 @@ function openQuickBirthdaySpendModal() {
     return {
       ...b,
       originalIdx,
+      month: occ.month,
+      day: occ.day,
       dateObj: bDate,
       diffDays,
       spent,
@@ -12156,17 +12330,33 @@ function renderBudgetsView(container) {
   let recentlyPassedCount = 0;
 
   const enrichedBirthdays = birthdays.map((b, idx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) mIdx = 0;
-    const dayNum = parseInt(b.day || 1, 10);
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1, dateObj: new Date(yr, 0, 1), isMovable: false })));
+    const iconFn = (typeof getOccasionIcon === 'function') ? getOccasionIcon : (window.getOccasionIcon || (() => '🎂'));
 
-    // Next occurrence within next 365 days
-    const thisYearDate = new Date(curYear, mIdx, dayNum, 0, 0, 0);
-    const nextDate = (thisYearDate >= todayZero) ? thisYearDate : new Date(curYear + 1, mIdx, dayNum, 0, 0, 0);
+    const thisYearOcc = occFn(b, curYear);
+    const thisYearDate = new Date(thisYearOcc.dateObj.getFullYear(), thisYearOcc.dateObj.getMonth(), thisYearOcc.dateObj.getDate(), 0, 0, 0);
+
+    let nextDate;
+    let nextOcc;
+    if (thisYearDate >= todayZero) {
+      nextDate = thisYearDate;
+      nextOcc = thisYearOcc;
+    } else {
+      nextOcc = occFn(b, curYear + 1);
+      nextDate = new Date(nextOcc.dateObj.getFullYear(), nextOcc.dateObj.getMonth(), nextOcc.dateObj.getDate(), 0, 0, 0);
+    }
     const diffDays = Math.round((nextDate - todayZero) / (1000 * 60 * 60 * 24));
 
     // Previous occurrence for recently passed filter
-    const prevDate = (thisYearDate < todayZero) ? thisYearDate : new Date(curYear - 1, mIdx, dayNum, 0, 0, 0);
+    let prevDate;
+    let prevOcc;
+    if (thisYearDate < todayZero) {
+      prevDate = thisYearDate;
+      prevOcc = thisYearOcc;
+    } else {
+      prevOcc = occFn(b, curYear - 1);
+      prevDate = new Date(prevOcc.dateObj.getFullYear(), prevOcc.dateObj.getMonth(), prevOcc.dateObj.getDate(), 0, 0, 0);
+    }
     const daysAgo = Math.round((todayZero - prevDate) / (1000 * 60 * 60 * 24));
 
     if (diffDays >= 0 && diffDays <= 30) soonBirthdaysCount++;
@@ -12182,9 +12372,13 @@ function renderBudgetsView(container) {
     return {
       ...b,
       originalIdx: idx,
+      thisYearOcc,
+      nextOcc,
       nextDate,
       diffDays,
       daysAgo,
+      icon: iconFn(b),
+      isMovable: Boolean(thisYearOcc.isMovable),
       spent: bSpent,
       remaining: bBudget - bSpent,
       pct: Math.min(100, Math.round((bSpent / (bBudget || 1)) * 100))
@@ -12301,16 +12495,18 @@ function renderBudgetsView(container) {
           else if (b.diffDays > 1 && b.diffDays <= 7) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">⏳ In ${b.diffDays} days!</span>`;
           else if (b.diffDays > 7 && b.diffDays <= 30) countdownBadge = `<span class="badge" style="background:#eab308; color:#000; font-size:10px;">📅 In ${b.diffDays} days</span>`;
           else if (b.diffDays > 30 && b.diffDays <= 90) countdownBadge = `<span class="badge" style="background:rgba(2,132,199,0.15); color:var(--curr-border); font-size:10px;">In ${b.diffDays} days</span>`;
-          else countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days (${b.month} '${String(b.nextDate.getFullYear()).slice(2)})</span>`;
+          else countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days (${b.nextOcc.month} '${String(b.nextDate.getFullYear()).slice(2)})</span>`;
+
+          const movableBadge = b.isMovable ? `<span class="badge" style="background:rgba(168, 85, 247, 0.15); color:#c084fc; font-size:9.5px; margin-left:6px; vertical-align:middle;" title="Movable calendar date - shifts dynamically every year">🗓️ Dynamic</span>` : '';
 
           return `
             <div class="account-card" style="display:flex; flex-direction:column; justify-content:space-between; border-left:3px solid #ec4899;">
               <div>
                 <div class="account-card-header" style="margin-bottom:6px;">
                   <div>
-                    <strong style="color:var(--heading); font-size:14px;">🎂 ${b.name}</strong>
+                    <strong style="color:var(--heading); font-size:14px;">${b.icon} ${b.name}</strong>${movableBadge}
                     <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                      📅 <strong>${b.day} ${b.month}</strong> &bull; Next: <strong>${b.day} ${b.month} ${b.nextDate.getFullYear()}</strong> &bull; Paid: ${b.account || cfg.current_accounts[0]}
+                      📅 <strong>${b.thisYearOcc.day} ${b.thisYearOcc.month} (${curYear})</strong> &bull; Next: <strong>${b.nextOcc.day} ${b.nextOcc.month} ${b.nextDate.getFullYear()}</strong> &bull; Paid: ${b.account || cfg.current_accounts[0]}
                     </div>
                   </div>
                   <div>${countdownBadge}</div>
@@ -20029,7 +20225,116 @@ window.budgetApp = {
   },
   openRecurringPaymentsModal() { this.closeFabMenu(); openRecurringPaymentsModal(); },
 
+  onOccasionRuleChange(ruleVal) {
+    const fixedInputs = document.getElementById('bday-fixed-date-inputs');
+    const dynPreview = document.getElementById('bday-dynamic-preview');
+    const dynDateText = document.getElementById('bday-dynamic-date-text');
+    const nameEl = document.getElementById('bday-name');
+    const catEl = document.getElementById('bday-cat');
+    const monthEl = document.getElementById('bday-month');
+    const dayEl = document.getElementById('bday-day');
+    const curYear = appState.currentYear || new Date().getFullYear();
+
+    if (!ruleVal || ruleVal === 'fixed') {
+      if (fixedInputs) fixedInputs.style.display = 'flex';
+      if (dynPreview) dynPreview.style.display = 'none';
+      return;
+    }
+
+    if (fixedInputs) fixedInputs.style.display = 'none';
+    if (dynPreview) dynPreview.style.display = 'block';
+
+    const tempOcc = { date_rule: ruleVal };
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: 'Mar', day: 1 })));
+    const occCur = occFn(tempOcc, curYear);
+    const occNext = occFn(tempOcc, curYear + 1);
+
+    if (dynDateText) {
+      dynDateText.innerHTML = `Calculated for <strong>${curYear}</strong>: <strong>${occCur.day} ${occCur.month}</strong> &bull; Next (${curYear + 1}): <strong>${occNext.day} ${occNext.month}</strong>`;
+    }
+
+    const presetInfo = {
+      'uk_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'fathers_day': { name: "Father's Day", cat: 'Celebration' },
+      'us_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'easter_sunday': { name: 'Easter Sunday', cat: 'Holiday' },
+      'good_friday': { name: 'Good Friday', cat: 'Holiday' },
+      'easter_monday': { name: 'Easter Monday', cat: 'Holiday' },
+      'black_friday': { name: 'Black Friday', cat: 'Celebration' },
+      'cyber_monday': { name: 'Cyber Monday', cat: 'Celebration' },
+      'thanksgiving_us': { name: 'Thanksgiving', cat: 'Holiday' }
+    };
+
+    if (presetInfo[ruleVal]) {
+      const presetNames = Object.values(presetInfo).map(p => p.name);
+      if (nameEl && (!nameEl.value || presetNames.includes(nameEl.value))) {
+        nameEl.value = presetInfo[ruleVal].name;
+      }
+      if (catEl) {
+        catEl.value = presetInfo[ruleVal].cat;
+      }
+    }
+
+    if (monthEl) monthEl.value = occCur.month;
+    if (dayEl) dayEl.value = occCur.day;
+  },
+
+  onConvertOccasionRuleChange(ruleVal) {
+    const fixedInputs = document.getElementById('conv-bday-fixed-date-inputs');
+    const dynPreview = document.getElementById('conv-bday-dynamic-preview');
+    const dynDateText = document.getElementById('conv-bday-dynamic-date-text');
+    const nameEl = document.getElementById('conv-bday-name');
+    const catEl = document.getElementById('conv-bday-cat');
+    const monthEl = document.getElementById('conv-bday-month');
+    const dayEl = document.getElementById('conv-bday-day');
+    const curYear = appState.currentYear || new Date().getFullYear();
+
+    if (!ruleVal || ruleVal === 'fixed') {
+      if (fixedInputs) fixedInputs.style.display = 'grid';
+      if (dynPreview) dynPreview.style.display = 'none';
+      return;
+    }
+
+    if (fixedInputs) fixedInputs.style.display = 'none';
+    if (dynPreview) dynPreview.style.display = 'block';
+
+    const tempOcc = { date_rule: ruleVal };
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: 'Mar', day: 1 })));
+    const occCur = occFn(tempOcc, curYear);
+    const occNext = occFn(tempOcc, curYear + 1);
+
+    if (dynDateText) {
+      dynDateText.innerHTML = `Calculated for <strong>${curYear}</strong>: <strong>${occCur.day} ${occCur.month}</strong> &bull; Next (${curYear + 1}): <strong>${occNext.day} ${occNext.month}</strong>`;
+    }
+
+    const presetInfo = {
+      'uk_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'fathers_day': { name: "Father's Day", cat: 'Celebration' },
+      'us_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'easter_sunday': { name: 'Easter Sunday', cat: 'Holiday' },
+      'good_friday': { name: 'Good Friday', cat: 'Holiday' },
+      'easter_monday': { name: 'Easter Monday', cat: 'Holiday' },
+      'black_friday': { name: 'Black Friday', cat: 'Celebration' },
+      'cyber_monday': { name: 'Cyber Monday', cat: 'Celebration' },
+      'thanksgiving_us': { name: 'Thanksgiving', cat: 'Holiday' }
+    };
+
+    if (presetInfo[ruleVal]) {
+      const presetNames = Object.values(presetInfo).map(p => p.name);
+      if (nameEl && (!nameEl.value || presetNames.includes(nameEl.value))) {
+        nameEl.value = presetInfo[ruleVal].name;
+      }
+      if (catEl) {
+        catEl.value = presetInfo[ruleVal].cat;
+      }
+    }
+
+    if (monthEl) monthEl.value = occCur.month;
+    if (dayEl) dayEl.value = occCur.day;
+  },
+
   async confirmAddBirthday() {
+    const ruleEl = document.getElementById('bday-rule');
     const nameEl = document.getElementById('bday-name');
     const monthEl = document.getElementById('bday-month');
     const dayEl = document.getElementById('bday-day');
@@ -20039,8 +20344,9 @@ window.budgetApp = {
 
     if (!nameEl || !budgetEl) return;
     const name = nameEl.value.trim();
-    const month = monthEl ? monthEl.value : 'Jan';
-    const day = parseInt(dayEl ? dayEl.value : 1, 10) || 1;
+    const rule = ruleEl ? ruleEl.value : 'fixed';
+    let month = monthEl ? monthEl.value : 'Jan';
+    let day = parseInt(dayEl ? dayEl.value : 1, 10) || 1;
     const budget = parseFloat(budgetEl.value) || 0;
     const acc = accEl ? accEl.value : getSettings().current_accounts[0];
     const cat = catEl ? catEl.value : 'Birthday';
@@ -20050,10 +20356,17 @@ window.budgetApp = {
       return;
     }
 
+    if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+      const occ = getOccasionDate({ date_rule: rule }, appState.currentYear);
+      month = occ.month;
+      day = occ.day;
+    }
+
     const newBday = {
       name,
       month,
       day,
+      date_rule: rule,
       budget_amount: budget,
       account: acc,
       category: cat,
@@ -20069,7 +20382,13 @@ window.budgetApp = {
         const yData = appState.data.years[y];
         if (!yData.birthdays) yData.birthdays = [];
         if (!yData.birthdays.some(b => b.name === name)) {
-          yData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+          const yBday = JSON.parse(JSON.stringify(newBday));
+          if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+            const occY = getOccasionDate(yBday, y);
+            yBday.month = occY.month;
+            yBday.day = occY.day;
+          }
+          yData.birthdays.push(yBday);
         }
       });
     }
@@ -20081,6 +20400,7 @@ window.budgetApp = {
   },
 
   async confirmEditBirthday(bIdx) {
+    const ruleEl = document.getElementById('bday-rule');
     const nameEl = document.getElementById('bday-name');
     const monthEl = document.getElementById('bday-month');
     const dayEl = document.getElementById('bday-day');
@@ -20092,9 +20412,17 @@ window.budgetApp = {
     const b = birthdays[bIdx];
     if (b) {
       const oldName = b.name;
+      const rule = ruleEl ? ruleEl.value : (b.date_rule || 'fixed');
       b.name = nameEl.value.trim() || b.name;
-      if (monthEl) b.month = monthEl.value;
-      if (dayEl) b.day = parseInt(dayEl.value, 10) || 1;
+      b.date_rule = rule;
+      if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+        const occ = getOccasionDate(b, appState.currentYear);
+        b.month = occ.month;
+        b.day = occ.day;
+      } else {
+        if (monthEl) b.month = monthEl.value;
+        if (dayEl) b.day = parseInt(dayEl.value, 10) || 1;
+      }
       if (budgetEl) b.budget_amount = parseFloat(budgetEl.value) || 0;
       if (accEl) b.account = accEl.value;
 
@@ -20103,6 +20431,7 @@ window.budgetApp = {
         const mb = cfg.birthdays.find(item => item.name === oldName) || cfg.birthdays[bIdx];
         if (mb) {
           mb.name = b.name;
+          mb.date_rule = b.date_rule;
           mb.month = b.month;
           mb.day = b.day;
           mb.budget_amount = b.budget_amount;
@@ -20116,8 +20445,15 @@ window.budgetApp = {
             const yB = yData.birthdays.find(item => item.name === oldName);
             if (yB) {
               yB.name = b.name;
-              yB.month = b.month;
-              yB.day = b.day;
+              yB.date_rule = b.date_rule;
+              if (b.date_rule && b.date_rule !== 'fixed' && typeof getOccasionDate === 'function') {
+                const occY = getOccasionDate(yB, y);
+                yB.month = occY.month;
+                yB.day = occY.day;
+              } else {
+                yB.month = b.month;
+                yB.day = b.day;
+              }
               yB.budget_amount = b.budget_amount;
               yB.account = b.account;
             }
@@ -21560,6 +21896,7 @@ window.budgetApp = {
       // Birthday or Occasion
       const bdayMode = document.querySelector('input[name="conv-bday-mode"]:checked')?.value || 'new';
       if (bdayMode === 'new') {
+        const ruleEl = document.getElementById('conv-bday-rule');
         const nameEl = document.getElementById('conv-bday-name');
         const monthEl = document.getElementById('conv-bday-month');
         const dayEl = document.getElementById('conv-bday-day');
@@ -21568,8 +21905,9 @@ window.budgetApp = {
         const catEl = document.getElementById('conv-bday-cat');
 
         const name = nameEl ? nameEl.value.trim() : '';
-        const month = monthEl ? monthEl.value : srcMonth;
-        const day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+        const rule = ruleEl ? ruleEl.value : 'fixed';
+        let month = monthEl ? monthEl.value : srcMonth;
+        let day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
         const budget = parseFloat(budgetEl ? budgetEl.value : 0) || 0;
         const acc = accEl ? accEl.value : cfg.current_accounts[0];
         const cat = catEl ? catEl.value : 'Birthday';
@@ -21579,10 +21917,17 @@ window.budgetApp = {
           return;
         }
 
+        if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+          const occ = getOccasionDate({ date_rule: rule }, appState.currentYear);
+          month = occ.month;
+          day = occ.day;
+        }
+
         const newBday = {
           name,
           month,
           day,
+          date_rule: rule,
           budget_amount: budget,
           account: acc,
           category: cat,
@@ -21597,7 +21942,13 @@ window.budgetApp = {
             const yrData = appState.data.years[y];
             if (!yrData.birthdays) yrData.birthdays = [];
             if (!yrData.birthdays.some(b => b.name === name)) {
-              yrData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+              const yBday = JSON.parse(JSON.stringify(newBday));
+              if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+                const occY = getOccasionDate(yBday, y);
+                yBday.month = occY.month;
+                yBday.day = occY.day;
+              }
+              yrData.birthdays.push(yBday);
             }
           });
         }

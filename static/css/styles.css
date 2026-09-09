@@ -2035,10 +2035,24 @@ h1, h2, h3, h4, h5, h6 {
   padding: 20px;
   max-width: 500px;
   width: 100%;
+  box-sizing: border-box;
   max-height: 90vh;
   overflow-y: auto;
+  overflow-x: hidden !important;
   box-shadow: 0 12px 35px rgba(0,0,0,0.65);
   transition: background 0.25s ease, border-color 0.25s ease;
+}
+
+@media (max-width: 600px) {
+  .modal-overlay {
+    padding: 8px !important;
+  }
+  .modal-box {
+    padding: 14px 12px !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    border-radius: 12px !important;
+  }
 }
 
 .modal-title {
@@ -2049,6 +2063,42 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.modal-body {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+  overflow-x: hidden !important;
+}
+
+.modal-body *,
+.modal-body *::before,
+.modal-body *::after {
+  box-sizing: border-box;
+}
+
+.modal-body input:not([type="checkbox"]):not([type="radio"]),
+.modal-body select,
+.modal-body textarea {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.modal-body select {
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.modal-body [style*="grid-template-columns"] > *,
+.modal-body [style*="display:flex"] > *,
+.modal-body [style*="display: flex"] > * {
+  min-width: 0 !important;
+  max-width: 100% !important;
 }
 
 .modal-actions {

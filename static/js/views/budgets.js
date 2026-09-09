@@ -1,4 +1,4 @@
-import { detectBudgetCategory } from '../calculations.js';
+import { detectBudgetCategory, getOccasionDate, getOccasionIcon } from '../calculations.js';
 import { appState, getSettings, getYearData, getBirthdays, getMasterYearlyBudgets, months, getCurrentPeriodMonthAndYear } from '../state.js';
 
 export function renderBudgetsView(container) {
@@ -22,17 +22,33 @@ export function renderBudgetsView(container) {
   let recentlyPassedCount = 0;
 
   const enrichedBirthdays = birthdays.map((b, idx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) mIdx = 0;
-    const dayNum = parseInt(b.day || 1, 10);
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: occ.month || 'Jan', day: occ.day || 1, dateObj: new Date(yr, 0, 1), isMovable: false })));
+    const iconFn = (typeof getOccasionIcon === 'function') ? getOccasionIcon : (window.getOccasionIcon || (() => '🎂'));
 
-    // Next occurrence within next 365 days
-    const thisYearDate = new Date(curYear, mIdx, dayNum, 0, 0, 0);
-    const nextDate = (thisYearDate >= todayZero) ? thisYearDate : new Date(curYear + 1, mIdx, dayNum, 0, 0, 0);
+    const thisYearOcc = occFn(b, curYear);
+    const thisYearDate = new Date(thisYearOcc.dateObj.getFullYear(), thisYearOcc.dateObj.getMonth(), thisYearOcc.dateObj.getDate(), 0, 0, 0);
+
+    let nextDate;
+    let nextOcc;
+    if (thisYearDate >= todayZero) {
+      nextDate = thisYearDate;
+      nextOcc = thisYearOcc;
+    } else {
+      nextOcc = occFn(b, curYear + 1);
+      nextDate = new Date(nextOcc.dateObj.getFullYear(), nextOcc.dateObj.getMonth(), nextOcc.dateObj.getDate(), 0, 0, 0);
+    }
     const diffDays = Math.round((nextDate - todayZero) / (1000 * 60 * 60 * 24));
 
     // Previous occurrence for recently passed filter
-    const prevDate = (thisYearDate < todayZero) ? thisYearDate : new Date(curYear - 1, mIdx, dayNum, 0, 0, 0);
+    let prevDate;
+    let prevOcc;
+    if (thisYearDate < todayZero) {
+      prevDate = thisYearDate;
+      prevOcc = thisYearOcc;
+    } else {
+      prevOcc = occFn(b, curYear - 1);
+      prevDate = new Date(prevOcc.dateObj.getFullYear(), prevOcc.dateObj.getMonth(), prevOcc.dateObj.getDate(), 0, 0, 0);
+    }
     const daysAgo = Math.round((todayZero - prevDate) / (1000 * 60 * 60 * 24));
 
     if (diffDays >= 0 && diffDays <= 30) soonBirthdaysCount++;
@@ -48,9 +64,13 @@ export function renderBudgetsView(container) {
     return {
       ...b,
       originalIdx: idx,
+      thisYearOcc,
+      nextOcc,
       nextDate,
       diffDays,
       daysAgo,
+      icon: iconFn(b),
+      isMovable: Boolean(thisYearOcc.isMovable),
       spent: bSpent,
       remaining: bBudget - bSpent,
       pct: Math.min(100, Math.round((bSpent / (bBudget || 1)) * 100))
@@ -167,16 +187,18 @@ export function renderBudgetsView(container) {
           else if (b.diffDays > 1 && b.diffDays <= 7) countdownBadge = `<span class="badge" style="background:#f43f5e; color:#fff; font-size:10px;">⏳ In ${b.diffDays} days!</span>`;
           else if (b.diffDays > 7 && b.diffDays <= 30) countdownBadge = `<span class="badge" style="background:#eab308; color:#000; font-size:10px;">📅 In ${b.diffDays} days</span>`;
           else if (b.diffDays > 30 && b.diffDays <= 90) countdownBadge = `<span class="badge" style="background:rgba(2,132,199,0.15); color:var(--curr-border); font-size:10px;">In ${b.diffDays} days</span>`;
-          else countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days (${b.month} '${String(b.nextDate.getFullYear()).slice(2)})</span>`;
+          else countdownBadge = `<span style="font-size:11px; color:var(--text-muted);">In ${b.diffDays} days (${b.nextOcc.month} '${String(b.nextDate.getFullYear()).slice(2)})</span>`;
+
+          const movableBadge = b.isMovable ? `<span class="badge" style="background:rgba(168, 85, 247, 0.15); color:#c084fc; font-size:9.5px; margin-left:6px; vertical-align:middle;" title="Movable calendar date - shifts dynamically every year">🗓️ Dynamic</span>` : '';
 
           return `
             <div class="account-card" style="display:flex; flex-direction:column; justify-content:space-between; border-left:3px solid #ec4899;">
               <div>
                 <div class="account-card-header" style="margin-bottom:6px;">
                   <div>
-                    <strong style="color:var(--heading); font-size:14px;">🎂 ${b.name}</strong>
+                    <strong style="color:var(--heading); font-size:14px;">${b.icon} ${b.name}</strong>${movableBadge}
                     <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                      📅 <strong>${b.day} ${b.month}</strong> &bull; Next: <strong>${b.day} ${b.month} ${b.nextDate.getFullYear()}</strong> &bull; Paid: ${b.account || cfg.current_accounts[0]}
+                      📅 <strong>${b.thisYearOcc.day} ${b.thisYearOcc.month} (${curYear})</strong> &bull; Next: <strong>${b.nextOcc.day} ${b.nextOcc.month} ${b.nextDate.getFullYear()}</strong> &bull; Paid: ${b.account || cfg.current_accounts[0]}
                     </div>
                   </div>
                   <div>${countdownBadge}</div>

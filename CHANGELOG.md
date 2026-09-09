@@ -5,6 +5,26 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.19] - 2026-09-09
+
+### Added
+- **💐 Movable Calendar Occasions & Computus Rules**:
+  - Added support for dynamic, movable holidays in Birthdays & Occasions that move annually based on astronomical and liturgical calendars, including **UK Mother's Day (Mothering Sunday - 4th Sunday of Lent, Easter - 21 days)**, **Father's Day (3rd Sunday in June)**, **US / International Mother's Day (2nd Sunday in May)**, **Easter Sunday**, **Good Friday**, **Easter Monday**, **Black Friday**, **Cyber Monday**, and **Thanksgiving**.
+  - Implemented `getOccasionDate(occasion, year)` helper in `calculations.js` which dynamically resolves movable date rules to their exact day and month for any budget year.
+  - Added Date Schedule Type selector in the Add, Edit, and Convert Transaction modals with live multi-year date preview and automatic preset name/category detection.
+  - Added full dynamic occasion support to the Convert Transaction modal (`confirmConvertItem` and `onConvertOccasionRuleChange`), saving `date_rule` and computing year-specific dates across all budget years.
+  - Updated rolling 365-day timeline and countdown in `budgets.js` to accurately calculate next year's occurrence using next year's shifted date rather than repeating the current date.
+  - Added contextual occasion icons (💐, 👔, 🐣, ✝️, 🛍️, 🎄, 💍, 🎂) in overview cards, budget cards, and spend dialogs.
+  - Preserved complete backward compatibility for standard fixed calendar dates.
+
+### Fixed
+- **📱 Modal Layout & Selection Box Mobile Responsiveness**:
+  - Resolved an issue on mobile viewports (smartphones / narrow screens) where long selection box option text (e.g. occasion names and schedule descriptions) prevented native `<select>` dropdowns and modal cards from resizing, causing horizontal overflow off the screen.
+  - Added strict `width: 100% !important`, `max-width: 100% !important`, `min-width: 0 !important`, `box-sizing: border-box !important`, and `text-overflow: ellipsis` constraints to all modal selects, inputs, and container grid cells.
+  - Added `overflow-x: hidden !important` to `.modal-box` and `.modal-body` to prevent horizontal spillage on small devices.
+
+---
+
 ## [0.3.18] - 2026-09-09
 
 ### Fixed

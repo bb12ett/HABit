@@ -13,6 +13,111 @@ export function getEaster(year) {
   return new Date(year, month - 1, day);
 }
 
+export function getOccasionDate(occasion, year = (appState && appState.currentYear ? appState.currentYear : new Date().getFullYear())) {
+  if (!occasion) return { month: 'Jan', day: 1, dateObj: new Date(year, 0, 1), isMovable: false, rule: 'fixed' };
+  const y = parseInt(year, 10) || new Date().getFullYear();
+  const rule = occasion.date_rule || 'fixed';
+
+  if (rule === 'uk_mothers_day') {
+    // 4th Sunday of Lent (Laetare Sunday) = exactly 3 weeks (21 days) before Easter Sunday
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() - 21);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'fathers_day') {
+    // 3rd Sunday in June
+    const d = new Date(y, 5, 1);
+    while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 14);
+    return { month: months[5], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'us_mothers_day') {
+    // 2nd Sunday in May
+    const d = new Date(y, 4, 1);
+    while (d.getDay() !== 0) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 7);
+    return { month: months[4], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'easter_sunday') {
+    const d = getEaster(y);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'good_friday') {
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() - 2);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'easter_monday') {
+    const easter = getEaster(y);
+    const d = new Date(easter);
+    d.setDate(easter.getDate() + 1);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'thanksgiving_us') {
+    // 4th Thursday in November
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 21);
+    return { month: months[10], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'black_friday') {
+    // Friday after 4th Thursday in November
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 22);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+  if (rule === 'cyber_monday') {
+    // Monday after Black Friday
+    const d = new Date(y, 10, 1);
+    while (d.getDay() !== 4) d.setDate(d.getDate() + 1);
+    d.setDate(d.getDate() + 25);
+    return { month: months[d.getMonth()], day: d.getDate(), dateObj: d, isMovable: true, rule };
+  }
+
+  // Fallback to static month and day
+  let mIdx = months.indexOf(occasion.month);
+  if (mIdx === -1) {
+    mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(occasion.month || '').toLowerCase().substring(0, 3)));
+  }
+  if (mIdx === -1) mIdx = 0;
+  const day = parseInt(occasion.day || 1, 10);
+  return {
+    month: months[mIdx],
+    day,
+    dateObj: new Date(y, mIdx, day),
+    isMovable: false,
+    rule: 'fixed'
+  };
+}
+
+export function getOccasionIcon(occasion) {
+  if (!occasion) return '🎂';
+  const rule = occasion.date_rule || 'fixed';
+  if (rule === 'uk_mothers_day' || rule === 'us_mothers_day') return '💐';
+  if (rule === 'fathers_day') return '👔';
+  if (rule === 'easter_sunday' || rule === 'easter_monday') return '🐣';
+  if (rule === 'good_friday') return '✝️';
+  if (rule === 'thanksgiving_us') return '🦃';
+  if (rule === 'black_friday' || rule === 'cyber_monday') return '🛍️';
+
+  const cat = (occasion.category || '').toLowerCase();
+  const name = (occasion.name || '').toLowerCase();
+
+  if (cat === 'birthday' || name.includes('birthday') || name.includes('bday')) return '🎂';
+  if (cat.includes('anniversary') || name.includes('anniversary')) return '💍';
+  if (cat.includes('holiday') || name.includes('christmas') || name.includes('xmas')) return '🎄';
+  if (name.includes('mother') || name.includes('mum') || name.includes('mom')) return '💐';
+  if (name.includes('father') || name.includes('dad')) return '👔';
+  if (name.includes('easter')) return '🐣';
+  if (cat.includes('celebration') || cat.includes('occasion')) return '🎉';
+
+  return '🎂';
+}
+
+
 export function getBankHolidays(year, countryCode) {
   if (countryCode === 'none') return [];
   const holidays = [];
@@ -1210,6 +1315,8 @@ if (typeof window !== 'undefined') {
   window.getPreviousWorkingDay = getPreviousWorkingDay;
   window.getBankHolidays = getBankHolidays;
   window.getEaster = getEaster;
+  window.getOccasionDate = getOccasionDate;
+  window.getOccasionIcon = getOccasionIcon;
   window.getYearlyBudgetItemsForMonth = getYearlyBudgetItemsForMonth;
   window.getBirthdayItemsForMonth = getBirthdayItemsForMonth;
   window.getBirthdaysForWeek = getBirthdaysForWeek;
@@ -1386,11 +1493,11 @@ export function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYea
   const endMs = new Date(schedule.endDate.getFullYear(), schedule.endDate.getMonth(), schedule.endDate.getDate(), 23, 59, 59).getTime();
 
   birthdays.forEach((b, bIdx) => {
-    let bMIdx = months.indexOf(b.month);
-    if (bMIdx === -1) bMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month || '').toLowerCase().substring(0, 3)));
-    if (bMIdx === -1) bMIdx = 0;
-    const bDate = new Date(year, bMIdx, parseInt(b.day || 1, 10));
+    const occ = getOccasionDate(b, year);
+    const bMIdx = months.indexOf(occ.month);
+    const bDate = occ.dateObj;
     const bMs = bDate.getTime();
+    const icon = getOccasionIcon(b);
 
     const spent = (b.transactions || []).reduce((s, t) => s + (Number(t.amount) || 0), 0);
     const remaining = Math.max(0, (Number(b.budget_amount) || 0) - spent);
@@ -1436,11 +1543,11 @@ export function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYea
     if (bMs >= startMs && bMs <= endMs) {
       if (remaining > 0) {
         items.push({
-          desc: `🎂 ${b.name}`,
-          rawDesc: `🎂 ${b.name}`,
-          due_day: bDate.getDate(),
-          exact_date: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
-          actualPaymentDate: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(b.day || 1).padStart(2, '0')}`,
+          desc: `${icon} ${b.name}`,
+          rawDesc: `${icon} ${b.name}`,
+          due_day: occ.day,
+          exact_date: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(occ.day).padStart(2, '0')}`,
+          actualPaymentDate: `${year}-${String(bMIdx + 1).padStart(2, '0')}-${String(occ.day).padStart(2, '0')}`,
           amount: remaining,
           account: b.account || cfg.current_accounts[0],
           isBirthday: true,
@@ -1457,7 +1564,7 @@ export function getBirthdayItemsForMonth(mName, mIdx, year = appState.currentYea
           matched_payee: b.matched_payee,
           source_type: 'birthday',
           raw_target: b,
-          actualDateStr: `${bDate.getDate()} ${months[bMIdx]}`
+          actualDateStr: `${occ.day} ${months[bMIdx]}`
         });
       }
     }
@@ -1473,14 +1580,12 @@ export function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = ap
   const items = [];
 
   (birthdays || []).forEach((b, bIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) {
-      mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month).toLowerCase().substring(0, 3)));
-    }
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10);
-    const targetDate = new Date(year, mIdx, day);
+    const occ = getOccasionDate(b, year);
+    const mIdx = months.indexOf(occ.month);
+    const day = occ.day;
+    const targetDate = occ.dateObj;
     const bTime = targetDate.getTime();
+    const icon = getOccasionIcon(b);
 
     const spent = (b.transactions || []).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
     const remaining = Math.max(0, (Number(b.budget_amount) || 0) - spent);
@@ -1530,8 +1635,8 @@ export function getBirthdaysForWeek(birthdays, weekObj, monthSchedule, year = ap
           originalIdx: bIdx,
           isBirthday: true,
           is_budget_item: true,
-          desc: `🎂 ${b.name}`,
-          rawDesc: `🎂 ${b.name}`,
+          desc: `${icon} ${b.name}`,
+          rawDesc: `${icon} ${b.name}`,
           due_day: day,
           exact_date: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
           actualPaymentDate: `${year}-${String(mIdx + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
@@ -1565,14 +1670,12 @@ export function getBirthdayOccasionsForWeek(birthdays, weekObj, monthSchedule, y
   const occasions = [];
 
   (birthdays || []).forEach((b, bIdx) => {
-    let mIdx = months.indexOf(b.month);
-    if (mIdx === -1) {
-      mIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month).toLowerCase().substring(0, 3)));
-    }
-    if (mIdx === -1) mIdx = 0;
-    const day = parseInt(b.day || 1, 10);
-    const targetDate = new Date(year, mIdx, day);
+    const occ = getOccasionDate(b, year);
+    const mIdx = months.indexOf(occ.month);
+    const day = occ.day;
+    const targetDate = occ.dateObj;
     const bTime = targetDate.getTime();
+    const icon = getOccasionIcon(b);
 
     if (bTime >= wStartTime && bTime <= wEndTime) {
       const spent = (b.transactions || []).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
@@ -1581,6 +1684,7 @@ export function getBirthdayOccasionsForWeek(birthdays, weekObj, monthSchedule, y
         ...b,
         originalIdx: bIdx,
         isBirthday: true,
+        icon,
         due_day: day,
         account: b.account || cfg.current_accounts[0],
         amount: Math.max(0, remaining),

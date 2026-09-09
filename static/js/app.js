@@ -73,7 +73,9 @@ import {
   calculateMonthSchedule,
   calculateAndSyncRollovers,
   detectCurrentMonthAndWeek,
-  setDynamicCategories
+  setDynamicCategories,
+  getOccasionDate,
+  getOccasionIcon
 } from './calculations.js';
 
 import {
@@ -3351,7 +3353,116 @@ window.budgetApp = {
   },
   openRecurringPaymentsModal() { this.closeFabMenu(); openRecurringPaymentsModal(); },
 
+  onOccasionRuleChange(ruleVal) {
+    const fixedInputs = document.getElementById('bday-fixed-date-inputs');
+    const dynPreview = document.getElementById('bday-dynamic-preview');
+    const dynDateText = document.getElementById('bday-dynamic-date-text');
+    const nameEl = document.getElementById('bday-name');
+    const catEl = document.getElementById('bday-cat');
+    const monthEl = document.getElementById('bday-month');
+    const dayEl = document.getElementById('bday-day');
+    const curYear = appState.currentYear || new Date().getFullYear();
+
+    if (!ruleVal || ruleVal === 'fixed') {
+      if (fixedInputs) fixedInputs.style.display = 'flex';
+      if (dynPreview) dynPreview.style.display = 'none';
+      return;
+    }
+
+    if (fixedInputs) fixedInputs.style.display = 'none';
+    if (dynPreview) dynPreview.style.display = 'block';
+
+    const tempOcc = { date_rule: ruleVal };
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: 'Mar', day: 1 })));
+    const occCur = occFn(tempOcc, curYear);
+    const occNext = occFn(tempOcc, curYear + 1);
+
+    if (dynDateText) {
+      dynDateText.innerHTML = `Calculated for <strong>${curYear}</strong>: <strong>${occCur.day} ${occCur.month}</strong> &bull; Next (${curYear + 1}): <strong>${occNext.day} ${occNext.month}</strong>`;
+    }
+
+    const presetInfo = {
+      'uk_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'fathers_day': { name: "Father's Day", cat: 'Celebration' },
+      'us_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'easter_sunday': { name: 'Easter Sunday', cat: 'Holiday' },
+      'good_friday': { name: 'Good Friday', cat: 'Holiday' },
+      'easter_monday': { name: 'Easter Monday', cat: 'Holiday' },
+      'black_friday': { name: 'Black Friday', cat: 'Celebration' },
+      'cyber_monday': { name: 'Cyber Monday', cat: 'Celebration' },
+      'thanksgiving_us': { name: 'Thanksgiving', cat: 'Holiday' }
+    };
+
+    if (presetInfo[ruleVal]) {
+      const presetNames = Object.values(presetInfo).map(p => p.name);
+      if (nameEl && (!nameEl.value || presetNames.includes(nameEl.value))) {
+        nameEl.value = presetInfo[ruleVal].name;
+      }
+      if (catEl) {
+        catEl.value = presetInfo[ruleVal].cat;
+      }
+    }
+
+    if (monthEl) monthEl.value = occCur.month;
+    if (dayEl) dayEl.value = occCur.day;
+  },
+
+  onConvertOccasionRuleChange(ruleVal) {
+    const fixedInputs = document.getElementById('conv-bday-fixed-date-inputs');
+    const dynPreview = document.getElementById('conv-bday-dynamic-preview');
+    const dynDateText = document.getElementById('conv-bday-dynamic-date-text');
+    const nameEl = document.getElementById('conv-bday-name');
+    const catEl = document.getElementById('conv-bday-cat');
+    const monthEl = document.getElementById('conv-bday-month');
+    const dayEl = document.getElementById('conv-bday-day');
+    const curYear = appState.currentYear || new Date().getFullYear();
+
+    if (!ruleVal || ruleVal === 'fixed') {
+      if (fixedInputs) fixedInputs.style.display = 'grid';
+      if (dynPreview) dynPreview.style.display = 'none';
+      return;
+    }
+
+    if (fixedInputs) fixedInputs.style.display = 'none';
+    if (dynPreview) dynPreview.style.display = 'block';
+
+    const tempOcc = { date_rule: ruleVal };
+    const occFn = (typeof getOccasionDate === 'function') ? getOccasionDate : (window.getOccasionDate || ((occ, yr) => ({ month: 'Mar', day: 1 })));
+    const occCur = occFn(tempOcc, curYear);
+    const occNext = occFn(tempOcc, curYear + 1);
+
+    if (dynDateText) {
+      dynDateText.innerHTML = `Calculated for <strong>${curYear}</strong>: <strong>${occCur.day} ${occCur.month}</strong> &bull; Next (${curYear + 1}): <strong>${occNext.day} ${occNext.month}</strong>`;
+    }
+
+    const presetInfo = {
+      'uk_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'fathers_day': { name: "Father's Day", cat: 'Celebration' },
+      'us_mothers_day': { name: "Mother's Day", cat: 'Celebration' },
+      'easter_sunday': { name: 'Easter Sunday', cat: 'Holiday' },
+      'good_friday': { name: 'Good Friday', cat: 'Holiday' },
+      'easter_monday': { name: 'Easter Monday', cat: 'Holiday' },
+      'black_friday': { name: 'Black Friday', cat: 'Celebration' },
+      'cyber_monday': { name: 'Cyber Monday', cat: 'Celebration' },
+      'thanksgiving_us': { name: 'Thanksgiving', cat: 'Holiday' }
+    };
+
+    if (presetInfo[ruleVal]) {
+      const presetNames = Object.values(presetInfo).map(p => p.name);
+      if (nameEl && (!nameEl.value || presetNames.includes(nameEl.value))) {
+        nameEl.value = presetInfo[ruleVal].name;
+      }
+      if (catEl) {
+        catEl.value = presetInfo[ruleVal].cat;
+      }
+    }
+
+    if (monthEl) monthEl.value = occCur.month;
+    if (dayEl) dayEl.value = occCur.day;
+  },
+
   async confirmAddBirthday() {
+    const ruleEl = document.getElementById('bday-rule');
     const nameEl = document.getElementById('bday-name');
     const monthEl = document.getElementById('bday-month');
     const dayEl = document.getElementById('bday-day');
@@ -3361,8 +3472,9 @@ window.budgetApp = {
 
     if (!nameEl || !budgetEl) return;
     const name = nameEl.value.trim();
-    const month = monthEl ? monthEl.value : 'Jan';
-    const day = parseInt(dayEl ? dayEl.value : 1, 10) || 1;
+    const rule = ruleEl ? ruleEl.value : 'fixed';
+    let month = monthEl ? monthEl.value : 'Jan';
+    let day = parseInt(dayEl ? dayEl.value : 1, 10) || 1;
     const budget = parseFloat(budgetEl.value) || 0;
     const acc = accEl ? accEl.value : getSettings().current_accounts[0];
     const cat = catEl ? catEl.value : 'Birthday';
@@ -3372,10 +3484,17 @@ window.budgetApp = {
       return;
     }
 
+    if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+      const occ = getOccasionDate({ date_rule: rule }, appState.currentYear);
+      month = occ.month;
+      day = occ.day;
+    }
+
     const newBday = {
       name,
       month,
       day,
+      date_rule: rule,
       budget_amount: budget,
       account: acc,
       category: cat,
@@ -3391,7 +3510,13 @@ window.budgetApp = {
         const yData = appState.data.years[y];
         if (!yData.birthdays) yData.birthdays = [];
         if (!yData.birthdays.some(b => b.name === name)) {
-          yData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+          const yBday = JSON.parse(JSON.stringify(newBday));
+          if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+            const occY = getOccasionDate(yBday, y);
+            yBday.month = occY.month;
+            yBday.day = occY.day;
+          }
+          yData.birthdays.push(yBday);
         }
       });
     }
@@ -3403,6 +3528,7 @@ window.budgetApp = {
   },
 
   async confirmEditBirthday(bIdx) {
+    const ruleEl = document.getElementById('bday-rule');
     const nameEl = document.getElementById('bday-name');
     const monthEl = document.getElementById('bday-month');
     const dayEl = document.getElementById('bday-day');
@@ -3414,9 +3540,17 @@ window.budgetApp = {
     const b = birthdays[bIdx];
     if (b) {
       const oldName = b.name;
+      const rule = ruleEl ? ruleEl.value : (b.date_rule || 'fixed');
       b.name = nameEl.value.trim() || b.name;
-      if (monthEl) b.month = monthEl.value;
-      if (dayEl) b.day = parseInt(dayEl.value, 10) || 1;
+      b.date_rule = rule;
+      if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+        const occ = getOccasionDate(b, appState.currentYear);
+        b.month = occ.month;
+        b.day = occ.day;
+      } else {
+        if (monthEl) b.month = monthEl.value;
+        if (dayEl) b.day = parseInt(dayEl.value, 10) || 1;
+      }
       if (budgetEl) b.budget_amount = parseFloat(budgetEl.value) || 0;
       if (accEl) b.account = accEl.value;
 
@@ -3425,6 +3559,7 @@ window.budgetApp = {
         const mb = cfg.birthdays.find(item => item.name === oldName) || cfg.birthdays[bIdx];
         if (mb) {
           mb.name = b.name;
+          mb.date_rule = b.date_rule;
           mb.month = b.month;
           mb.day = b.day;
           mb.budget_amount = b.budget_amount;
@@ -3438,8 +3573,15 @@ window.budgetApp = {
             const yB = yData.birthdays.find(item => item.name === oldName);
             if (yB) {
               yB.name = b.name;
-              yB.month = b.month;
-              yB.day = b.day;
+              yB.date_rule = b.date_rule;
+              if (b.date_rule && b.date_rule !== 'fixed' && typeof getOccasionDate === 'function') {
+                const occY = getOccasionDate(yB, y);
+                yB.month = occY.month;
+                yB.day = occY.day;
+              } else {
+                yB.month = b.month;
+                yB.day = b.day;
+              }
               yB.budget_amount = b.budget_amount;
               yB.account = b.account;
             }
@@ -4882,6 +5024,7 @@ window.budgetApp = {
       // Birthday or Occasion
       const bdayMode = document.querySelector('input[name="conv-bday-mode"]:checked')?.value || 'new';
       if (bdayMode === 'new') {
+        const ruleEl = document.getElementById('conv-bday-rule');
         const nameEl = document.getElementById('conv-bday-name');
         const monthEl = document.getElementById('conv-bday-month');
         const dayEl = document.getElementById('conv-bday-day');
@@ -4890,8 +5033,9 @@ window.budgetApp = {
         const catEl = document.getElementById('conv-bday-cat');
 
         const name = nameEl ? nameEl.value.trim() : '';
-        const month = monthEl ? monthEl.value : srcMonth;
-        const day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
+        const rule = ruleEl ? ruleEl.value : 'fixed';
+        let month = monthEl ? monthEl.value : srcMonth;
+        let day = dayEl ? (parseInt(dayEl.value, 10) || 1) : 1;
         const budget = parseFloat(budgetEl ? budgetEl.value : 0) || 0;
         const acc = accEl ? accEl.value : cfg.current_accounts[0];
         const cat = catEl ? catEl.value : 'Birthday';
@@ -4901,10 +5045,17 @@ window.budgetApp = {
           return;
         }
 
+        if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+          const occ = getOccasionDate({ date_rule: rule }, appState.currentYear);
+          month = occ.month;
+          day = occ.day;
+        }
+
         const newBday = {
           name,
           month,
           day,
+          date_rule: rule,
           budget_amount: budget,
           account: acc,
           category: cat,
@@ -4919,7 +5070,13 @@ window.budgetApp = {
             const yrData = appState.data.years[y];
             if (!yrData.birthdays) yrData.birthdays = [];
             if (!yrData.birthdays.some(b => b.name === name)) {
-              yrData.birthdays.push(JSON.parse(JSON.stringify(newBday)));
+              const yBday = JSON.parse(JSON.stringify(newBday));
+              if (rule !== 'fixed' && typeof getOccasionDate === 'function') {
+                const occY = getOccasionDate(yBday, y);
+                yBday.month = occY.month;
+                yBday.day = occY.day;
+              }
+              yrData.birthdays.push(yBday);
             }
           });
         }
