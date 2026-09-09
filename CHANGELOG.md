@@ -5,6 +5,20 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.18] - 2026-09-09
+
+### Fixed
+- **🎄 Annual Recurring Payments across Payday Budget Boundaries**:
+  - Resolved an issue where annual recurring payments falling near holiday payday boundary shifts (such as Christmas payments on Dec 24/25 belonging to January budget Week 1) were excluded because of nominal month name checks.
+  - Updated `isRecurringDueInMonth` and weekly calculation methods (`getDDsForWeek`, `getIncomesForWeek`, `calculateMonthForecast`) to evaluate actual payment dates across candidate boundary years (`startY - 1` through `endY + 1`).
+- **🔄 Multi-Item Composite Key Integrity & Deduplication**:
+  - Fixed an issue where multiple recurring bills sharing the same description and month (e.g. two separate "Christmas Extra" payments on Dec 17 and Dec 24) collided due to checking only `desc` and `month`.
+  - Replaced blind array-index cross-year updating in `editFullScheduledBill` and `deleteUnifiedScheduledBill` with composite key matching `(desc, month, due_day)`, preventing edits from altering unrelated bills.
+  - Added occurrence deduplication in `getDDsForWeek` and `getIncomesForWeek` to guard against duplicate entries on identical dates.
+  - Added automated state reconciliation on load (`reconcileYearlyRecurringCommitments`) to heal existing data, clean up duplicate items, and remove accidental monthly direct debits duplicating annual bills.
+
+---
+
 ## [0.3.17] - 2026-09-09
 
 ### Fixed

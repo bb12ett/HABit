@@ -312,7 +312,7 @@ export function getDDsForWeek(directDebits, weekObj, monthSchedule) {
     if (dd.exact_date) {
       const targetDate = new Date(dd.exact_date.includes('T') ? dd.exact_date : dd.exact_date + 'T12:00:00');
       const payTime = targetDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
       if (isDueThisWeek) {
         result.push({
           ...dd,
@@ -330,18 +330,43 @@ export function getDDsForWeek(directDebits, weekObj, monthSchedule) {
       }
       if (targetMIdx === -1) targetMIdx = primaryMonthIdx;
       
-      const targetDate = new Date(primaryYear, targetMIdx, dueDay);
-      const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
-      const payTime = actualPaymentDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
-      if (isDueThisWeek) {
-        result.push({
-          ...dd,
-          is_income: false,
-          actualPaymentDate: actualPaymentDate,
-          actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-          isDueThisWeek: true
-        });
+      const startY = schedStart.getFullYear();
+      const endY = schedEnd.getFullYear();
+      const candidateYears = new Set([primaryYear, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const targetDate = new Date(candY, targetMIdx, dueDay);
+        const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
+        const payTime = actualPaymentDate.getTime();
+
+        if (dd.start_date) {
+          const sDate = new Date(dd.start_date.includes('T') ? dd.start_date : dd.start_date + 'T00:00:00');
+          if (actualPaymentDate < sDate) continue;
+        }
+        if (dd.end_date) {
+          const eDate = new Date(dd.end_date.includes('T') ? dd.end_date : dd.end_date + 'T23:59:59');
+          if (actualPaymentDate > eDate) continue;
+        }
+
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
+        if (isDueThisWeek) {
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (dd.desc || dd.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(dd.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...dd,
+              is_income: false,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
+          break;
+        }
       }
     } else {
       const dueDay = parseInt(dd.due_day || 1, 10);
@@ -349,15 +374,23 @@ export function getDDsForWeek(directDebits, weekObj, monthSchedule) {
       candidateDates.forEach(targetDate => {
         const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
         const payTime = actualPaymentDate.getTime();
-        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
         if (isDueThisWeek) {
-          result.push({
-            ...dd,
-            is_income: false,
-            actualPaymentDate: actualPaymentDate,
-            actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-            isDueThisWeek: true
-          });
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (dd.desc || dd.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(dd.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...dd,
+              is_income: false,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
         }
       });
     }
@@ -382,7 +415,7 @@ export function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = app
     if (pi.exact_date) {
       const targetDate = new Date(pi.exact_date.includes('T') ? pi.exact_date : pi.exact_date + 'T12:00:00');
       const payTime = targetDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
       if (isDueThisWeek) {
         result.push({
           ...pi,
@@ -400,18 +433,43 @@ export function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = app
       }
       if (targetMIdx === -1) targetMIdx = primaryMonthIdx;
       
-      const targetDate = new Date(primaryYear, targetMIdx, dueDay);
-      const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
-      const payTime = actualPaymentDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
-      if (isDueThisWeek) {
-        result.push({
-          ...pi,
-          is_income: true,
-          actualPaymentDate: actualPaymentDate,
-          actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-          isDueThisWeek: true
-        });
+      const startY = schedStart.getFullYear();
+      const endY = schedEnd.getFullYear();
+      const candidateYears = new Set([primaryYear, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const targetDate = new Date(candY, targetMIdx, dueDay);
+        const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
+        const payTime = actualPaymentDate.getTime();
+
+        if (pi.start_date) {
+          const sDate = new Date(pi.start_date.includes('T') ? pi.start_date : pi.start_date + 'T00:00:00');
+          if (actualPaymentDate < sDate) continue;
+        }
+        if (pi.end_date) {
+          const eDate = new Date(pi.end_date.includes('T') ? pi.end_date : pi.end_date + 'T23:59:59');
+          if (actualPaymentDate > eDate) continue;
+        }
+
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
+        if (isDueThisWeek) {
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (pi.desc || pi.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(pi.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...pi,
+              is_income: true,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
+          break;
+        }
       }
     } else {
       const dueDay = parseInt(pi.due_day || 1, 10);
@@ -419,15 +477,23 @@ export function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = app
       candidateDates.forEach(targetDate => {
         const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
         const payTime = actualPaymentDate.getTime();
-        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
         if (isDueThisWeek) {
-          result.push({
-            ...pi,
-            is_income: true,
-            actualPaymentDate: actualPaymentDate,
-            actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-            isDueThisWeek: true
-          });
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (pi.desc || pi.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(pi.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...pi,
+              is_income: true,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
         }
       });
     }
@@ -533,11 +599,50 @@ export function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
 
 export function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   if (!r) return false;
-  if (r.frequency === 'monthly') return true;
-  if (r.frequency === 'yearly') return r.month === mName;
+  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
   const mIdx = months.indexOf(mName);
   if (mIdx === -1) return false;
   const sched = calculateMonthSchedule(year, mIdx);
+  if (!sched || !sched.startDate || !sched.endDate) return false;
+
+  const startMs = sched.startDate.getTime();
+  const endMs = sched.endDate.getTime();
+
+  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income') {
+    let targetMIdx = r.month ? months.indexOf(r.month) : (r.start_date ? new Date(r.start_date).getMonth() : 0);
+    if (targetMIdx === -1) {
+      targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
+    }
+    if (targetMIdx === -1) targetMIdx = 0;
+
+    const dueDay = parseInt(r.due_day || r.day_of_month || 1, 10);
+    const holidayRule = r.holiday_rule || (r.is_income ? 'previous' : 'following');
+
+    const startY = sched.startDate.getFullYear();
+    const endY = sched.endDate.getFullYear();
+    const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+    for (const candY of candidateYears) {
+      const candDate = new Date(candY, targetMIdx, dueDay);
+      const adjDate = getAdjustedWorkingDay(candDate, holidayRule);
+      const pTime = adjDate.getTime();
+
+      if (r.start_date) {
+        const sDate = new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00');
+        if (adjDate < sDate) continue;
+      }
+      if (r.end_date) {
+        const eDate = new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59');
+        if (adjDate > eDate) continue;
+      }
+
+      if (pTime >= startMs && pTime <= endMs) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   for (const w of sched.weeks) {
     const occs = getRecurringForWeek([r], w, sched, year);
     if (occs && occs.length > 0) return true;
@@ -608,6 +713,36 @@ export function formatScheduledBillDue(b, contextMonth = null, year = appState.c
     return contextMonth ? `Day ${b.due_day || 1}` : `Day ${b.due_day || 1} each month`;
   }
   if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
+    if (contextMonth) {
+      const mIdx = months.indexOf(contextMonth);
+      if (mIdx >= 0) {
+        const sched = calculateMonthSchedule(year, mIdx);
+        if (sched && sched.startDate && sched.endDate) {
+          const startMs = sched.startDate.getTime();
+          const endMs = sched.endDate.getTime();
+          let targetMIdx = b.month ? months.indexOf(b.month) : 0;
+          if (targetMIdx === -1) {
+            targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month || '').toLowerCase().substring(0, 3)));
+          }
+          if (targetMIdx === -1) targetMIdx = 0;
+
+          const dueDay = parseInt(b.due_day || b.day_of_month || 1, 10);
+          const holidayRule = b.holiday_rule || (b.is_income ? 'previous' : 'following');
+          const startY = sched.startDate.getFullYear();
+          const endY = sched.endDate.getFullYear();
+          const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+          for (const candY of candidateYears) {
+            const candDate = new Date(candY, targetMIdx, dueDay);
+            const adjDate = getAdjustedWorkingDay(candDate, holidayRule);
+            const pTime = adjDate.getTime();
+            if (pTime >= startMs && pTime <= endMs) {
+              return `${adjDate.getDate()} ${months[adjDate.getMonth()]}`;
+            }
+          }
+        }
+      }
+    }
     return `${b.due_day || 1} ${b.month || 'Jan'}`;
   }
 
@@ -686,26 +821,52 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
   const startMs = new Date(schedule.startDate.getFullYear(), schedule.startDate.getMonth(), schedule.startDate.getDate(), 0, 0, 0).getTime();
   const endMs = new Date(schedule.endDate.getFullYear(), schedule.endDate.getMonth(), schedule.endDate.getDate(), 23, 59, 59).getTime();
 
-  const yearlyBillsThisMonth = (yData.yearly_recurring || []).filter(yb => {
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+  const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+    const k = `${b.desc || b.name}_${b.month || ''}_${b.due_day || ''}`;
+    if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
+  });
+
+  const yearlyBillsThisMonth = allYearlyBills.filter(yb => {
     const dueDay = parseInt(yb.due_day || 1, 10);
     let targetMIdx = months.indexOf(yb.month);
     if (targetMIdx === -1) targetMIdx = months.findIndex(m => m.toLowerCase().startsWith((yb.month || '').toLowerCase().substring(0, 3)));
     if (targetMIdx === -1) return false;
-    const targetDate = new Date(year, targetMIdx, dueDay);
-    const actualPaymentDate = getAdjustedWorkingDay(targetDate, yb.holiday_rule || 'following');
-    const pTime = actualPaymentDate.getTime();
-    return pTime >= startMs && pTime <= endMs;
+
+    for (const candY of candidateYears) {
+      const targetDate = new Date(candY, targetMIdx, dueDay);
+      const actualPaymentDate = getAdjustedWorkingDay(targetDate, yb.holiday_rule || 'following');
+      const pTime = actualPaymentDate.getTime();
+      if (pTime >= startMs && pTime <= endMs) return true;
+    }
+    return false;
   });
 
-  const yearlyIncomeThisMonth = (yData.yearly_income || []).filter(yi => {
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+    const k = `${i.desc || i.name}_${i.month || ''}_${i.due_day || ''}`;
+    if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
+  });
+
+  const yearlyIncomeThisMonth = allYearlyIncome.filter(yi => {
     const dueDay = parseInt(yi.due_day || 1, 10);
     let targetMIdx = months.indexOf(yi.month);
     if (targetMIdx === -1) targetMIdx = months.findIndex(m => m.toLowerCase().startsWith((yi.month || '').toLowerCase().substring(0, 3)));
     if (targetMIdx === -1) return false;
-    const targetDate = new Date(year, targetMIdx, dueDay);
-    const actualPaymentDate = getAdjustedWorkingDay(targetDate, yi.holiday_rule || 'previous');
-    const pTime = actualPaymentDate.getTime();
-    return pTime >= startMs && pTime <= endMs;
+
+    for (const candY of candidateYears) {
+      const targetDate = new Date(candY, targetMIdx, dueDay);
+      const actualPaymentDate = getAdjustedWorkingDay(targetDate, yi.holiday_rule || 'previous');
+      const pTime = actualPaymentDate.getTime();
+      if (pTime >= startMs && pTime <= endMs) return true;
+    }
+    return false;
   });
 
   const birthdaysThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(mName, mIdx, year) : [];
@@ -1054,6 +1215,8 @@ if (typeof window !== 'undefined') {
   window.getBirthdaysForWeek = getBirthdaysForWeek;
   window.getBirthdayOccasionsForWeek = getBirthdayOccasionsForWeek;
   window.getRecurringForWeek = getRecurringForWeek;
+  window.isRecurringDueInMonth = isRecurringDueInMonth;
+  window.formatScheduledBillDue = formatScheduledBillDue;
 }
 
 
@@ -1485,17 +1648,28 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
       const stepMonths = freq === 'monthly' ? 1 : (freq === 'quarterly' ? 3 : intervalN);
       const dueDay = parseInt(r.day_of_month || startDate.getDate() || 1, 10);
       
-      // Test month of week start and week end
-      const testMonths = [weekObj.startDate.getMonth(), weekObj.endDate.getMonth()];
-      const uniqueMonths = [...new Set(testMonths)];
+      // Test month and year of week start and week end
+      const testCandidates = [
+        { m: weekObj.startDate.getMonth(), y: weekObj.startDate.getFullYear() },
+        { m: weekObj.endDate.getMonth(), y: weekObj.endDate.getFullYear() }
+      ];
+      const uniqueCandidates = [];
+      const seenYM = new Set();
+      testCandidates.forEach(c => {
+        const k = `${c.y}_${c.m}`;
+        if (!seenYM.has(k)) {
+          seenYM.add(k);
+          uniqueCandidates.push(c);
+        }
+      });
 
-      uniqueMonths.forEach(m => {
-        const testDate = new Date(year, m, dueDay);
+      uniqueCandidates.forEach(cand => {
+        const testDate = new Date(cand.y, cand.m, dueDay);
         const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
         const payTime = actualPayDate.getTime();
 
         if (payTime >= wStartTime && payTime <= wEndTime) {
-          const diffMonths = (year - startDate.getFullYear()) * 12 + (m - startDate.getMonth());
+          const diffMonths = (cand.y - startDate.getFullYear()) * 12 + (cand.m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
             const occIso = actualPayDate.toISOString().slice(0, 10);
             const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
@@ -1522,34 +1696,46 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
         }
       });
     } else if (freq === 'yearly') {
-      const dueMonth = r.month ? months.indexOf(r.month) : startDate.getMonth();
-      const dueDay = parseInt(r.day_of_month || startDate.getDate() || 1, 10);
-      const testDate = new Date(year, dueMonth, dueDay);
-      const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
-      const payTime = actualPayDate.getTime();
+      let dueMonth = r.month ? months.indexOf(r.month) : startDate.getMonth();
+      if (dueMonth === -1) {
+        dueMonth = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
+      }
+      if (dueMonth === -1) dueMonth = 0;
 
-      if (payTime >= wStartTime && payTime <= wEndTime) {
-        const occIso = actualPayDate.toISOString().slice(0, 10);
-        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
-        occurrences.push({
-          ...r,
-          isRecurring: true,
-          isMovable: true,
-          is_income: isIncome,
-          source_type: r.source_type || (isIncome ? 'yearly_income' : 'recurring_payment'),
-          source_idx: rIdx,
-          rawDesc: r.desc,
-          desc: isIncome ? `📥 ${r.desc}` : `🔄 ${r.desc}`,
-          amount,
-          account: r.account,
-          holiday_rule: holidayRule,
-          actualPaymentDate: actualPayDate,
-          actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
-          occurrenceDate: actualPayDate,
-          status: isOccCleared ? 'paid' : 'due',
-          auto_cleared: isOccCleared,
-          manually_cleared: Boolean(r.manually_cleared)
-        });
+      const dueDay = parseInt(r.day_of_month || r.due_day || startDate.getDate() || 1, 10);
+      const startY = weekObj.startDate.getFullYear();
+      const endY = weekObj.endDate.getFullYear();
+      const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const testDate = new Date(candY, dueMonth, dueDay);
+        const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
+        const payTime = actualPayDate.getTime();
+
+        if (payTime >= wStartTime && payTime <= wEndTime) {
+          const occIso = actualPayDate.toISOString().slice(0, 10);
+          const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+          occurrences.push({
+            ...r,
+            isRecurring: true,
+            isMovable: true,
+            is_income: isIncome,
+            source_type: r.source_type || (isIncome ? 'yearly_income' : 'recurring_payment'),
+            source_idx: rIdx,
+            rawDesc: r.desc,
+            desc: isIncome ? `📥 ${r.desc}` : `🔄 ${r.desc}`,
+            amount,
+            account: r.account,
+            holiday_rule: holidayRule,
+            actualPaymentDate: actualPayDate,
+            actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
+            occurrenceDate: actualPayDate,
+            status: isOccCleared ? 'paid' : 'due',
+            auto_cleared: isOccCleared,
+            manually_cleared: Boolean(r.manually_cleared)
+          });
+          break;
+        }
       }
     }
   });
@@ -2338,21 +2524,38 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
   (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
   const yData = getYearData(year);
-  const allYearlyBills = yData.yearly_recurring || [];
-  const allYearlyIncome = yData.yearly_income || [];
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+    const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
+    if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
+  });
+
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+    const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
+    if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
+  });
+
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(targetMonth, mIdx, year) : [];
   const allBirthdays = yData.birthdays || cfg.birthdays || [];
   const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
   const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
 
-  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => yb.month === targetMonth).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => totalDD += (Number(yb.amount) || 0));
   budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
   birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
 
-  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => yi.month === targetMonth).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
 
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -2435,8 +2638,10 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
       else wExpenseSum += amt;
     });
 
-    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
-    const yearlyBillsWithMeta = (yData.yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const directDebitsWithMeta = (mData.direct_debits || [])
+      .filter(b => !activeYearlyDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = allYearlyBills.map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
     const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
@@ -2447,8 +2652,10 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
     const wDDs = [...baseDDs, ...wRecurring, ...wBirthdays];
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
-    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
-    const yearlyIncomesWithMeta = (yData.yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const directIncomesWithMeta = (mData.payments_in || [])
+      .filter(b => !activeYearlyIncomeDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, year);
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, year) : [];

@@ -57,21 +57,55 @@ export function renderOverviewView(container) {
 
   cfg.people.forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
-  const allYearlyBills = getYearData().yearly_recurring || [];
-  const allYearlyIncome = getYearData().yearly_income || [];
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [
+    ...(getYearData(currentYear)?.yearly_recurring || []),
+    ...(getYearData(startY)?.yearly_recurring || []),
+    ...(getYearData(endY)?.yearly_recurring || []),
+    ...(cfg.default_yearly_recurring || [])
+  ].forEach(b => {
+    const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
+    if (!seenYBK.has(k)) {
+      seenYBK.add(k);
+      allYearlyBills.push(b);
+    }
+  });
+
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [
+    ...(getYearData(currentYear)?.yearly_income || []),
+    ...(getYearData(startY)?.yearly_income || []),
+    ...(getYearData(endY)?.yearly_income || []),
+    ...(cfg.default_yearly_income || [])
+  ].forEach(i => {
+    const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
+    if (!seenYIK.has(k)) {
+      seenYIK.add(k);
+      allYearlyIncome.push(i);
+    }
+  });
+
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-  const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
-  const allRecurring = getYearData().recurring_payments || cfg.recurring_payments || [];
-  const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
+  const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
+  const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
 
-  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => yb.month === activeTab).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
   budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
   birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
 
-  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => yi.month === activeTab).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
   
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -154,14 +188,16 @@ export function renderOverviewView(container) {
       else wExpenseSum += amt;
     });
 
-    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
-    const yearlyBillsWithMeta = (getYearData().yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const directDebitsWithMeta = (mData.direct_debits || [])
+      .filter(b => !activeYearlyDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = allYearlyBills.map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
     const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
-    const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
-    const allRecurring = getYearData().recurring_payments || cfg.recurring_payments || [];
+    const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
+    const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
     const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, currentYear) : [];
     const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, currentYear) : [];
     
@@ -169,11 +205,13 @@ export function renderOverviewView(container) {
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
     // Scheduled Payments In / Inflows
-    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
-    const yearlyIncomesWithMeta = (getYearData().yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const directIncomesWithMeta = (mData.payments_in || [])
+      .filter(b => !activeYearlyIncomeDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
-    const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
+    const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
     const wIncomes = [...baseIncomes, ...wRecurringIncomes];
     const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -1309,7 +1347,9 @@ export function renderOverviewView(container) {
             <tbody>
               ${getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
                 if (b.frequency === 'monthly') return true;
-                if (b.frequency === 'yearly') return b.month === activeTab;
+                if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
+                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                }
                 if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
                   return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
                 }

@@ -715,9 +715,30 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
 
   const list = [];
 
-  // 1. Monthly Direct Debits for this month
+  // 1. Annual Recurring Bills
+  const yrCombined = [];
+  const seenYR = new Set();
+  const yrSources = [
+    ...(yData.yearly_recurring || []),
+    ...((mName === 'Jan' && appState.data?.years?.[String(year - 1)]?.yearly_recurring) || []),
+    ...((mName === 'Dec' && appState.data?.years?.[String(year + 1)]?.yearly_recurring) || []),
+    ...(cfg.default_yearly_recurring || [])
+  ];
+  yrSources.forEach((yb, idx) => {
+    const k = `${(yb.desc || yb.name || '').trim().toLowerCase()}_${(yb.month || '').trim().toLowerCase()}_${parseInt(yb.due_day || 1, 10)}`;
+    if (!seenYR.has(k)) {
+      seenYR.add(k);
+      yrCombined.push({ ...yb, origIdx: idx });
+    }
+  });
+
+  const activeYearlyDescs = new Set(yrCombined.map(yb => (yb.desc || yb.name || '').trim().toLowerCase()));
+
+  // 2. Monthly Direct Debits for this month (excluding any that duplicate an active yearly bill)
   (md.direct_debits || []).forEach((dd, idx) => {
     if (!isItemActiveInMonth(dd, mName, year)) return;
+    const dDesc = (dd.desc || dd.name || '').trim().toLowerCase();
+    if (activeYearlyDescs.has(dDesc)) return;
     list.push({
       ...dd,
       is_income: false,
@@ -730,14 +751,13 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
     });
   });
 
-  // 2. Annual Recurring Bills
-  (yData.yearly_recurring || []).forEach((yb, idx) => {
+  yrCombined.forEach((yb) => {
     if (!isItemActiveInMonth(yb, mName, year)) return;
     list.push({
       ...yb,
       is_income: false,
       source_type: 'yearly_recurring',
-      source_idx: idx,
+      source_idx: yb.origIdx !== undefined ? yb.origIdx : 0,
       frequency: 'yearly',
       account: yb.account || cfg.current_accounts[0],
       transfer_to: yb.transfer_to || 'none',
@@ -770,9 +790,30 @@ export function getAllScheduledIncomes(mName, year = appState.currentYear) {
 
   const list = [];
 
-  // 1. Monthly Payments In for this month
+  // 1. Annual Recurring Income
+  const yiCombined = [];
+  const seenYI = new Set();
+  const yiSources = [
+    ...(yData.yearly_income || []),
+    ...((mName === 'Jan' && appState.data?.years?.[String(year - 1)]?.yearly_income) || []),
+    ...((mName === 'Dec' && appState.data?.years?.[String(year + 1)]?.yearly_income) || []),
+    ...(cfg.default_yearly_income || [])
+  ];
+  yiSources.forEach((yi, idx) => {
+    const k = `${(yi.desc || yi.name || '').trim().toLowerCase()}_${(yi.month || '').trim().toLowerCase()}_${parseInt(yi.due_day || 1, 10)}`;
+    if (!seenYI.has(k)) {
+      seenYI.add(k);
+      yiCombined.push({ ...yi, origIdx: idx });
+    }
+  });
+
+  const activeYearlyIncomeDescs = new Set(yiCombined.map(yi => (yi.desc || yi.name || '').trim().toLowerCase()));
+
+  // 2. Monthly Payments In for this month (excluding any that duplicate an active yearly income)
   (md.payments_in || []).forEach((pi, idx) => {
     if (!isItemActiveInMonth(pi, mName, year)) return;
+    const pDesc = (pi.desc || pi.name || '').trim().toLowerCase();
+    if (activeYearlyIncomeDescs.has(pDesc)) return;
     list.push({
       ...pi,
       is_income: true,
@@ -784,14 +825,13 @@ export function getAllScheduledIncomes(mName, year = appState.currentYear) {
     });
   });
 
-  // 2. Annual Recurring Income
-  (yData.yearly_income || []).forEach((yi, idx) => {
+  yiCombined.forEach((yi) => {
     if (!isItemActiveInMonth(yi, mName, year)) return;
     list.push({
       ...yi,
       is_income: true,
       source_type: 'yearly_income',
-      source_idx: idx,
+      source_idx: yi.origIdx !== undefined ? yi.origIdx : 0,
       frequency: 'yearly',
       account: yi.account || cfg.current_accounts[0],
       holiday_rule: yi.holiday_rule || 'previous'
@@ -911,6 +951,97 @@ export function getMasterScheduledCommitments() {
   return { allBills, allIncomes, allItems: [...allBills, ...allIncomes], curPeriod };
 }
 
+export function reconcileYearlyRecurringCommitments(data = appState.data) {
+  if (!data) return;
+  const cfg = data.settings || {};
+  if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+
+  // 1. Specific healing for "Christmas Extra"
+  const hasChristmasExtra = cfg.default_yearly_recurring.some(yr => (yr.desc || '').toLowerCase().includes('christmas extra')) ||
+    Object.values(data.years || {}).some(yd => (yd.yearly_recurring || []).some(yr => (yr.desc || '').toLowerCase().includes('christmas extra')));
+
+  if (hasChristmasExtra) {
+    let acc = 'Credit Card';
+    let amt17 = 70;
+    let amt24 = 70;
+    let foundAcc = null;
+
+    const scanList = [
+      ...(cfg.default_yearly_recurring || []),
+      ...Object.values(data.years || {}).flatMap(yd => yd.yearly_recurring || [])
+    ];
+    scanList.forEach(yr => {
+      if ((yr.desc || '').toLowerCase().includes('christmas extra')) {
+        if (yr.account) foundAcc = yr.account;
+        const due = parseInt(yr.due_day, 10);
+        if (due === 17 && yr.amount) amt17 = Number(yr.amount);
+        if ((due === 24 || due === 25) && yr.amount) amt24 = Number(yr.amount);
+      }
+    });
+    if (foundAcc) acc = foundAcc;
+
+    const targetChristmasExtra = [
+      { desc: 'Christmas Extra', month: 'Dec', due_day: 17, amount: amt17, account: acc, holiday_rule: 'previous' },
+      { desc: 'Christmas Extra', month: 'Dec', due_day: 24, amount: amt24, account: acc, holiday_rule: 'previous' }
+    ];
+
+    const sanitizeYR = (arr) => {
+      const filtered = (arr || []).filter(yr => !(yr.desc || '').toLowerCase().includes('christmas extra'));
+      filtered.push({ ...targetChristmasExtra[0] });
+      filtered.push({ ...targetChristmasExtra[1] });
+      return filtered;
+    };
+
+    cfg.default_yearly_recurring = sanitizeYR(cfg.default_yearly_recurring);
+
+    if (data.years) {
+      Object.keys(data.years).forEach(yStr => {
+        const yd = data.years[yStr];
+        if (!yd.yearly_recurring) yd.yearly_recurring = [];
+        yd.yearly_recurring = sanitizeYR(yd.yearly_recurring);
+
+        if (yd.months) {
+          Object.keys(yd.months).forEach(mStr => {
+            const md = yd.months[mStr];
+            if (md && md.direct_debits) {
+              md.direct_debits = md.direct_debits.filter(dd => {
+                const dDesc = (dd.desc || dd.name || '').toLowerCase();
+                return !dDesc.includes('christmas extra');
+              });
+            }
+          });
+        }
+      });
+    }
+  }
+
+  // 2. General deduplication for yearly_recurring across all years & default
+  const dedupeYR = (arr) => {
+    const seen = new Set();
+    const result = [];
+    (arr || []).forEach(yr => {
+      const k = `${(yr.desc || yr.name || '').trim().toLowerCase()}_${(yr.month || '').trim().toLowerCase()}_${parseInt(yr.due_day || 1, 10)}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        result.push(yr);
+      }
+    });
+    return result;
+  };
+
+  if (cfg.default_yearly_recurring) {
+    cfg.default_yearly_recurring = dedupeYR(cfg.default_yearly_recurring);
+  }
+  if (data.years) {
+    Object.keys(data.years).forEach(yStr => {
+      const yd = data.years[yStr];
+      if (yd.yearly_recurring) {
+        yd.yearly_recurring = dedupeYR(yd.yearly_recurring);
+      }
+    });
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.getRecurringIncomes = getRecurringIncomes;
   window.isItemActiveInMonth = isItemActiveInMonth;
@@ -919,5 +1050,7 @@ if (typeof window !== 'undefined') {
   window.getAllScheduledItems = getAllScheduledItems;
   window.getMasterScheduledCommitments = getMasterScheduledCommitments;
   window.getMasterYearlyBudgets = getMasterYearlyBudgets;
+  window.reconcileYearlyRecurringCommitments = reconcileYearlyRecurringCommitments;
 }
+
 

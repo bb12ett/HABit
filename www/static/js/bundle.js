@@ -718,9 +718,30 @@ function getAllScheduledBills(mName, year = appState.currentYear) {
 
   const list = [];
 
-  // 1. Monthly Direct Debits for this month
+  // 1. Annual Recurring Bills
+  const yrCombined = [];
+  const seenYR = new Set();
+  const yrSources = [
+    ...(yData.yearly_recurring || []),
+    ...((mName === 'Jan' && appState.data?.years?.[String(year - 1)]?.yearly_recurring) || []),
+    ...((mName === 'Dec' && appState.data?.years?.[String(year + 1)]?.yearly_recurring) || []),
+    ...(cfg.default_yearly_recurring || [])
+  ];
+  yrSources.forEach((yb, idx) => {
+    const k = `${(yb.desc || yb.name || '').trim().toLowerCase()}_${(yb.month || '').trim().toLowerCase()}_${parseInt(yb.due_day || 1, 10)}`;
+    if (!seenYR.has(k)) {
+      seenYR.add(k);
+      yrCombined.push({ ...yb, origIdx: idx });
+    }
+  });
+
+  const activeYearlyDescs = new Set(yrCombined.map(yb => (yb.desc || yb.name || '').trim().toLowerCase()));
+
+  // 2. Monthly Direct Debits for this month (excluding any that duplicate an active yearly bill)
   (md.direct_debits || []).forEach((dd, idx) => {
     if (!isItemActiveInMonth(dd, mName, year)) return;
+    const dDesc = (dd.desc || dd.name || '').trim().toLowerCase();
+    if (activeYearlyDescs.has(dDesc)) return;
     list.push({
       ...dd,
       is_income: false,
@@ -733,14 +754,13 @@ function getAllScheduledBills(mName, year = appState.currentYear) {
     });
   });
 
-  // 2. Annual Recurring Bills
-  (yData.yearly_recurring || []).forEach((yb, idx) => {
+  yrCombined.forEach((yb) => {
     if (!isItemActiveInMonth(yb, mName, year)) return;
     list.push({
       ...yb,
       is_income: false,
       source_type: 'yearly_recurring',
-      source_idx: idx,
+      source_idx: yb.origIdx !== undefined ? yb.origIdx : 0,
       frequency: 'yearly',
       account: yb.account || cfg.current_accounts[0],
       transfer_to: yb.transfer_to || 'none',
@@ -773,9 +793,30 @@ function getAllScheduledIncomes(mName, year = appState.currentYear) {
 
   const list = [];
 
-  // 1. Monthly Payments In for this month
+  // 1. Annual Recurring Income
+  const yiCombined = [];
+  const seenYI = new Set();
+  const yiSources = [
+    ...(yData.yearly_income || []),
+    ...((mName === 'Jan' && appState.data?.years?.[String(year - 1)]?.yearly_income) || []),
+    ...((mName === 'Dec' && appState.data?.years?.[String(year + 1)]?.yearly_income) || []),
+    ...(cfg.default_yearly_income || [])
+  ];
+  yiSources.forEach((yi, idx) => {
+    const k = `${(yi.desc || yi.name || '').trim().toLowerCase()}_${(yi.month || '').trim().toLowerCase()}_${parseInt(yi.due_day || 1, 10)}`;
+    if (!seenYI.has(k)) {
+      seenYI.add(k);
+      yiCombined.push({ ...yi, origIdx: idx });
+    }
+  });
+
+  const activeYearlyIncomeDescs = new Set(yiCombined.map(yi => (yi.desc || yi.name || '').trim().toLowerCase()));
+
+  // 2. Monthly Payments In for this month (excluding any that duplicate an active yearly income)
   (md.payments_in || []).forEach((pi, idx) => {
     if (!isItemActiveInMonth(pi, mName, year)) return;
+    const pDesc = (pi.desc || pi.name || '').trim().toLowerCase();
+    if (activeYearlyIncomeDescs.has(pDesc)) return;
     list.push({
       ...pi,
       is_income: true,
@@ -787,14 +828,13 @@ function getAllScheduledIncomes(mName, year = appState.currentYear) {
     });
   });
 
-  // 2. Annual Recurring Income
-  (yData.yearly_income || []).forEach((yi, idx) => {
+  yiCombined.forEach((yi) => {
     if (!isItemActiveInMonth(yi, mName, year)) return;
     list.push({
       ...yi,
       is_income: true,
       source_type: 'yearly_income',
-      source_idx: idx,
+      source_idx: yi.origIdx !== undefined ? yi.origIdx : 0,
       frequency: 'yearly',
       account: yi.account || cfg.current_accounts[0],
       holiday_rule: yi.holiday_rule || 'previous'
@@ -914,6 +954,97 @@ function getMasterScheduledCommitments() {
   return { allBills, allIncomes, allItems: [...allBills, ...allIncomes], curPeriod };
 }
 
+function reconcileYearlyRecurringCommitments(data = appState.data) {
+  if (!data) return;
+  const cfg = data.settings || {};
+  if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+
+  // 1. Specific healing for "Christmas Extra"
+  const hasChristmasExtra = cfg.default_yearly_recurring.some(yr => (yr.desc || '').toLowerCase().includes('christmas extra')) ||
+    Object.values(data.years || {}).some(yd => (yd.yearly_recurring || []).some(yr => (yr.desc || '').toLowerCase().includes('christmas extra')));
+
+  if (hasChristmasExtra) {
+    let acc = 'Credit Card';
+    let amt17 = 70;
+    let amt24 = 70;
+    let foundAcc = null;
+
+    const scanList = [
+      ...(cfg.default_yearly_recurring || []),
+      ...Object.values(data.years || {}).flatMap(yd => yd.yearly_recurring || [])
+    ];
+    scanList.forEach(yr => {
+      if ((yr.desc || '').toLowerCase().includes('christmas extra')) {
+        if (yr.account) foundAcc = yr.account;
+        const due = parseInt(yr.due_day, 10);
+        if (due === 17 && yr.amount) amt17 = Number(yr.amount);
+        if ((due === 24 || due === 25) && yr.amount) amt24 = Number(yr.amount);
+      }
+    });
+    if (foundAcc) acc = foundAcc;
+
+    const targetChristmasExtra = [
+      { desc: 'Christmas Extra', month: 'Dec', due_day: 17, amount: amt17, account: acc, holiday_rule: 'previous' },
+      { desc: 'Christmas Extra', month: 'Dec', due_day: 24, amount: amt24, account: acc, holiday_rule: 'previous' }
+    ];
+
+    const sanitizeYR = (arr) => {
+      const filtered = (arr || []).filter(yr => !(yr.desc || '').toLowerCase().includes('christmas extra'));
+      filtered.push({ ...targetChristmasExtra[0] });
+      filtered.push({ ...targetChristmasExtra[1] });
+      return filtered;
+    };
+
+    cfg.default_yearly_recurring = sanitizeYR(cfg.default_yearly_recurring);
+
+    if (data.years) {
+      Object.keys(data.years).forEach(yStr => {
+        const yd = data.years[yStr];
+        if (!yd.yearly_recurring) yd.yearly_recurring = [];
+        yd.yearly_recurring = sanitizeYR(yd.yearly_recurring);
+
+        if (yd.months) {
+          Object.keys(yd.months).forEach(mStr => {
+            const md = yd.months[mStr];
+            if (md && md.direct_debits) {
+              md.direct_debits = md.direct_debits.filter(dd => {
+                const dDesc = (dd.desc || dd.name || '').toLowerCase();
+                return !dDesc.includes('christmas extra');
+              });
+            }
+          });
+        }
+      });
+    }
+  }
+
+  // 2. General deduplication for yearly_recurring across all years & default
+  const dedupeYR = (arr) => {
+    const seen = new Set();
+    const result = [];
+    (arr || []).forEach(yr => {
+      const k = `${(yr.desc || yr.name || '').trim().toLowerCase()}_${(yr.month || '').trim().toLowerCase()}_${parseInt(yr.due_day || 1, 10)}`;
+      if (!seen.has(k)) {
+        seen.add(k);
+        result.push(yr);
+      }
+    });
+    return result;
+  };
+
+  if (cfg.default_yearly_recurring) {
+    cfg.default_yearly_recurring = dedupeYR(cfg.default_yearly_recurring);
+  }
+  if (data.years) {
+    Object.keys(data.years).forEach(yStr => {
+      const yd = data.years[yStr];
+      if (yd.yearly_recurring) {
+        yd.yearly_recurring = dedupeYR(yd.yearly_recurring);
+      }
+    });
+  }
+}
+
 if (typeof window !== 'undefined') {
   window.getRecurringIncomes = getRecurringIncomes;
   window.isItemActiveInMonth = isItemActiveInMonth;
@@ -922,7 +1053,9 @@ if (typeof window !== 'undefined') {
   window.getAllScheduledItems = getAllScheduledItems;
   window.getMasterScheduledCommitments = getMasterScheduledCommitments;
   window.getMasterYearlyBudgets = getMasterYearlyBudgets;
+  window.reconcileYearlyRecurringCommitments = reconcileYearlyRecurringCommitments;
 }
+
 
 
 // --- static/js/api.js ---
@@ -2514,7 +2647,7 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
     if (dd.exact_date) {
       const targetDate = new Date(dd.exact_date.includes('T') ? dd.exact_date : dd.exact_date + 'T12:00:00');
       const payTime = targetDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
       if (isDueThisWeek) {
         result.push({
           ...dd,
@@ -2532,18 +2665,43 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
       }
       if (targetMIdx === -1) targetMIdx = primaryMonthIdx;
       
-      const targetDate = new Date(primaryYear, targetMIdx, dueDay);
-      const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
-      const payTime = actualPaymentDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
-      if (isDueThisWeek) {
-        result.push({
-          ...dd,
-          is_income: false,
-          actualPaymentDate: actualPaymentDate,
-          actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-          isDueThisWeek: true
-        });
+      const startY = schedStart.getFullYear();
+      const endY = schedEnd.getFullYear();
+      const candidateYears = new Set([primaryYear, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const targetDate = new Date(candY, targetMIdx, dueDay);
+        const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
+        const payTime = actualPaymentDate.getTime();
+
+        if (dd.start_date) {
+          const sDate = new Date(dd.start_date.includes('T') ? dd.start_date : dd.start_date + 'T00:00:00');
+          if (actualPaymentDate < sDate) continue;
+        }
+        if (dd.end_date) {
+          const eDate = new Date(dd.end_date.includes('T') ? dd.end_date : dd.end_date + 'T23:59:59');
+          if (actualPaymentDate > eDate) continue;
+        }
+
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
+        if (isDueThisWeek) {
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (dd.desc || dd.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(dd.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...dd,
+              is_income: false,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
+          break;
+        }
       }
     } else {
       const dueDay = parseInt(dd.due_day || 1, 10);
@@ -2551,15 +2709,23 @@ function getDDsForWeek(directDebits, weekObj, monthSchedule) {
       candidateDates.forEach(targetDate => {
         const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
         const payTime = actualPaymentDate.getTime();
-        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
         if (isDueThisWeek) {
-          result.push({
-            ...dd,
-            is_income: false,
-            actualPaymentDate: actualPaymentDate,
-            actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-            isDueThisWeek: true
-          });
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (dd.desc || dd.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(dd.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...dd,
+              is_income: false,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
         }
       });
     }
@@ -2584,7 +2750,7 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
     if (pi.exact_date) {
       const targetDate = new Date(pi.exact_date.includes('T') ? pi.exact_date : pi.exact_date + 'T12:00:00');
       const payTime = targetDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
       if (isDueThisWeek) {
         result.push({
           ...pi,
@@ -2602,18 +2768,43 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
       }
       if (targetMIdx === -1) targetMIdx = primaryMonthIdx;
       
-      const targetDate = new Date(primaryYear, targetMIdx, dueDay);
-      const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
-      const payTime = actualPaymentDate.getTime();
-      const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
-      if (isDueThisWeek) {
-        result.push({
-          ...pi,
-          is_income: true,
-          actualPaymentDate: actualPaymentDate,
-          actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-          isDueThisWeek: true
-        });
+      const startY = schedStart.getFullYear();
+      const endY = schedEnd.getFullYear();
+      const candidateYears = new Set([primaryYear, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const targetDate = new Date(candY, targetMIdx, dueDay);
+        const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
+        const payTime = actualPaymentDate.getTime();
+
+        if (pi.start_date) {
+          const sDate = new Date(pi.start_date.includes('T') ? pi.start_date : pi.start_date + 'T00:00:00');
+          if (actualPaymentDate < sDate) continue;
+        }
+        if (pi.end_date) {
+          const eDate = new Date(pi.end_date.includes('T') ? pi.end_date : pi.end_date + 'T23:59:59');
+          if (actualPaymentDate > eDate) continue;
+        }
+
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
+        if (isDueThisWeek) {
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (pi.desc || pi.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(pi.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...pi,
+              is_income: true,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
+          break;
+        }
       }
     } else {
       const dueDay = parseInt(pi.due_day || 1, 10);
@@ -2621,15 +2812,23 @@ function getIncomesForWeek(paymentsIn, weekObj, monthSchedule, year = appState.c
       candidateDates.forEach(targetDate => {
         const actualPaymentDate = getAdjustedWorkingDay(targetDate, rule);
         const payTime = actualPaymentDate.getTime();
-        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && targetDate.getTime() <= schedEnd.getTime());
+        const isDueThisWeek = (payTime >= wStartTime && payTime <= wEndTime) || (isLastWeek && payTime >= wStartTime && payTime <= schedEnd.getTime());
         if (isDueThisWeek) {
-          result.push({
-            ...pi,
-            is_income: true,
-            actualPaymentDate: actualPaymentDate,
-            actualDateStr: `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`,
-            isDueThisWeek: true
-          });
+          const actualDateStr = `${actualPaymentDate.getDate()} ${months[actualPaymentDate.getMonth()]}`;
+          const isDup = result.some(r =>
+            (r.desc || r.name) === (pi.desc || pi.name) &&
+            r.actualDateStr === actualDateStr &&
+            Math.abs((Number(r.amount) || 0) - (Number(pi.amount) || 0)) < 0.05
+          );
+          if (!isDup) {
+            result.push({
+              ...pi,
+              is_income: true,
+              actualPaymentDate: actualPaymentDate,
+              actualDateStr: actualDateStr,
+              isDueThisWeek: true
+            });
+          }
         }
       });
     }
@@ -2735,11 +2934,50 @@ function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
 
 function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   if (!r) return false;
-  if (r.frequency === 'monthly') return true;
-  if (r.frequency === 'yearly') return r.month === mName;
+  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
   const mIdx = months.indexOf(mName);
   if (mIdx === -1) return false;
   const sched = calculateMonthSchedule(year, mIdx);
+  if (!sched || !sched.startDate || !sched.endDate) return false;
+
+  const startMs = sched.startDate.getTime();
+  const endMs = sched.endDate.getTime();
+
+  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income') {
+    let targetMIdx = r.month ? months.indexOf(r.month) : (r.start_date ? new Date(r.start_date).getMonth() : 0);
+    if (targetMIdx === -1) {
+      targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
+    }
+    if (targetMIdx === -1) targetMIdx = 0;
+
+    const dueDay = parseInt(r.due_day || r.day_of_month || 1, 10);
+    const holidayRule = r.holiday_rule || (r.is_income ? 'previous' : 'following');
+
+    const startY = sched.startDate.getFullYear();
+    const endY = sched.endDate.getFullYear();
+    const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+    for (const candY of candidateYears) {
+      const candDate = new Date(candY, targetMIdx, dueDay);
+      const adjDate = getAdjustedWorkingDay(candDate, holidayRule);
+      const pTime = adjDate.getTime();
+
+      if (r.start_date) {
+        const sDate = new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00');
+        if (adjDate < sDate) continue;
+      }
+      if (r.end_date) {
+        const eDate = new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59');
+        if (adjDate > eDate) continue;
+      }
+
+      if (pTime >= startMs && pTime <= endMs) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   for (const w of sched.weeks) {
     const occs = getRecurringForWeek([r], w, sched, year);
     if (occs && occs.length > 0) return true;
@@ -2810,6 +3048,36 @@ function formatScheduledBillDue(b, contextMonth = null, year = appState.currentY
     return contextMonth ? `Day ${b.due_day || 1}` : `Day ${b.due_day || 1} each month`;
   }
   if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
+    if (contextMonth) {
+      const mIdx = months.indexOf(contextMonth);
+      if (mIdx >= 0) {
+        const sched = calculateMonthSchedule(year, mIdx);
+        if (sched && sched.startDate && sched.endDate) {
+          const startMs = sched.startDate.getTime();
+          const endMs = sched.endDate.getTime();
+          let targetMIdx = b.month ? months.indexOf(b.month) : 0;
+          if (targetMIdx === -1) {
+            targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(b.month || '').toLowerCase().substring(0, 3)));
+          }
+          if (targetMIdx === -1) targetMIdx = 0;
+
+          const dueDay = parseInt(b.due_day || b.day_of_month || 1, 10);
+          const holidayRule = b.holiday_rule || (b.is_income ? 'previous' : 'following');
+          const startY = sched.startDate.getFullYear();
+          const endY = sched.endDate.getFullYear();
+          const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+          for (const candY of candidateYears) {
+            const candDate = new Date(candY, targetMIdx, dueDay);
+            const adjDate = getAdjustedWorkingDay(candDate, holidayRule);
+            const pTime = adjDate.getTime();
+            if (pTime >= startMs && pTime <= endMs) {
+              return `${adjDate.getDate()} ${months[adjDate.getMonth()]}`;
+            }
+          }
+        }
+      }
+    }
     return `${b.due_day || 1} ${b.month || 'Jan'}`;
   }
 
@@ -2888,26 +3156,52 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
   const startMs = new Date(schedule.startDate.getFullYear(), schedule.startDate.getMonth(), schedule.startDate.getDate(), 0, 0, 0).getTime();
   const endMs = new Date(schedule.endDate.getFullYear(), schedule.endDate.getMonth(), schedule.endDate.getDate(), 23, 59, 59).getTime();
 
-  const yearlyBillsThisMonth = (yData.yearly_recurring || []).filter(yb => {
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+  const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+    const k = `${b.desc || b.name}_${b.month || ''}_${b.due_day || ''}`;
+    if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
+  });
+
+  const yearlyBillsThisMonth = allYearlyBills.filter(yb => {
     const dueDay = parseInt(yb.due_day || 1, 10);
     let targetMIdx = months.indexOf(yb.month);
     if (targetMIdx === -1) targetMIdx = months.findIndex(m => m.toLowerCase().startsWith((yb.month || '').toLowerCase().substring(0, 3)));
     if (targetMIdx === -1) return false;
-    const targetDate = new Date(year, targetMIdx, dueDay);
-    const actualPaymentDate = getAdjustedWorkingDay(targetDate, yb.holiday_rule || 'following');
-    const pTime = actualPaymentDate.getTime();
-    return pTime >= startMs && pTime <= endMs;
+
+    for (const candY of candidateYears) {
+      const targetDate = new Date(candY, targetMIdx, dueDay);
+      const actualPaymentDate = getAdjustedWorkingDay(targetDate, yb.holiday_rule || 'following');
+      const pTime = actualPaymentDate.getTime();
+      if (pTime >= startMs && pTime <= endMs) return true;
+    }
+    return false;
   });
 
-  const yearlyIncomeThisMonth = (yData.yearly_income || []).filter(yi => {
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+    const k = `${i.desc || i.name}_${i.month || ''}_${i.due_day || ''}`;
+    if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
+  });
+
+  const yearlyIncomeThisMonth = allYearlyIncome.filter(yi => {
     const dueDay = parseInt(yi.due_day || 1, 10);
     let targetMIdx = months.indexOf(yi.month);
     if (targetMIdx === -1) targetMIdx = months.findIndex(m => m.toLowerCase().startsWith((yi.month || '').toLowerCase().substring(0, 3)));
     if (targetMIdx === -1) return false;
-    const targetDate = new Date(year, targetMIdx, dueDay);
-    const actualPaymentDate = getAdjustedWorkingDay(targetDate, yi.holiday_rule || 'previous');
-    const pTime = actualPaymentDate.getTime();
-    return pTime >= startMs && pTime <= endMs;
+
+    for (const candY of candidateYears) {
+      const targetDate = new Date(candY, targetMIdx, dueDay);
+      const actualPaymentDate = getAdjustedWorkingDay(targetDate, yi.holiday_rule || 'previous');
+      const pTime = actualPaymentDate.getTime();
+      if (pTime >= startMs && pTime <= endMs) return true;
+    }
+    return false;
   });
 
   const birthdaysThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(mName, mIdx, year) : [];
@@ -3256,6 +3550,8 @@ if (typeof window !== 'undefined') {
   window.getBirthdaysForWeek = getBirthdaysForWeek;
   window.getBirthdayOccasionsForWeek = getBirthdayOccasionsForWeek;
   window.getRecurringForWeek = getRecurringForWeek;
+  window.isRecurringDueInMonth = isRecurringDueInMonth;
+  window.formatScheduledBillDue = formatScheduledBillDue;
 }
 
 
@@ -3687,17 +3983,28 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
       const stepMonths = freq === 'monthly' ? 1 : (freq === 'quarterly' ? 3 : intervalN);
       const dueDay = parseInt(r.day_of_month || startDate.getDate() || 1, 10);
       
-      // Test month of week start and week end
-      const testMonths = [weekObj.startDate.getMonth(), weekObj.endDate.getMonth()];
-      const uniqueMonths = [...new Set(testMonths)];
+      // Test month and year of week start and week end
+      const testCandidates = [
+        { m: weekObj.startDate.getMonth(), y: weekObj.startDate.getFullYear() },
+        { m: weekObj.endDate.getMonth(), y: weekObj.endDate.getFullYear() }
+      ];
+      const uniqueCandidates = [];
+      const seenYM = new Set();
+      testCandidates.forEach(c => {
+        const k = `${c.y}_${c.m}`;
+        if (!seenYM.has(k)) {
+          seenYM.add(k);
+          uniqueCandidates.push(c);
+        }
+      });
 
-      uniqueMonths.forEach(m => {
-        const testDate = new Date(year, m, dueDay);
+      uniqueCandidates.forEach(cand => {
+        const testDate = new Date(cand.y, cand.m, dueDay);
         const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
         const payTime = actualPayDate.getTime();
 
         if (payTime >= wStartTime && payTime <= wEndTime) {
-          const diffMonths = (year - startDate.getFullYear()) * 12 + (m - startDate.getMonth());
+          const diffMonths = (cand.y - startDate.getFullYear()) * 12 + (cand.m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
             const occIso = actualPayDate.toISOString().slice(0, 10);
             const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
@@ -3724,34 +4031,46 @@ function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year = appS
         }
       });
     } else if (freq === 'yearly') {
-      const dueMonth = r.month ? months.indexOf(r.month) : startDate.getMonth();
-      const dueDay = parseInt(r.day_of_month || startDate.getDate() || 1, 10);
-      const testDate = new Date(year, dueMonth, dueDay);
-      const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
-      const payTime = actualPayDate.getTime();
+      let dueMonth = r.month ? months.indexOf(r.month) : startDate.getMonth();
+      if (dueMonth === -1) {
+        dueMonth = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
+      }
+      if (dueMonth === -1) dueMonth = 0;
 
-      if (payTime >= wStartTime && payTime <= wEndTime) {
-        const occIso = actualPayDate.toISOString().slice(0, 10);
-        const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
-        occurrences.push({
-          ...r,
-          isRecurring: true,
-          isMovable: true,
-          is_income: isIncome,
-          source_type: r.source_type || (isIncome ? 'yearly_income' : 'recurring_payment'),
-          source_idx: rIdx,
-          rawDesc: r.desc,
-          desc: isIncome ? `📥 ${r.desc}` : `🔄 ${r.desc}`,
-          amount,
-          account: r.account,
-          holiday_rule: holidayRule,
-          actualPaymentDate: actualPayDate,
-          actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
-          occurrenceDate: actualPayDate,
-          status: isOccCleared ? 'paid' : 'due',
-          auto_cleared: isOccCleared,
-          manually_cleared: Boolean(r.manually_cleared)
-        });
+      const dueDay = parseInt(r.day_of_month || r.due_day || startDate.getDate() || 1, 10);
+      const startY = weekObj.startDate.getFullYear();
+      const endY = weekObj.endDate.getFullYear();
+      const candidateYears = new Set([year, startY, endY, startY - 1, endY + 1]);
+
+      for (const candY of candidateYears) {
+        const testDate = new Date(candY, dueMonth, dueDay);
+        const actualPayDate = getAdjustedWorkingDay(testDate, holidayRule);
+        const payTime = actualPayDate.getTime();
+
+        if (payTime >= wStartTime && payTime <= wEndTime) {
+          const occIso = actualPayDate.toISOString().slice(0, 10);
+          const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
+          occurrences.push({
+            ...r,
+            isRecurring: true,
+            isMovable: true,
+            is_income: isIncome,
+            source_type: r.source_type || (isIncome ? 'yearly_income' : 'recurring_payment'),
+            source_idx: rIdx,
+            rawDesc: r.desc,
+            desc: isIncome ? `📥 ${r.desc}` : `🔄 ${r.desc}`,
+            amount,
+            account: r.account,
+            holiday_rule: holidayRule,
+            actualPaymentDate: actualPayDate,
+            actualDateStr: `${actualPayDate.getDate()} ${months[actualPayDate.getMonth()]}`,
+            occurrenceDate: actualPayDate,
+            status: isOccCleared ? 'paid' : 'due',
+            auto_cleared: isOccCleared,
+            manually_cleared: Boolean(r.manually_cleared)
+          });
+          break;
+        }
       }
     }
   });
@@ -4540,21 +4859,38 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
   (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
   const yData = getYearData(year);
-  const allYearlyBills = yData.yearly_recurring || [];
-  const allYearlyIncome = yData.yearly_income || [];
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+    const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
+    if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
+  });
+
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+    const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
+    if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
+  });
+
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(targetMonth, mIdx, year) : [];
   const allBirthdays = yData.birthdays || cfg.birthdays || [];
   const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
   const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
 
-  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => yb.month === targetMonth).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => totalDD += (Number(yb.amount) || 0));
   budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
   birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
 
-  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => yi.month === targetMonth).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
 
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -4637,8 +4973,10 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
       else wExpenseSum += amt;
     });
 
-    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
-    const yearlyBillsWithMeta = (yData.yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const directDebitsWithMeta = (mData.direct_debits || [])
+      .filter(b => !activeYearlyDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = allYearlyBills.map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
     const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(targetMonth, mIdx, year).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
@@ -4649,8 +4987,10 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
     const wDDs = [...baseDDs, ...wRecurring, ...wBirthdays];
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
-    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
-    const yearlyIncomesWithMeta = (yData.yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const directIncomesWithMeta = (mData.payments_in || [])
+      .filter(b => !activeYearlyIncomeDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, year);
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, year) : [];
@@ -10257,21 +10597,55 @@ function renderOverviewView(container) {
 
   cfg.people.forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
-  const allYearlyBills = getYearData().yearly_recurring || [];
-  const allYearlyIncome = getYearData().yearly_income || [];
+  const startY = schedule.startDate.getFullYear();
+  const endY = schedule.endDate.getFullYear();
+
+  const allYearlyBills = [];
+  const seenYBK = new Set();
+  [
+    ...(getYearData(currentYear)?.yearly_recurring || []),
+    ...(getYearData(startY)?.yearly_recurring || []),
+    ...(getYearData(endY)?.yearly_recurring || []),
+    ...(cfg.default_yearly_recurring || [])
+  ].forEach(b => {
+    const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
+    if (!seenYBK.has(k)) {
+      seenYBK.add(k);
+      allYearlyBills.push(b);
+    }
+  });
+
+  const allYearlyIncome = [];
+  const seenYIK = new Set();
+  [
+    ...(getYearData(currentYear)?.yearly_income || []),
+    ...(getYearData(startY)?.yearly_income || []),
+    ...(getYearData(endY)?.yearly_income || []),
+    ...(cfg.default_yearly_income || [])
+  ].forEach(i => {
+    const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
+    if (!seenYIK.has(k)) {
+      seenYIK.add(k);
+      allYearlyIncome.push(i);
+    }
+  });
+
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-  const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
-  const allRecurring = getYearData().recurring_payments || cfg.recurring_payments || [];
-  const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
+  const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
+  const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
 
-  let totalDD = (mData.direct_debits || []).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => yb.month === activeTab).forEach(yb => totalDD += (Number(yb.amount) || 0));
+  let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
   budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
   birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
 
-  let totalMonthPaymentsIn = (mData.payments_in || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => yi.month === activeTab).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
   
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -10354,14 +10728,16 @@ function renderOverviewView(container) {
       else wExpenseSum += amt;
     });
 
-    const directDebitsWithMeta = (mData.direct_debits || []).map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
-    const yearlyBillsWithMeta = (getYearData().yearly_recurring || []).map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
+    const directDebitsWithMeta = (mData.direct_debits || [])
+      .filter(b => !activeYearlyDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'direct_debit', source_idx: idx }));
+    const yearlyBillsWithMeta = allYearlyBills.map((b, idx) => ({ ...b, source_type: 'yearly_recurring', source_idx: idx }));
     const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear).map((b, idx) => ({ ...b, source_type: 'budget_bill', source_idx: idx })) : [];
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
-    const allBirthdays = getYearData().birthdays || cfg.birthdays || [];
-    const allRecurring = getYearData().recurring_payments || cfg.recurring_payments || [];
+    const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
+    const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
     const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, currentYear) : [];
     const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, currentYear) : [];
     
@@ -10369,11 +10745,13 @@ function renderOverviewView(container) {
     const wDDTotal = wDDs.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
     // Scheduled Payments In / Inflows
-    const directIncomesWithMeta = (mData.payments_in || []).map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
-    const yearlyIncomesWithMeta = (getYearData().yearly_income || []).map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
+    const directIncomesWithMeta = (mData.payments_in || [])
+      .filter(b => !activeYearlyIncomeDescs.has((b.desc || b.name || '').trim().toLowerCase()))
+      .map((b, idx) => ({ ...b, source_type: 'payments_in', source_idx: idx }));
+    const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
-    const allRecurringIncomes = getYearData().recurring_incomes || cfg.recurring_incomes || [];
+    const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
     const wIncomes = [...baseIncomes, ...wRecurringIncomes];
     const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -11509,7 +11887,9 @@ function renderOverviewView(container) {
             <tbody>
               ${getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
                 if (b.frequency === 'monthly') return true;
-                if (b.frequency === 'yearly') return b.month === activeTab;
+                if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
+                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                }
                 if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
                   return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
                 }
@@ -17280,6 +17660,9 @@ async function init() {
     const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
+      if (typeof reconcileYearlyRecurringCommitments === 'function') {
+        reconcileYearlyRecurringCommitments(appState.data);
+      }
     } else if (initialMode === 'ha') {
       console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
       const errEl = document.getElementById('errorBanner');
@@ -18579,10 +18962,20 @@ window.budgetApp = {
       if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) return mData.payments_in[sourceIdx];
     } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
       if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
-    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
-      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
-    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
-      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'yearly_recurring') {
+      if (yData.yearly_recurring && sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
+      const prevYData = getYearData(appState.currentYear - 1);
+      if (prevYData?.yearly_recurring && sourceIdx !== undefined && isMatch(prevYData.yearly_recurring[sourceIdx])) return prevYData.yearly_recurring[sourceIdx];
+      const nextYData = getYearData(appState.currentYear + 1);
+      if (nextYData?.yearly_recurring && sourceIdx !== undefined && isMatch(nextYData.yearly_recurring[sourceIdx])) return nextYData.yearly_recurring[sourceIdx];
+      if (cfg.default_yearly_recurring && sourceIdx !== undefined && isMatch(cfg.default_yearly_recurring[sourceIdx])) return cfg.default_yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income') {
+      if (yData.yearly_income && sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+      const prevYData = getYearData(appState.currentYear - 1);
+      if (prevYData?.yearly_income && sourceIdx !== undefined && isMatch(prevYData.yearly_income[sourceIdx])) return prevYData.yearly_income[sourceIdx];
+      const nextYData = getYearData(appState.currentYear + 1);
+      if (nextYData?.yearly_income && sourceIdx !== undefined && isMatch(nextYData.yearly_income[sourceIdx])) return nextYData.yearly_income[sourceIdx];
+      if (cfg.default_yearly_income && sourceIdx !== undefined && isMatch(cfg.default_yearly_income[sourceIdx])) return cfg.default_yearly_income[sourceIdx];
     } else if (sourceType === 'recurring_payment') {
       const recurring = yData.recurring_payments || cfg.recurring_payments || [];
       if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
@@ -18612,13 +19005,21 @@ window.budgetApp = {
 
     if (billDesc) {
       const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+      const prevYData = getYearData(appState.currentYear - 1);
+      const nextYData = getYearData(appState.currentYear + 1);
 
       let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
           || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (prevYData?.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (nextYData?.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (cfg.default_yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (prevYData?.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (nextYData?.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (cfg.default_yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
       if (item) return item;
@@ -19917,8 +20318,22 @@ window.budgetApp = {
         mData.direct_debits.push({ ...newDD });
       }
     } else if (freq === 'yearly') {
+      const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo };
       if (!yData.yearly_recurring) yData.yearly_recurring = [];
-      yData.yearly_recurring.push({ desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo });
+      yData.yearly_recurring.push(newYR);
+      if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+      if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+        cfg.default_yearly_recurring.push({ ...newYR });
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yd = appState.data.years[yStr];
+          if (!yd.yearly_recurring) yd.yearly_recurring = [];
+          if (!yd.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+            yd.yearly_recurring.push({ ...newYR });
+          }
+        });
+      }
     } else {
       // Weekly, Bi-Weekly, Quarterly, Custom
       const recurring = getRecurringPayments(appState.currentYear);
@@ -19943,13 +20358,35 @@ window.budgetApp = {
 
     const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
     const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
+    const cfg = getSettings();
 
     if (sourceType === 'direct_debit') {
       const mData = getMonthData(currentActiveMonth);
       if (mData.direct_debits) mData.direct_debits.splice(sourceIdx, 1);
     } else if (sourceType === 'yearly_recurring') {
       const yData = getYearData();
-      if (yData.yearly_recurring) yData.yearly_recurring.splice(sourceIdx, 1);
+      let delDesc = null;
+      let delMonth = null;
+      if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
+        delDesc = yData.yearly_recurring[sourceIdx].desc;
+        delMonth = yData.yearly_recurring[sourceIdx].month;
+        yData.yearly_recurring.splice(sourceIdx, 1);
+      }
+      if (delDesc) {
+        if (cfg.default_yearly_recurring) {
+          const cfgIdx = cfg.default_yearly_recurring.findIndex(yr => yr.desc === delDesc && (!delMonth || yr.month === delMonth));
+          if (cfgIdx >= 0) cfg.default_yearly_recurring.splice(cfgIdx, 1);
+        }
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yd = appState.data.years[yStr];
+            if (yd.yearly_recurring) {
+              const idx = yd.yearly_recurring.findIndex(yr => yr.desc === delDesc && (!delMonth || yr.month === delMonth));
+              if (idx >= 0) yd.yearly_recurring.splice(idx, 1);
+            }
+          });
+        }
+      }
     } else if (sourceType === 'recurring_payment') {
       const recurring = getRecurringPayments(appState.currentYear);
       recurring.splice(sourceIdx, 1);
@@ -20181,13 +20618,15 @@ window.budgetApp = {
       } else if (freq === 'yearly') {
         const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat, start_date: startDateVal, end_date: endDateVal };
         if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
-        cfg.default_yearly_recurring.push(newYR);
+        if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+          cfg.default_yearly_recurring.push(newYR);
+        }
 
         if (appState.data && appState.data.years) {
           Object.keys(appState.data.years).forEach(yStr => {
             const yData = appState.data.years[yStr];
             if (!yData.yearly_recurring) yData.yearly_recurring = [];
-            if (!yData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+            if (!yData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
               yData.yearly_recurring.push({ ...newYR });
             }
           });
@@ -20281,26 +20720,60 @@ window.budgetApp = {
         });
       }
     } else if (sourceType === 'yearly_recurring') {
-      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
-        cfg.default_yearly_recurring[sourceIdx][field] = value;
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx])
+        || (curYearData.yearly_recurring && curYearData.yearly_recurring[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yr) => {
+        if (!yr) return false;
+        if (origDesc && yr.desc !== origDesc) return false;
+        if (origMonth && yr.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yr.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_recurring) {
+        const item = cfg.default_yearly_recurring.find(isMatch) || cfg.default_yearly_recurring[sourceIdx];
+        if (item) item[field] = value;
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
-            yData.yearly_recurring[sourceIdx][field] = value;
+          if (yData.yearly_recurring) {
+            const item = yData.yearly_recurring.find(isMatch) || yData.yearly_recurring[sourceIdx];
+            if (item) item[field] = value;
           }
         });
       }
     } else if (sourceType === 'yearly_income') {
-      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
-        cfg.default_yearly_income[sourceIdx][field] = value;
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx])
+        || (curYearData.yearly_income && curYearData.yearly_income[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yi) => {
+        if (!yi) return false;
+        if (origDesc && yi.desc !== origDesc) return false;
+        if (origMonth && yi.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yi.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_income) {
+        const item = cfg.default_yearly_income.find(isMatch) || cfg.default_yearly_income[sourceIdx];
+        if (item) item[field] = value;
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
-            yData.yearly_income[sourceIdx][field] = value;
+          if (yData.yearly_income) {
+            const item = yData.yearly_income.find(isMatch) || yData.yearly_income[sourceIdx];
+            if (item) item[field] = value;
           }
         });
       }
@@ -20387,26 +20860,64 @@ window.budgetApp = {
         });
       }
     } else if (sourceType === 'yearly_recurring') {
-      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
-        cfg.default_yearly_recurring.splice(sourceIdx, 1);
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx])
+        || (curYearData.yearly_recurring && curYearData.yearly_recurring[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yr) => {
+        if (!yr) return false;
+        if (origDesc && yr.desc !== origDesc) return false;
+        if (origMonth && yr.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yr.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_recurring) {
+        const idx = cfg.default_yearly_recurring.findIndex(isMatch);
+        if (idx >= 0) cfg.default_yearly_recurring.splice(idx, 1);
+        else if (cfg.default_yearly_recurring[sourceIdx]) cfg.default_yearly_recurring.splice(sourceIdx, 1);
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
-            yData.yearly_recurring.splice(sourceIdx, 1);
+          if (yData.yearly_recurring) {
+            const idx = yData.yearly_recurring.findIndex(isMatch);
+            if (idx >= 0) yData.yearly_recurring.splice(idx, 1);
+            else if (yData.yearly_recurring[sourceIdx]) yData.yearly_recurring.splice(sourceIdx, 1);
           }
         });
       }
     } else if (sourceType === 'yearly_income') {
-      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
-        cfg.default_yearly_income.splice(sourceIdx, 1);
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx])
+        || (curYearData.yearly_income && curYearData.yearly_income[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yi) => {
+        if (!yi) return false;
+        if (origDesc && yi.desc !== origDesc) return false;
+        if (origMonth && yi.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yi.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_income) {
+        const idx = cfg.default_yearly_income.findIndex(isMatch);
+        if (idx >= 0) cfg.default_yearly_income.splice(idx, 1);
+        else if (cfg.default_yearly_income[sourceIdx]) cfg.default_yearly_income.splice(sourceIdx, 1);
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
-            yData.yearly_income.splice(sourceIdx, 1);
+          if (yData.yearly_income) {
+            const idx = yData.yearly_income.findIndex(isMatch);
+            if (idx >= 0) yData.yearly_income.splice(idx, 1);
+            else if (yData.yearly_income[sourceIdx]) yData.yearly_income.splice(sourceIdx, 1);
           }
         });
       }
@@ -21005,13 +21516,15 @@ window.budgetApp = {
         } else if (freq === 'yearly') {
           const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
           if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
-          cfg.default_yearly_recurring.push(newYR);
+          if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+            cfg.default_yearly_recurring.push(newYR);
+          }
 
           if (appState.data && appState.data.years) {
             Object.keys(appState.data.years).forEach(yStr => {
               const yrData = appState.data.years[yStr];
               if (!yrData.yearly_recurring) yrData.yearly_recurring = [];
-              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
                 yrData.yearly_recurring.push({ ...newYR });
               }
             });

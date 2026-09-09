@@ -25,7 +25,8 @@ import {
   getSlidingWindowMonths,
   getCurrentPeriodMonthAndYear,
   isItemActiveInMonth,
-  getRecurringIncomes
+  getRecurringIncomes,
+  reconcileYearlyRecurringCommitments
 } from './state.js';
 
 import {
@@ -981,6 +982,9 @@ export async function init() {
     const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
+      if (typeof reconcileYearlyRecurringCommitments === 'function') {
+        reconcileYearlyRecurringCommitments(appState.data);
+      }
     } else if (initialMode === 'ha') {
       console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
       const errEl = document.getElementById('errorBanner');
@@ -2280,10 +2284,20 @@ window.budgetApp = {
       if (sourceIdx !== undefined && isMatch(mData.payments_in[sourceIdx])) return mData.payments_in[sourceIdx];
     } else if (sourceType === 'scheduled_item' && mData.scheduled_items) {
       if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
-    } else if (sourceType === 'yearly_recurring' && yData.yearly_recurring) {
-      if (sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
-    } else if (sourceType === 'yearly_income' && yData.yearly_income) {
-      if (sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+    } else if (sourceType === 'yearly_recurring') {
+      if (yData.yearly_recurring && sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
+      const prevYData = getYearData(appState.currentYear - 1);
+      if (prevYData?.yearly_recurring && sourceIdx !== undefined && isMatch(prevYData.yearly_recurring[sourceIdx])) return prevYData.yearly_recurring[sourceIdx];
+      const nextYData = getYearData(appState.currentYear + 1);
+      if (nextYData?.yearly_recurring && sourceIdx !== undefined && isMatch(nextYData.yearly_recurring[sourceIdx])) return nextYData.yearly_recurring[sourceIdx];
+      if (cfg.default_yearly_recurring && sourceIdx !== undefined && isMatch(cfg.default_yearly_recurring[sourceIdx])) return cfg.default_yearly_recurring[sourceIdx];
+    } else if (sourceType === 'yearly_income') {
+      if (yData.yearly_income && sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
+      const prevYData = getYearData(appState.currentYear - 1);
+      if (prevYData?.yearly_income && sourceIdx !== undefined && isMatch(prevYData.yearly_income[sourceIdx])) return prevYData.yearly_income[sourceIdx];
+      const nextYData = getYearData(appState.currentYear + 1);
+      if (nextYData?.yearly_income && sourceIdx !== undefined && isMatch(nextYData.yearly_income[sourceIdx])) return nextYData.yearly_income[sourceIdx];
+      if (cfg.default_yearly_income && sourceIdx !== undefined && isMatch(cfg.default_yearly_income[sourceIdx])) return cfg.default_yearly_income[sourceIdx];
     } else if (sourceType === 'recurring_payment') {
       const recurring = yData.recurring_payments || cfg.recurring_payments || [];
       if (sourceIdx !== undefined && isMatch(recurring[sourceIdx])) return recurring[sourceIdx];
@@ -2313,13 +2327,21 @@ window.budgetApp = {
 
     if (billDesc) {
       const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
+      const prevYData = getYearData(appState.currentYear - 1);
+      const nextYData = getYearData(appState.currentYear + 1);
 
       let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
           || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (mData.payments_in || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (mData.scheduled_items || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (prevYData?.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (nextYData?.yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (cfg.default_yearly_recurring || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (prevYData?.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (nextYData?.yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
+          || (cfg.default_yearly_income || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.recurring_payments || []).find(d => d.desc === billDesc || d.name === billDesc)
           || (yData.recurring_incomes || []).find(d => d.desc === billDesc || d.name === billDesc);
       if (item) return item;
@@ -3618,8 +3640,22 @@ window.budgetApp = {
         mData.direct_debits.push({ ...newDD });
       }
     } else if (freq === 'yearly') {
+      const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo };
       if (!yData.yearly_recurring) yData.yearly_recurring = [];
-      yData.yearly_recurring.push({ desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo });
+      yData.yearly_recurring.push(newYR);
+      if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
+      if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+        cfg.default_yearly_recurring.push({ ...newYR });
+      }
+      if (appState.data && appState.data.years) {
+        Object.keys(appState.data.years).forEach(yStr => {
+          const yd = appState.data.years[yStr];
+          if (!yd.yearly_recurring) yd.yearly_recurring = [];
+          if (!yd.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+            yd.yearly_recurring.push({ ...newYR });
+          }
+        });
+      }
     } else {
       // Weekly, Bi-Weekly, Quarterly, Custom
       const recurring = getRecurringPayments(appState.currentYear);
@@ -3644,13 +3680,35 @@ window.budgetApp = {
 
     const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
     const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
+    const cfg = getSettings();
 
     if (sourceType === 'direct_debit') {
       const mData = getMonthData(currentActiveMonth);
       if (mData.direct_debits) mData.direct_debits.splice(sourceIdx, 1);
     } else if (sourceType === 'yearly_recurring') {
       const yData = getYearData();
-      if (yData.yearly_recurring) yData.yearly_recurring.splice(sourceIdx, 1);
+      let delDesc = null;
+      let delMonth = null;
+      if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
+        delDesc = yData.yearly_recurring[sourceIdx].desc;
+        delMonth = yData.yearly_recurring[sourceIdx].month;
+        yData.yearly_recurring.splice(sourceIdx, 1);
+      }
+      if (delDesc) {
+        if (cfg.default_yearly_recurring) {
+          const cfgIdx = cfg.default_yearly_recurring.findIndex(yr => yr.desc === delDesc && (!delMonth || yr.month === delMonth));
+          if (cfgIdx >= 0) cfg.default_yearly_recurring.splice(cfgIdx, 1);
+        }
+        if (appState.data && appState.data.years) {
+          Object.keys(appState.data.years).forEach(yStr => {
+            const yd = appState.data.years[yStr];
+            if (yd.yearly_recurring) {
+              const idx = yd.yearly_recurring.findIndex(yr => yr.desc === delDesc && (!delMonth || yr.month === delMonth));
+              if (idx >= 0) yd.yearly_recurring.splice(idx, 1);
+            }
+          });
+        }
+      }
     } else if (sourceType === 'recurring_payment') {
       const recurring = getRecurringPayments(appState.currentYear);
       recurring.splice(sourceIdx, 1);
@@ -3882,13 +3940,15 @@ window.budgetApp = {
       } else if (freq === 'yearly') {
         const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, category: schedCat, start_date: startDateVal, end_date: endDateVal };
         if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
-        cfg.default_yearly_recurring.push(newYR);
+        if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+          cfg.default_yearly_recurring.push(newYR);
+        }
 
         if (appState.data && appState.data.years) {
           Object.keys(appState.data.years).forEach(yStr => {
             const yData = appState.data.years[yStr];
             if (!yData.yearly_recurring) yData.yearly_recurring = [];
-            if (!yData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+            if (!yData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
               yData.yearly_recurring.push({ ...newYR });
             }
           });
@@ -3982,26 +4042,60 @@ window.budgetApp = {
         });
       }
     } else if (sourceType === 'yearly_recurring') {
-      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
-        cfg.default_yearly_recurring[sourceIdx][field] = value;
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx])
+        || (curYearData.yearly_recurring && curYearData.yearly_recurring[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yr) => {
+        if (!yr) return false;
+        if (origDesc && yr.desc !== origDesc) return false;
+        if (origMonth && yr.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yr.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_recurring) {
+        const item = cfg.default_yearly_recurring.find(isMatch) || cfg.default_yearly_recurring[sourceIdx];
+        if (item) item[field] = value;
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
-            yData.yearly_recurring[sourceIdx][field] = value;
+          if (yData.yearly_recurring) {
+            const item = yData.yearly_recurring.find(isMatch) || yData.yearly_recurring[sourceIdx];
+            if (item) item[field] = value;
           }
         });
       }
     } else if (sourceType === 'yearly_income') {
-      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
-        cfg.default_yearly_income[sourceIdx][field] = value;
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx])
+        || (curYearData.yearly_income && curYearData.yearly_income[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yi) => {
+        if (!yi) return false;
+        if (origDesc && yi.desc !== origDesc) return false;
+        if (origMonth && yi.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yi.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_income) {
+        const item = cfg.default_yearly_income.find(isMatch) || cfg.default_yearly_income[sourceIdx];
+        if (item) item[field] = value;
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
-            yData.yearly_income[sourceIdx][field] = value;
+          if (yData.yearly_income) {
+            const item = yData.yearly_income.find(isMatch) || yData.yearly_income[sourceIdx];
+            if (item) item[field] = value;
           }
         });
       }
@@ -4088,26 +4182,64 @@ window.budgetApp = {
         });
       }
     } else if (sourceType === 'yearly_recurring') {
-      if (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx]) {
-        cfg.default_yearly_recurring.splice(sourceIdx, 1);
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_recurring && cfg.default_yearly_recurring[sourceIdx])
+        || (curYearData.yearly_recurring && curYearData.yearly_recurring[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yr) => {
+        if (!yr) return false;
+        if (origDesc && yr.desc !== origDesc) return false;
+        if (origMonth && yr.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yr.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_recurring) {
+        const idx = cfg.default_yearly_recurring.findIndex(isMatch);
+        if (idx >= 0) cfg.default_yearly_recurring.splice(idx, 1);
+        else if (cfg.default_yearly_recurring[sourceIdx]) cfg.default_yearly_recurring.splice(sourceIdx, 1);
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_recurring && yData.yearly_recurring[sourceIdx]) {
-            yData.yearly_recurring.splice(sourceIdx, 1);
+          if (yData.yearly_recurring) {
+            const idx = yData.yearly_recurring.findIndex(isMatch);
+            if (idx >= 0) yData.yearly_recurring.splice(idx, 1);
+            else if (yData.yearly_recurring[sourceIdx]) yData.yearly_recurring.splice(sourceIdx, 1);
           }
         });
       }
     } else if (sourceType === 'yearly_income') {
-      if (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx]) {
-        cfg.default_yearly_income.splice(sourceIdx, 1);
+      const curYearData = getYearData(curPeriod.year);
+      const sourceItem = (cfg.default_yearly_income && cfg.default_yearly_income[sourceIdx])
+        || (curYearData.yearly_income && curYearData.yearly_income[sourceIdx]);
+      const origDesc = sourceItem?.desc;
+      const origMonth = sourceItem?.month;
+      const origDueDay = sourceItem?.due_day;
+
+      const isMatch = (yi) => {
+        if (!yi) return false;
+        if (origDesc && yi.desc !== origDesc) return false;
+        if (origMonth && yi.month !== origMonth) return false;
+        if (origDueDay !== undefined && Number(yi.due_day) !== Number(origDueDay)) return false;
+        return true;
+      };
+
+      if (cfg.default_yearly_income) {
+        const idx = cfg.default_yearly_income.findIndex(isMatch);
+        if (idx >= 0) cfg.default_yearly_income.splice(idx, 1);
+        else if (cfg.default_yearly_income[sourceIdx]) cfg.default_yearly_income.splice(sourceIdx, 1);
       }
       if (appState.data && appState.data.years) {
         Object.keys(appState.data.years).forEach(yStr => {
           const yData = appState.data.years[yStr];
-          if (yData.yearly_income && yData.yearly_income[sourceIdx]) {
-            yData.yearly_income.splice(sourceIdx, 1);
+          if (yData.yearly_income) {
+            const idx = yData.yearly_income.findIndex(isMatch);
+            if (idx >= 0) yData.yearly_income.splice(idx, 1);
+            else if (yData.yearly_income[sourceIdx]) yData.yearly_income.splice(sourceIdx, 1);
           }
         });
       }
@@ -4706,13 +4838,15 @@ window.budgetApp = {
         } else if (freq === 'yearly') {
           const newYR = { desc, month, due_day: dueDay, amount: amt, account: acc, transfer_to: transferTo, holiday_rule: holidayRule, start_date: startDateVal };
           if (!cfg.default_yearly_recurring) cfg.default_yearly_recurring = [];
-          cfg.default_yearly_recurring.push(newYR);
+          if (!cfg.default_yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
+            cfg.default_yearly_recurring.push(newYR);
+          }
 
           if (appState.data && appState.data.years) {
             Object.keys(appState.data.years).forEach(yStr => {
               const yrData = appState.data.years[yStr];
               if (!yrData.yearly_recurring) yrData.yearly_recurring = [];
-              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month)) {
+              if (!yrData.yearly_recurring.some(yr => yr.desc === desc && yr.month === month && Number(yr.due_day) === Number(dueDay))) {
                 yrData.yearly_recurring.push({ ...newYR });
               }
             });
