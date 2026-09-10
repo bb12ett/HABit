@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.18")
+    return os.environ.get("APP_VERSION", "0.3.20")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -454,11 +454,114 @@ def save_year_data(year: int, year_data: dict):
         print(f"[Storage] Error saving budget_{year}.json: {e}")
         return False
 
+def is_year_empty_or_phantom(year: int, y_data: dict, current_year: int, settings: dict = None) -> bool:
+    if year == current_year:
+        return False
+    if settings is None:
+        settings = load_settings()
+
+    today = datetime.date.today()
+    cur_y = today.year
+    cur_m = today.month  # 1-12
+    adv = int(settings.get("months_in_advance", 12))
+    arr = int(settings.get("months_in_arrears", 3))
+
+    max_future_year = (cur_y * 12 + (cur_m - 1) + adv) // 12
+    min_arrears_year = (cur_y * 12 + (cur_m - 1) - arr) // 12
+
+    # If within active forecast projection window, never treat as phantom
+    if year >= min_arrears_year and year <= max_future_year:
+        return False
+
+    if not isinstance(y_data, dict):
+        return True
+
+    # 1. Any Open Banking transactions in this year?
+    if len(y_data.get("open_banking_transactions", [])) > 0:
+        return False
+
+    # 2. Any custom yearly budgets?
+    budgets = y_data.get("yearly_budgets", [])
+    if isinstance(budgets, list) and len(budgets) > 0:
+        for b in budgets:
+            if isinstance(b, dict):
+                if float(b.get("total_budget", 0) or 0) > 0 or len(b.get("items", [])) > 0 or len(b.get("transactions", [])) > 0:
+                    return False
+
+    months_dict = y_data.get("months", {})
+    if isinstance(months_dict, dict):
+        for m_name, m_obj in months_dict.items():
+            if not isinstance(m_obj, dict):
+                continue
+
+            if len(m_obj.get("open_banking_transactions", [])) > 0:
+                return False
+
+            # Weekly items (transactions)
+            weekly_items = m_obj.get("weekly_items", {})
+            if isinstance(weekly_items, dict):
+                for items in weekly_items.values():
+                    if isinstance(items, list) and len(items) > 0:
+                        for it in items:
+                            if isinstance(it, dict) and (float(it.get("amount", 0) or 0) > 0 or bool(it.get("desc"))):
+                                return False
+
+            # Weekly actuals (non-empty, non-zero values ignoring _ metadata)
+            weekly_actuals = m_obj.get("weekly_actuals", {})
+            if isinstance(weekly_actuals, dict):
+                for w_dict in weekly_actuals.values():
+                    if isinstance(w_dict, dict):
+                        for k, v in w_dict.items():
+                            if k.startswith("_"):
+                                continue
+                            if v not in ("", None, 0, "0", 0.0):
+                                return False
+
+            # Actuals
+            actuals = m_obj.get("actuals", {})
+            if isinstance(actuals, dict):
+                for v in actuals.values():
+                    if v not in ("", None, 0, "0", 0.0):
+                        return False
+
+            if m_obj.get("user_edited_start_balance"):
+                return False
+
+            acc_list = list(m_obj.get("current_data", {}).values()) + list(m_obj.get("credit_data", {}).values()) + list(m_obj.get("savings_data", {}).values())
+            for acc in acc_list:
+                if isinstance(acc, dict) and acc.get("user_edited"):
+                    return False
+
+    return True
+
+def delete_year_data(year: int):
+    try:
+        deleted = False
+        for ext in ["", ".tmp", ".bak"]:
+            p = os.path.join(DATA_DIR, f"budget_{year}.json{ext}")
+            if os.path.exists(p):
+                os.remove(p)
+                deleted = True
+                print(f"[Storage] Deleted budget_{year}.json{ext}")
+        return deleted
+    except Exception as e:
+        print(f"[Storage] Error deleting budget_{year}.json: {e}")
+        return False
+
 def load_data(year=None):
     migrate_legacy_storage()
     settings = load_settings()
+    cur_year = int(settings.get("current_year", datetime.date.today().year))
     avail_years = get_available_years()
     
+    # Auto-prune any empty historical phantom files (< cur_year) created by previous runaway lookups
+    for y in list(avail_years):
+        if y < cur_year:
+            y_data = load_year_data(y, settings)
+            if is_year_empty_or_phantom(y, y_data, cur_year, settings):
+                delete_year_data(y)
+
+    avail_years = get_available_years()
     today = datetime.date.today()
     cur_y = today.year
     cur_m = today.month  # 1-12
@@ -476,7 +579,7 @@ def load_data(year=None):
         except Exception:
             target_year = settings.get("current_year", cur_y)
 
-    needed_years = set(range(start_year, end_year + 1))
+    needed_years = set([y for y in range(start_year, end_year + 1) if y >= cur_y])
     for y in avail_years:
         needed_years.add(y)
     if target_year:
@@ -484,9 +587,11 @@ def load_data(year=None):
 
     years_dict = {}
     for y in sorted(needed_years):
-        y_data = load_year_data(y, settings)
         y_path = os.path.join(DATA_DIR, f"budget_{y}.json")
-        if not os.path.exists(y_path):
+        if not os.path.exists(y_path) and y < cur_y:
+            continue
+        y_data = load_year_data(y, settings)
+        if not os.path.exists(y_path) and y >= cur_y:
             save_year_data(y, y_data)
         years_dict[str(y)] = y_data
 
@@ -4045,6 +4150,60 @@ def budget_create_year_api():
         return jsonify({"status": "created", "year": new_year, "data": composite})
     except Exception as e:
         return jsonify({"error": str(e)}), 400
+
+@app.route("/api/budget/year/<int:year>", methods=["DELETE"])
+def budget_delete_year_api(year):
+    try:
+        migrate_legacy_storage()
+        settings = load_settings()
+        cur_year = int(settings.get("current_year", datetime.date.today().year))
+        if year == cur_year:
+            return jsonify({"error": f"Cannot delete the active budget year ({cur_year})."}), 400
+
+        today = datetime.date.today()
+        cur_y = today.year
+        cur_m = today.month
+        adv = int(settings.get("months_in_advance", 12))
+        arr = int(settings.get("months_in_arrears", 3))
+        max_future_year = (cur_y * 12 + (cur_m - 1) + adv) // 12
+        min_arrears_year = (cur_y * 12 + (cur_m - 1) - arr) // 12
+        if year >= min_arrears_year and year <= max_future_year:
+            return jsonify({"error": f"Cannot delete Year {year} as it is currently within your active forecasting window ({adv} months in advance). Adjust 'Months in advance' in Settings first if you wish to remove it."}), 400
+        
+        success = delete_year_data(year)
+        composite = load_data(year=cur_year)
+        return jsonify({"status": "deleted", "year": year, "success": success, "data": composite})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/budget/year/delete", methods=["POST"])
+def budget_delete_year_post_api():
+    try:
+        migrate_legacy_storage()
+        payload = request.get_json(force=True) or {}
+        year = int(payload.get("year", 0))
+        if not year:
+            return jsonify({"error": "Missing year"}), 400
+        settings = load_settings()
+        cur_year = int(settings.get("current_year", datetime.date.today().year))
+        if year == cur_year:
+            return jsonify({"error": f"Cannot delete the active budget year ({cur_year})."}), 400
+
+        today = datetime.date.today()
+        cur_y = today.year
+        cur_m = today.month
+        adv = int(settings.get("months_in_advance", 12))
+        arr = int(settings.get("months_in_arrears", 3))
+        max_future_year = (cur_y * 12 + (cur_m - 1) + adv) // 12
+        min_arrears_year = (cur_y * 12 + (cur_m - 1) - arr) // 12
+        if year >= min_arrears_year and year <= max_future_year:
+            return jsonify({"error": f"Cannot delete Year {year} as it is currently within your active forecasting window ({adv} months in advance). Adjust 'Months in advance' in Settings first if you wish to remove it."}), 400
+        
+        success = delete_year_data(year)
+        composite = load_data(year=cur_year)
+        return jsonify({"status": "deleted", "year": year, "success": success, "data": composite})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/budget/propagate", methods=["POST"])
 def budget_propagate_api():

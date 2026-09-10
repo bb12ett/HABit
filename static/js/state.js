@@ -275,13 +275,27 @@ export function getSettings() {
   return appState.data.settings;
 }
 
-export function getYearData(year = appState.currentYear) {
+export function getYearData(year = appState.currentYear, autoCreate = null) {
   const yStr = String(year);
   if (!appState.data || typeof appState.data !== 'object') {
     appState.data = { settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), years: {} };
   }
   if (!appState.data.years) appState.data.years = {};
   if (!appState.data.years[yStr]) {
+    const curY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+    const targetY = parseInt(year, 10);
+
+    // NEVER auto-create historical years (< curY). They must be explicitly created if ever needed.
+    if (!isNaN(targetY) && targetY < curY) {
+      return null;
+    }
+
+    // For current or future years, only auto-create if explicitly true, or default (null) for current active year
+    const shouldAutoCreate = (autoCreate === true) || (autoCreate === null && (targetY === curY || yStr === String(curY)));
+    if (!shouldAutoCreate) {
+      return null;
+    }
+
     const prevYearNum = parseInt(year, 10) - 1;
     const prevYearData = appState.data.years ? appState.data.years[String(prevYearNum)] : null;
     const cfg = getSettings();
@@ -345,8 +359,20 @@ export function getYearData(year = appState.currentYear) {
 
 export function getMonthData(mName, year = appState.currentYear) {
   const yData = getYearData(year);
-  if (!yData.months) yData.months = {};
   const cfg = getSettings();
+  if (!yData) {
+    return {
+      current_data: {},
+      credit_data: {},
+      savings_data: {},
+      weekly_items: {},
+      weekly_actuals: {},
+      direct_debits: JSON.parse(JSON.stringify(cfg.default_direct_debits || [])),
+      payments_in: JSON.parse(JSON.stringify(cfg.default_payments_in || [])),
+      deductions_list: JSON.parse(JSON.stringify(cfg.default_deductions || []))
+    };
+  }
+  if (!yData.months) yData.months = {};
   if (!yData.months[mName]) {
     yData.months[mName] = {};
   }
@@ -652,14 +678,16 @@ export function getMasterYearlyBudgets() {
   if (cfg.yearly_budgets && cfg.yearly_budgets.length > 0) {
     return cfg.yearly_budgets;
   }
+  if (!yData) return [];
   if (!yData.yearly_budgets) yData.yearly_budgets = [];
   return yData.yearly_budgets;
 }
 
 export function getBirthdays(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.birthdays || []));
   if (!yData.birthdays) {
-    const cfg = getSettings();
     yData.birthdays = JSON.parse(JSON.stringify(cfg.birthdays || []));
   }
   return yData.birthdays;
@@ -667,8 +695,9 @@ export function getBirthdays(year = appState.currentYear) {
 
 export function getRecurringPayments(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.recurring_payments || []));
   if (!yData.recurring_payments) {
-    const cfg = getSettings();
     yData.recurring_payments = JSON.parse(JSON.stringify(cfg.recurring_payments || []));
   }
   return yData.recurring_payments;
@@ -676,8 +705,9 @@ export function getRecurringPayments(year = appState.currentYear) {
 
 export function getRecurringIncomes(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
   if (!yData.recurring_incomes) {
-    const cfg = getSettings();
     yData.recurring_incomes = JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
   }
   return yData.recurring_incomes;
@@ -710,7 +740,7 @@ export function isItemActiveInMonth(item, mName, year) {
 
 export function getAllScheduledBills(mName, year = appState.currentYear) {
   const md = getMonthData(mName, year);
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const cfg = getSettings();
 
   const list = [];
@@ -785,7 +815,7 @@ export function getAllScheduledBills(mName, year = appState.currentYear) {
 
 export function getAllScheduledIncomes(mName, year = appState.currentYear) {
   const md = getMonthData(mName, year);
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const cfg = getSettings();
 
   const list = [];
@@ -1039,7 +1069,119 @@ export function reconcileYearlyRecurringCommitments(data = appState.data) {
         yd.yearly_recurring = dedupeYR(yd.yearly_recurring);
       }
     });
+
+    // 3. Prune historical phantom years (strictly older than current active year that have no transactions/budgets/actuals)
+    const curYear = data.settings?.current_year || (appState && appState.currentYear) || new Date().getFullYear();
+    Object.keys(data.years).forEach(yStr => {
+      const yNum = parseInt(yStr, 10);
+      if (yNum < curYear && isYearEmptyOrPhantom(yNum, data.years[yStr], curYear)) {
+        delete data.years[yStr];
+        if (Array.isArray(data.available_years)) {
+          data.available_years = data.available_years.filter(yr => yr !== yNum);
+        }
+      }
+    });
   }
+}
+
+export function isYearEmptyOrPhantom(y, yData, currentYear = (appState && appState.currentYear ? appState.currentYear : new Date().getFullYear()), settings = null) {
+  const yNum = parseInt(y, 10);
+  const curNum = parseInt(currentYear, 10);
+  if (yNum === curNum) return false; // Never treat current active year as phantom
+
+  const cfg = settings || (typeof getSettings === 'function' ? getSettings() : (appState?.data?.settings || {}));
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+  const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+  const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+  // If within active forecast projection horizon (months in advance / arrears), never treat as phantom!
+  if (yNum >= minArrearsYear && yNum <= maxFutureYear) {
+    return false;
+  }
+
+  if (!yData || typeof yData !== 'object') return true;
+
+  // 1. Any Open Banking transactions in this year?
+  if (Array.isArray(yData.open_banking_transactions) && yData.open_banking_transactions.length > 0) return false;
+
+  // 2. Any custom yearly budgets?
+  if (Array.isArray(yData.yearly_budgets) && yData.yearly_budgets.length > 0) {
+    const hasRealBudget = yData.yearly_budgets.some(b => b && (
+      (Number(b.total_budget) > 0) ||
+      (Array.isArray(b.items) && b.items.length > 0) ||
+      (Array.isArray(b.transactions) && b.transactions.length > 0)
+    ));
+    if (hasRealBudget) return false;
+  }
+
+  const monthsMap = yData.months || {};
+  for (const m of Object.keys(monthsMap)) {
+    const md = monthsMap[m];
+    if (!md || typeof md !== 'object') continue;
+
+    // Month-level open banking transactions
+    if (Array.isArray(md.open_banking_transactions) && md.open_banking_transactions.length > 0) {
+      return false;
+    }
+
+    // Weekly actual bank balances recorded
+    if (md.weekly_actuals && typeof md.weekly_actuals === 'object') {
+      for (const wData of Object.values(md.weekly_actuals)) {
+        if (wData && typeof wData === 'object') {
+          for (const [k, v] of Object.entries(wData)) {
+            if (k.startsWith('_')) continue;
+            if (v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0") {
+              return false;
+            }
+          }
+        }
+      }
+    }
+
+    // Month category actual spend recorded
+    if (md.actuals && typeof md.actuals === 'object') {
+      if (Object.values(md.actuals).some(v => v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0")) {
+        return false;
+      }
+    }
+
+    // User explicitly edited an opening balance
+    if (md.user_edited_start_balance) {
+      return false;
+    }
+
+    const accList = [
+      ...Object.values(md.current_data || {}),
+      ...Object.values(md.credit_data || {}),
+      ...Object.values(md.savings_data || {})
+    ];
+    for (const acc of accList) {
+      if (acc && acc.user_edited) {
+        return false;
+      }
+    }
+
+    // Weekly spend items / transactions recorded
+    if (md.weekly_items && typeof md.weekly_items === 'object') {
+      for (const items of Object.values(md.weekly_items)) {
+        if (Array.isArray(items) && items.length > 0) {
+          const hasRealItems = items.some(item => item && (Number(item.amount) > 0 || (item.desc && item.desc.trim() !== "")));
+          if (hasRealItems) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 if (typeof window !== 'undefined') {
@@ -1051,6 +1193,7 @@ if (typeof window !== 'undefined') {
   window.getMasterScheduledCommitments = getMasterScheduledCommitments;
   window.getMasterYearlyBudgets = getMasterYearlyBudgets;
   window.reconcileYearlyRecurringCommitments = reconcileYearlyRecurringCommitments;
+  window.isYearEmptyOrPhantom = isYearEmptyOrPhantom;
 }
 
 

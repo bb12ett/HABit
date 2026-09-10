@@ -16,7 +16,8 @@ export function getTrajectoryAvailableMonths() {
     ? getSlidingWindowMonths()
     : [];
   return allMonths.filter(mObj => {
-    const yData = getYearData(mObj.year);
+    const yData = getYearData(mObj.year, false);
+    if (!yData) return false;
     const md = (yData && yData.months && yData.months[mObj.month]) || {};
     return !md.archived;
   });

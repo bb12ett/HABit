@@ -46,6 +46,7 @@ import {
   syncCategoriesFromGitHub,
   fetchAvailableYears,
   createBudgetYear,
+  deleteBudgetYear,
   propagateScheduledBillsApi,
   exportFullBudgetBackupApi,
   importFullBudgetBackupApi,
@@ -2288,16 +2289,16 @@ window.budgetApp = {
       if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
     } else if (sourceType === 'yearly_recurring') {
       if (yData.yearly_recurring && sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
-      const prevYData = getYearData(appState.currentYear - 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
       if (prevYData?.yearly_recurring && sourceIdx !== undefined && isMatch(prevYData.yearly_recurring[sourceIdx])) return prevYData.yearly_recurring[sourceIdx];
-      const nextYData = getYearData(appState.currentYear + 1);
+      const nextYData = getYearData(appState.currentYear + 1, false);
       if (nextYData?.yearly_recurring && sourceIdx !== undefined && isMatch(nextYData.yearly_recurring[sourceIdx])) return nextYData.yearly_recurring[sourceIdx];
       if (cfg.default_yearly_recurring && sourceIdx !== undefined && isMatch(cfg.default_yearly_recurring[sourceIdx])) return cfg.default_yearly_recurring[sourceIdx];
     } else if (sourceType === 'yearly_income') {
       if (yData.yearly_income && sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
-      const prevYData = getYearData(appState.currentYear - 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
       if (prevYData?.yearly_income && sourceIdx !== undefined && isMatch(prevYData.yearly_income[sourceIdx])) return prevYData.yearly_income[sourceIdx];
-      const nextYData = getYearData(appState.currentYear + 1);
+      const nextYData = getYearData(appState.currentYear + 1, false);
       if (nextYData?.yearly_income && sourceIdx !== undefined && isMatch(nextYData.yearly_income[sourceIdx])) return nextYData.yearly_income[sourceIdx];
       if (cfg.default_yearly_income && sourceIdx !== undefined && isMatch(cfg.default_yearly_income[sourceIdx])) return cfg.default_yearly_income[sourceIdx];
     } else if (sourceType === 'recurring_payment') {
@@ -2329,8 +2330,8 @@ window.budgetApp = {
 
     if (billDesc) {
       const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
-      const prevYData = getYearData(appState.currentYear - 1);
-      const nextYData = getYearData(appState.currentYear + 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
+      const nextYData = getYearData(appState.currentYear + 1, false);
 
       let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
           || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
@@ -5287,6 +5288,101 @@ window.budgetApp = {
     renderNav();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  toggleArchiveYearFold(year) {
+    const yNum = parseInt(year, 10);
+    if (!window.__archiveOpenYears) {
+      const curY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+      window.__archiveOpenYears = new Set([curY]);
+    }
+    const contentEl = document.getElementById(`archive-year-content-${yNum}`);
+    const chevronEl = document.getElementById(`archive-year-chevron-${yNum}`);
+    const headerEl = document.getElementById(`archive-year-header-${yNum}`);
+
+    if (window.__archiveOpenYears.has(yNum)) {
+      window.__archiveOpenYears.delete(yNum);
+      if (contentEl) contentEl.style.display = 'none';
+      if (chevronEl) chevronEl.textContent = '▶';
+      if (headerEl) {
+        headerEl.style.borderBottom = 'none';
+        headerEl.title = `Click to expand Year ${yNum}`;
+      }
+    } else {
+      window.__archiveOpenYears.add(yNum);
+      if (contentEl) contentEl.style.display = 'grid';
+      if (chevronEl) chevronEl.textContent = '▼';
+      if (headerEl) {
+        headerEl.style.borderBottom = '1px solid var(--border)';
+        headerEl.title = `Click to collapse Year ${yNum}`;
+      }
+    }
+  },
+
+  toggleAllArchiveYears(expand = true) {
+    const years = appState.data?.years || {};
+    const allYearNums = Object.keys(years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
+    if (!window.__archiveOpenYears) window.__archiveOpenYears = new Set();
+    if (expand) {
+      allYearNums.forEach(y => window.__archiveOpenYears.add(y));
+    } else {
+      window.__archiveOpenYears.clear();
+    }
+    openArchiveManagerModal();
+  },
+
+  async deleteBudgetYear(year) {
+    const yrNum = parseInt(year, 10);
+    const currentY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+    if (!yrNum || isNaN(yrNum)) return;
+    if (yrNum === currentY) {
+      alert(`Cannot delete active budget year (${currentY}).`);
+      return;
+    }
+
+    const cfg = getSettings();
+    const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+    const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+    const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+    const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+    const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+    if (yrNum >= minArrearsYear && yrNum <= maxFutureYear) {
+      alert(`Cannot delete Year ${yrNum} as it is currently within your active forecasting window (${adv} months in advance). To remove it, first adjust 'Months in advance' in Settings.`);
+      return;
+    }
+
+    const confirmDelete = confirm(`Are you sure you want to permanently delete Year ${yrNum} and all its data?\n\nThis action cannot be undone.`);
+    if (!confirmDelete) return;
+
+    const res = await deleteBudgetYear(yrNum);
+    if (appState.data && appState.data.years) {
+      delete appState.data.years[String(yrNum)];
+    }
+    if (appState.data && Array.isArray(appState.data.available_years)) {
+      appState.data.available_years = appState.data.available_years.filter(y => y !== yrNum);
+    }
+
+    if (res && res.data) {
+      if (res.data.years) {
+        delete res.data.years[String(yrNum)];
+        appState.data.years = res.data.years;
+      }
+      if (res.data.available_years) {
+        appState.data.available_years = res.data.available_years.filter(y => y !== yrNum);
+      }
+      if (res.data.settings) appState.data.settings = res.data.settings;
+    } else {
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+
+    calculateAndSyncRollovers();
+    renderNav();
+    openArchiveManagerModal();
+    alert(`Year ${yrNum} deleted successfully.`);
   },
 
   syncSlidingWindowAutoArchive() {

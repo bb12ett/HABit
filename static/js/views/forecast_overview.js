@@ -404,6 +404,85 @@ export function renderForecastOverviewView(container) {
   if (typeof calculateLiveDailyPacing === 'function' && activeWeekObj && activeWeekPred) {
     livePacing = calculateLiveDailyPacing(activeWeekObj, activeWeekPred, activeWeekActuals, cfg);
   }
+
+  // Active week transactions and cleared status resolution
+  const resolveOccDateStr = (item) => {
+    if (item.actualPaymentDate) {
+      if (typeof item.actualPaymentDate === 'string') return item.actualPaymentDate.slice(0, 10);
+      if (item.actualPaymentDate instanceof Date && !isNaN(item.actualPaymentDate)) {
+        const y = item.actualPaymentDate.getFullYear();
+        const m = String(item.actualPaymentDate.getMonth() + 1).padStart(2, '0');
+        const d = String(item.actualPaymentDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    }
+    if (item.exact_date) return String(item.exact_date).slice(0, 10);
+    if (item.due_day && currentMonthName) {
+      const mIdx = months.indexOf(currentMonthName);
+      if (mIdx >= 0) {
+        const y = currentYear || new Date().getFullYear();
+        const m = String(mIdx + 1).padStart(2, '0');
+        const d = String(item.due_day).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    }
+    return '';
+  };
+
+  const todayEndMs = new Date().setHours(23, 59, 59, 999);
+
+  const activeWeekDDs = (activeWeekPred.wDDs || []).map(d => {
+    const occDateStr = resolveOccDateStr(d);
+    const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_payment');
+    const isCleared = isRecurring
+      ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr))
+      : Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
+    let pDate = null;
+    if (d.actualPaymentDate) pDate = new Date(d.actualPaymentDate);
+    else if (d.exact_date) pDate = new Date(d.exact_date);
+    else if (d.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), d.due_day);
+    const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+    return {
+      ...d,
+      is_income: false,
+      occDateStr,
+      isCleared,
+      isPastDate
+    };
+  });
+
+  const activeWeekIncomes = (activeWeekPred.wIncomes || []).map(i => {
+    const occDateStr = resolveOccDateStr(i);
+    const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income');
+    const isCleared = isRecurring
+      ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr))
+      : Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
+    let pDate = null;
+    if (i.actualPaymentDate) pDate = new Date(i.actualPaymentDate);
+    else if (i.exact_date) pDate = new Date(i.exact_date);
+    else if (i.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), i.due_day);
+    const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+    return {
+      ...i,
+      is_income: true,
+      occDateStr,
+      isCleared,
+      isPastDate
+    };
+  });
+
+  const clearedBillsCount = activeWeekDDs.filter(d => d.isCleared).length;
+  const clearedBillsTotal = activeWeekDDs.filter(d => d.isCleared).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const clearedIncomesCount = activeWeekIncomes.filter(i => i.isCleared).length;
+  const clearedIncomesTotal = activeWeekIncomes.filter(i => i.isCleared).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  const activeWeekAllTransactions = [...activeWeekDDs, ...activeWeekIncomes];
+  activeWeekAllTransactions.sort((a, b) => {
+    const tA = a.actualPaymentDate ? new Date(a.actualPaymentDate).getTime() : (parseInt(a.due_day, 10) || 0);
+    const tB = b.actualPaymentDate ? new Date(b.actualPaymentDate).getTime() : (parseInt(b.due_day, 10) || 0);
+    return tA - tB;
+  });
+  const totalClearedTransactionsCount = activeWeekAllTransactions.filter(t => t.isCleared).length;
   
   // Calculate total money in vs money out for monthly cashflow
   const totalInflows = totalCurrentInflow + forecast.totalMonthPaymentsIn;
@@ -887,13 +966,13 @@ export function renderForecastOverviewView(container) {
                   <div class="forecast-spotlight-item">
                     <span class="forecast-spotlight-label">Bills Clearing</span>
                     <span class="forecast-spotlight-value text-red">-${curr}${(activeWeekPred.wDDTotal || 0).toFixed(2)}</span>
-                    <span class="forecast-spotlight-sub">${(activeWeekPred.wDDs || []).length} direct debits</span>
+                    <span class="forecast-spotlight-sub">${clearedBillsCount > 0 ? `<strong style="color:var(--green);">${clearedBillsCount}</strong> of ${activeWeekDDs.length} cleared (${curr}${clearedBillsTotal.toFixed(0)})` : `${activeWeekDDs.length} direct debits`}</span>
                   </div>
 
                   <div class="forecast-spotlight-item">
                     <span class="forecast-spotlight-label">Expected Inflow</span>
                     <span class="forecast-spotlight-value text-green">+${curr}${(activeWeekPred.wIncomeTotal || 0).toFixed(2)}</span>
-                    <span class="forecast-spotlight-sub">${(activeWeekPred.wIncomes || []).length} salary / incomes</span>
+                    <span class="forecast-spotlight-sub">${clearedIncomesCount > 0 ? `<strong style="color:var(--green);">${clearedIncomesCount}</strong> of ${activeWeekIncomes.length} cleared (${curr}${clearedIncomesTotal.toFixed(0)})` : `${activeWeekIncomes.length} salary / incomes`}</span>
                   </div>
 
                   <div class="forecast-spotlight-item">
@@ -903,26 +982,91 @@ export function renderForecastOverviewView(container) {
                   </div>
                 </div>
 
-                <!-- Bills clearing this week -->
+                <!-- Transactions clearing this week -->
                 <div style="margin-top:14px;">
                   <h4 style="font-size:12.5px; font-weight:600; color:var(--heading); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>Bills Clearing in ${activeWeekObj?.name || 'Active Week'}</span>
-                    <span style="font-size:11px; color:var(--text-muted);">${(activeWeekPred.wDDs || []).length} items</span>
+                    <span>${activeWeekIncomes.length > 0 ? 'Transactions' : 'Bills'} Clearing in ${activeWeekObj?.name || 'Active Week'}</span>
+                    <span style="font-size:11px; color:var(--text-muted);">${totalClearedTransactionsCount > 0 ? `<strong style="color:var(--green);">${totalClearedTransactionsCount}</strong> of ` : ''}${activeWeekAllTransactions.length} items${totalClearedTransactionsCount > 0 ? ' cleared' : ''}</span>
                   </h4>
 
                   <div class="forecast-chips-scroll">
-                    ${(activeWeekPred.wDDs && activeWeekPred.wDDs.length > 0) ? activeWeekPred.wDDs.map(d => `
-                      <div class="forecast-bill-chip">
-                        <div style="display:flex; align-items:center; gap:6px; min-width:0;">
-                          <span class="forecast-bill-chip-icon">⚡</span>
-                          <div class="forecast-bill-chip-info">
-                            <span class="forecast-bill-chip-title">${d.desc || d.name}</span>
-                            <span class="forecast-bill-chip-meta">Due Day ${d.due_day} &bull; ${d.account || 'Current'}</span>
+                    ${(activeWeekAllTransactions && activeWeekAllTransactions.length > 0) ? activeWeekAllTransactions.map(t => {
+                      const isInc = Boolean(t.is_income);
+                      const cleanDesc = (t.rawDesc || t.desc || t.name || '').replace(/'/g, "\\'");
+                      const sType = t.source_type || (isInc ? 'payments_in' : 'direct_debit');
+                      const sIdx = t.source_idx !== undefined ? t.source_idx : 0;
+                      const amt = Number(t.amount) || 0;
+                      const occStr = t.occDateStr || '';
+                      const isClr = Boolean(t.isCleared);
+                      const isPast = Boolean(t.isPastDate);
+
+                      let badgeHtml = '';
+                      if (isClr) {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:700; background:rgba(16,185,129,0.22); color:var(--green); border:1px solid rgba(16,185,129,0.45); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Cleared / Paid • Click to mark Due">
+                            ✓ Cleared
+                          </button>
+                        `;
+                      } else if (isPast) {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.18); color:var(--amber); border:1px solid rgba(245,158,11,0.4); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Payment Due • Click to mark Cleared">
+                            ⚠️ Due
+                          </button>
+                        `;
+                      } else {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:500; background:rgba(255,255,255,0.06); color:var(--text-muted); border:1px solid rgba(255,255,255,0.12); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Upcoming Payment • Click to mark Cleared">
+                            ⏳ Upcoming
+                          </button>
+                        `;
+                      }
+
+                      const iconDisplay = isClr ? '✅' : (t.icon || (isInc ? '📥' : (t.transfer_to ? '➔' : (t.isRecurring ? '🔄' : '⚡'))));
+                      const dateMeta = t.actualDateStr || (t.due_day ? `Day ${t.due_day}` : '');
+
+                      return `
+                        <div class="forecast-bill-chip ${isClr ? 'cleared' : (isPast ? 'past-due' : '')} ${isInc ? 'income' : ''}" 
+                             style="${isClr ? 'border-left: 3.5px solid var(--green) !important; background: rgba(16, 185, 129, 0.05);' : (isPast ? 'border-left: 3.5px solid var(--amber) !important;' : '')} cursor:pointer;" 
+                             onclick="window.budgetApp.setTab('${currentMonthName}')" 
+                             title="Click to view ${activeWeekObj?.name || 'week'} in ${currentMonthName}">
+                          <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 auto;">
+                            <span class="forecast-bill-chip-icon" style="font-size:15px; flex-shrink:0;">${iconDisplay}</span>
+                            <div class="forecast-bill-chip-info" style="min-width:0;">
+                              <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                                <span class="forecast-bill-chip-title" style="font-size:12px; ${isClr ? 'opacity:0.95;' : ''}">${t.desc || t.name}</span>
+                              </div>
+                              <span class="forecast-bill-chip-meta" style="font-size:10.5px;">
+                                ${dateMeta ? `Due ${dateMeta} &bull; ` : ''}${t.account || 'Current Account'}
+                                ${t.matched_payee ? ` &bull; <span style="color:var(--green); font-weight:600;">Matched: ${t.matched_payee}</span>` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:3px; flex-shrink:0;">
+                            <span class="forecast-bill-chip-amt" style="font-size:12px; font-weight:700; ${isInc ? 'color:var(--green);' : (isClr ? 'color:var(--green);' : 'color:var(--red);')}">
+                              ${isInc ? '+' : '-'}${curr}${amt.toFixed(2)}
+                            </span>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                              ${badgeHtml}
+                              ${(globalEditMode || (cfg.open_banking && cfg.open_banking.enabled)) ? `
+                                <button type="button" class="btn secondary" 
+                                  style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;" 
+                                  onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                                  title="Match with Bank Transaction">🔗</button>
+                              ` : ''}
+                            </div>
                           </div>
                         </div>
-                        <span class="forecast-bill-chip-amt">-${curr}${Number(d.amount).toFixed(2)}</span>
-                      </div>
-                    `).join('') : '<div class="forecast-empty-note">No scheduled bills clearing this week</div>'}
+                      `;
+                    }).join('') : '<div class="forecast-empty-note">No scheduled transactions clearing this week</div>'}
                   </div>
                 </div>
 

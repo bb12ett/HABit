@@ -1,4 +1,4 @@
-import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear } from '../state.js';
+import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear, isYearEmptyOrPhantom } from '../state.js';
 import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek, getOccasionDate, getOccasionIcon } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
@@ -886,24 +886,67 @@ export function openAddBudgetModal() {
 
 export function openArchiveManagerModal() {
   const years = appState.data.years || {};
-  const sortedYears = Object.keys(years).sort();
+  const currentY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+  const cfg = (typeof getSettings === 'function') ? getSettings() : (appState?.data?.settings || {});
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+  const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+  const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+  // Initialize open years set (active year open by default)
+  if (!window.__archiveOpenYears) {
+    window.__archiveOpenYears = new Set([currentY]);
+  }
+
+  // Sort descending: active / newest year at the top
+  const allYearNums = Object.keys(years).map(y => parseInt(y, 10)).filter(n => !isNaN(n)).sort((a, b) => b - a);
 
   showModal({
     title: "📦 Archive & History Manager",
     body: `
-      <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-        Archiving hides completed months from the top navigation bar while keeping all transactions, starting balances, and rollovers permanently saved in the database.
-      </p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; flex:1; min-width:200px;">
+          Archiving hides completed months from the top navigation bar while keeping all transactions and rollovers permanently saved.
+        </p>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn secondary sm" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.toggleAllArchiveYears(true)">Expand All</button>
+          <button type="button" class="btn secondary sm" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.toggleAllArchiveYears(false)">Collapse All</button>
+        </div>
+      </div>
 
-      ${sortedYears.map(y => {
-        const yData = years[y] || {};
+      ${allYearNums.map(y => {
+        const yData = years[String(y)] || {};
+        const isCurrent = (y === currentY);
+        const isWithinHorizon = (y >= minArrearsYear && y <= maxFutureYear);
+        const isOpen = window.__archiveOpenYears.has(y);
+        const archivedCount = months.filter(m => !!(yData.months && yData.months[m] && yData.months[m].archived)).length;
+
+        const delBtn = (!isCurrent && !isWithinHorizon) ? `
+          <button class="btn secondary sm" style="font-size:10.5px; padding:2px 8px; color:#ef4444; border-color:rgba(239,68,68,0.3);" onclick="window.budgetApp.deleteBudgetYear(${y})" title="Delete Year ${y} and its data file">
+            🗑️ Delete Year
+          </button>
+        ` : '';
+
         return `
-          <div style="margin-bottom:18px; border-bottom:1px solid var(--border); padding-bottom:12px;">
-            <h4 style="font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-              <span style="color:var(--heading); font-weight:700;">📅 Year ${y}</span>
-              <span style="font-size:11px; font-weight:normal; color:var(--text-muted);">Toggle tab visibility</span>
-            </h4>
-            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px;">
+          <div class="archive-year-card" style="margin-bottom:10px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--card-bg, rgba(255,255,255,0.02));">
+            <div id="archive-year-header-${y}" class="archive-year-header" onclick="window.budgetApp.toggleArchiveYearFold(${y})" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; background:rgba(255,255,255,0.03); border-bottom:${isOpen ? '1px solid var(--border)' : 'none'}; transition:background 0.15s ease;" title="Click to ${isOpen ? 'collapse' : 'expand'} Year ${y}">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="archive-year-chevron-${y}" style="font-size:10px; color:var(--text-muted); width:14px; display:inline-block; transition:transform 0.15s ease;">${isOpen ? '▼' : '▶'}</span>
+                <span style="color:var(--heading); font-weight:700; font-size:13px;">📅 Year ${y}</span>
+                ${isCurrent ? '<span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9.5px; padding:1px 6px;">Active Year</span>' : ''}
+                <span class="badge" style="background:rgba(255,255,255,0.07); font-size:10px; padding:1px 6px; color:var(--text-muted);">${archivedCount} of 12 archived</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;" onclick="event.stopPropagation()">
+                ${delBtn}
+              </div>
+            </div>
+            <div id="archive-year-content-${y}" style="display:${isOpen ? 'grid' : 'none'}; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px; padding:12px; background:var(--card-bg);">
               ${months.map(m => {
                 const md = (yData.months && yData.months[m]) || {};
                 const isArchived = !!md.archived;

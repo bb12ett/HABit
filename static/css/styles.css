@@ -5057,6 +5057,23 @@ body.global-edit-mode-active #pullToRefreshContainer {
   flex-shrink: 0;
 }
 
+.forecast-bill-chip.cleared {
+  border-left: 3.5px solid var(--green) !important;
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.forecast-bill-chip.past-due {
+  border-left: 3.5px solid var(--amber) !important;
+}
+
+.forecast-bill-chip.income {
+  background: rgba(16, 185, 129, 0.03);
+}
+
+.forecast-bill-chip:hover {
+  filter: brightness(1.04);
+}
+
 /* Multi-Week Runway Grid */
 .forecast-week-runway-grid {
   display: grid;
@@ -5594,4 +5611,17 @@ body.global-edit-mode-active #pullToRefreshContainer {
   .forecast-spotlight-value {
     font-size: 14.5px;
   }
+}
+
+/* Archive Manager Foldable Year Cards */
+.archive-year-card {
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.archive-year-header:hover {
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+
+.archive-year-header:active {
+  background: rgba(255, 255, 255, 0.09) !important;
 }

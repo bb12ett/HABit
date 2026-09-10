@@ -5,6 +5,20 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.20] - 2026-09-10
+
+### Fixed
+- **🧹 Root Cause Elimination of Phantom Historical Years (2014–2025) & Clean Archive Manager**:
+  - **Identified & Eliminated Definitive Root Cause**: Pinpointed the origin of phantom historical years to commit `0b6be9b` (Sept 9, 19:34). In that commit, cross-boundary annual bill queries evaluated `startY = schedule.startDate.getFullYear()`, which in January 2026 evaluated to December 2025 (`startY = 2025`). Because `getYearData(year)` silently instantiated `appState.data.years[year]` whenever any non-existent year was queried, querying 2025 created a blank 2025 record. When `calculateAndSyncRollovers()` iterated through `appState.data.years`, January 2025 evaluated `startY = 2024`, creating 2024. Each calculation cycle recursively cascaded backwards all the way to 2014. Furthermore, whenever 2025 was deleted, the next recalculation for 2026 immediately called `getYearData(2025)` and resurrected it.
+  - **Sealed Auto-Creation at the Root**: Updated `getYearData(year, autoCreate = false)` and boundary lookups in `calculations.js` (`computeMonthClosing`, `getDDsForWeek`) to strictly prohibit auto-creating historical years (`< currentYear`) during read queries, breaking the backward cascade and permanently preventing phantom year resurrection.
+  - **Removed Phantom UI Friction & Clutter**: Removed all symptomatic phantom year banners, "Clean Empty Years" buttons, and warning badges from the Archive Manager modal. Because root cause prevention is combined with silent startup auto-pruning, historical phantom years are cleaned automatically without requiring user intervention or cluttering the interface.
+  - **Fixed Storage & Deletion Reliability**: Added `.del()` and `.delete()` aliases to `IndexedDBStore` ensuring IndexedDB storage deletes cleanly without errors. Prevented server `load_data` (in `app.py`) and client `LocalEngine.fetchBudget` (in `api.js`) from recreating missing historical years.
+  - **Active Forecast Horizon Protection**: Ensured future projection years within the active sliding forecast window (e.g. 2028 when configured with `months_in_advance: 18` extending from September 2026 into March 2028) are strictly protected and never treated as empty or eligible for deletion.
+  - **Foldable Year Accordions in Archive Manager**: Made year sections in the Archive & History Manager collapsible cards with interactive headers and toggle chevrons (`▼ / ▶`). The active year defaults to expanded while future and historical years default to collapsed, avoiding UI clutter. Added at-a-glance archived month count badges (`X of 12 archived`) and one-click `Expand All` / `Collapse All` header controls with state persistence across month archive actions.
+  - **Clean Archive Manager Experience**: Archive Manager displays only the user's active and forecast window years in clean descending chronological order (`2028, 2027, 2026`) with month visibility toggles and a discreet `🗑️ Delete Year` action button only for obsolete historical years.
+
+---
+
 ## [0.3.19] - 2026-09-09
 
 ### Added
@@ -16,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated rolling 365-day timeline and countdown in `budgets.js` to accurately calculate next year's occurrence using next year's shifted date rather than repeating the current date.
   - Added contextual occasion icons (💐, 👔, 🐣, ✝️, 🛍️, 🎄, 💍, 🎂) in overview cards, budget cards, and spend dialogs.
   - Preserved complete backward compatibility for standard fixed calendar dates.
+- **🔦 Active Week Spotlight Cleared Transactions & Live Status Badges**:
+  - Added visual cleared indicators to the **Active Week Spotlight** on the Overview page, distinctly marking paid direct debits and cleared inflows with green left border accents, subtle background highlights, and checkmark icons (`✅`).
+  - Added interactive status badges (`✓ Cleared`, `⚠️ Due`, and `⏳ Upcoming`) allowing users to toggle a bill or transaction's cleared state directly from the Overview page.
+  - Displayed bank-matched payee names (`Matched: [payee]`) and manual match shortcuts (`🔗`) when bank transaction integration is active.
+  - Updated the "Bills Clearing" and "Expected Inflow" metric cards to show real-time progress ratios (e.g. `2 of 5 cleared (£320)`).
+  - Included all scheduled transactions (both bills and expected inflows) in the active week spotlight feed in chronological order.
 
 ### Fixed
 - **📱 Modal Layout & Selection Box Mobile Responsiveness**:

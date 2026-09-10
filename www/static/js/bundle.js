@@ -278,13 +278,27 @@ function getSettings() {
   return appState.data.settings;
 }
 
-function getYearData(year = appState.currentYear) {
+function getYearData(year = appState.currentYear, autoCreate = null) {
   const yStr = String(year);
   if (!appState.data || typeof appState.data !== 'object') {
     appState.data = { settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)), years: {} };
   }
   if (!appState.data.years) appState.data.years = {};
   if (!appState.data.years[yStr]) {
+    const curY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+    const targetY = parseInt(year, 10);
+
+    // NEVER auto-create historical years (< curY). They must be explicitly created if ever needed.
+    if (!isNaN(targetY) && targetY < curY) {
+      return null;
+    }
+
+    // For current or future years, only auto-create if explicitly true, or default (null) for current active year
+    const shouldAutoCreate = (autoCreate === true) || (autoCreate === null && (targetY === curY || yStr === String(curY)));
+    if (!shouldAutoCreate) {
+      return null;
+    }
+
     const prevYearNum = parseInt(year, 10) - 1;
     const prevYearData = appState.data.years ? appState.data.years[String(prevYearNum)] : null;
     const cfg = getSettings();
@@ -348,8 +362,20 @@ function getYearData(year = appState.currentYear) {
 
 function getMonthData(mName, year = appState.currentYear) {
   const yData = getYearData(year);
-  if (!yData.months) yData.months = {};
   const cfg = getSettings();
+  if (!yData) {
+    return {
+      current_data: {},
+      credit_data: {},
+      savings_data: {},
+      weekly_items: {},
+      weekly_actuals: {},
+      direct_debits: JSON.parse(JSON.stringify(cfg.default_direct_debits || [])),
+      payments_in: JSON.parse(JSON.stringify(cfg.default_payments_in || [])),
+      deductions_list: JSON.parse(JSON.stringify(cfg.default_deductions || []))
+    };
+  }
+  if (!yData.months) yData.months = {};
   if (!yData.months[mName]) {
     yData.months[mName] = {};
   }
@@ -655,14 +681,16 @@ function getMasterYearlyBudgets() {
   if (cfg.yearly_budgets && cfg.yearly_budgets.length > 0) {
     return cfg.yearly_budgets;
   }
+  if (!yData) return [];
   if (!yData.yearly_budgets) yData.yearly_budgets = [];
   return yData.yearly_budgets;
 }
 
 function getBirthdays(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.birthdays || []));
   if (!yData.birthdays) {
-    const cfg = getSettings();
     yData.birthdays = JSON.parse(JSON.stringify(cfg.birthdays || []));
   }
   return yData.birthdays;
@@ -670,8 +698,9 @@ function getBirthdays(year = appState.currentYear) {
 
 function getRecurringPayments(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.recurring_payments || []));
   if (!yData.recurring_payments) {
-    const cfg = getSettings();
     yData.recurring_payments = JSON.parse(JSON.stringify(cfg.recurring_payments || []));
   }
   return yData.recurring_payments;
@@ -679,8 +708,9 @@ function getRecurringPayments(year = appState.currentYear) {
 
 function getRecurringIncomes(year = appState.currentYear) {
   const yData = getYearData(year);
+  const cfg = getSettings();
+  if (!yData) return JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
   if (!yData.recurring_incomes) {
-    const cfg = getSettings();
     yData.recurring_incomes = JSON.parse(JSON.stringify(cfg.recurring_incomes || []));
   }
   return yData.recurring_incomes;
@@ -713,7 +743,7 @@ function isItemActiveInMonth(item, mName, year) {
 
 function getAllScheduledBills(mName, year = appState.currentYear) {
   const md = getMonthData(mName, year);
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const cfg = getSettings();
 
   const list = [];
@@ -788,7 +818,7 @@ function getAllScheduledBills(mName, year = appState.currentYear) {
 
 function getAllScheduledIncomes(mName, year = appState.currentYear) {
   const md = getMonthData(mName, year);
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const cfg = getSettings();
 
   const list = [];
@@ -1042,7 +1072,119 @@ function reconcileYearlyRecurringCommitments(data = appState.data) {
         yd.yearly_recurring = dedupeYR(yd.yearly_recurring);
       }
     });
+
+    // 3. Prune historical phantom years (strictly older than current active year that have no transactions/budgets/actuals)
+    const curYear = data.settings?.current_year || (appState && appState.currentYear) || new Date().getFullYear();
+    Object.keys(data.years).forEach(yStr => {
+      const yNum = parseInt(yStr, 10);
+      if (yNum < curYear && isYearEmptyOrPhantom(yNum, data.years[yStr], curYear)) {
+        delete data.years[yStr];
+        if (Array.isArray(data.available_years)) {
+          data.available_years = data.available_years.filter(yr => yr !== yNum);
+        }
+      }
+    });
   }
+}
+
+function isYearEmptyOrPhantom(y, yData, currentYear = (appState && appState.currentYear ? appState.currentYear : new Date().getFullYear()), settings = null) {
+  const yNum = parseInt(y, 10);
+  const curNum = parseInt(currentYear, 10);
+  if (yNum === curNum) return false; // Never treat current active year as phantom
+
+  const cfg = settings || (typeof getSettings === 'function' ? getSettings() : (appState?.data?.settings || {}));
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+  const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+  const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+  // If within active forecast projection horizon (months in advance / arrears), never treat as phantom!
+  if (yNum >= minArrearsYear && yNum <= maxFutureYear) {
+    return false;
+  }
+
+  if (!yData || typeof yData !== 'object') return true;
+
+  // 1. Any Open Banking transactions in this year?
+  if (Array.isArray(yData.open_banking_transactions) && yData.open_banking_transactions.length > 0) return false;
+
+  // 2. Any custom yearly budgets?
+  if (Array.isArray(yData.yearly_budgets) && yData.yearly_budgets.length > 0) {
+    const hasRealBudget = yData.yearly_budgets.some(b => b && (
+      (Number(b.total_budget) > 0) ||
+      (Array.isArray(b.items) && b.items.length > 0) ||
+      (Array.isArray(b.transactions) && b.transactions.length > 0)
+    ));
+    if (hasRealBudget) return false;
+  }
+
+  const monthsMap = yData.months || {};
+  for (const m of Object.keys(monthsMap)) {
+    const md = monthsMap[m];
+    if (!md || typeof md !== 'object') continue;
+
+    // Month-level open banking transactions
+    if (Array.isArray(md.open_banking_transactions) && md.open_banking_transactions.length > 0) {
+      return false;
+    }
+
+    // Weekly actual bank balances recorded
+    if (md.weekly_actuals && typeof md.weekly_actuals === 'object') {
+      for (const wData of Object.values(md.weekly_actuals)) {
+        if (wData && typeof wData === 'object') {
+          for (const [k, v] of Object.entries(wData)) {
+            if (k.startsWith('_')) continue;
+            if (v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0") {
+              return false;
+            }
+          }
+        }
+      }
+    }
+
+    // Month category actual spend recorded
+    if (md.actuals && typeof md.actuals === 'object') {
+      if (Object.values(md.actuals).some(v => v !== "" && v !== null && v !== undefined && v !== 0 && v !== "0")) {
+        return false;
+      }
+    }
+
+    // User explicitly edited an opening balance
+    if (md.user_edited_start_balance) {
+      return false;
+    }
+
+    const accList = [
+      ...Object.values(md.current_data || {}),
+      ...Object.values(md.credit_data || {}),
+      ...Object.values(md.savings_data || {})
+    ];
+    for (const acc of accList) {
+      if (acc && acc.user_edited) {
+        return false;
+      }
+    }
+
+    // Weekly spend items / transactions recorded
+    if (md.weekly_items && typeof md.weekly_items === 'object') {
+      for (const items of Object.values(md.weekly_items)) {
+        if (Array.isArray(items) && items.length > 0) {
+          const hasRealItems = items.some(item => item && (Number(item.amount) > 0 || (item.desc && item.desc.trim() !== "")));
+          if (hasRealItems) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 if (typeof window !== 'undefined') {
@@ -1054,6 +1196,7 @@ if (typeof window !== 'undefined') {
   window.getMasterScheduledCommitments = getMasterScheduledCommitments;
   window.getMasterYearlyBudgets = getMasterYearlyBudgets;
   window.reconcileYearlyRecurringCommitments = reconcileYearlyRecurringCommitments;
+  window.isYearEmptyOrPhantom = isYearEmptyOrPhantom;
 }
 
 
@@ -1171,6 +1314,14 @@ class IndexedDBStore {
         resolve(false);
       }
     });
+  }
+
+  async del(key) {
+    return await this.remove(key);
+  }
+
+  async delete(key) {
+    return await this.remove(key);
   }
 
   async keys() {
@@ -1339,11 +1490,27 @@ const LocalEngine = {
     const endYr = Math.floor((curYr * 12 + curM + adv) / 12);
 
     let allYears = await localStore.get('habit_available_years') || [];
+    const validYears = [];
+    for (const yr of allYears) {
+      if (yr < curYr) {
+        const yData = await localStore.get(`habit_year_${yr}`);
+        const checkEmptyFn = (typeof isYearEmptyOrPhantom === 'function') ? isYearEmptyOrPhantom : null;
+        if (checkEmptyFn && checkEmptyFn(yr, yData, curYr, settings)) {
+          await localStore.remove(`habit_year_${yr}`);
+          continue;
+        }
+      }
+      validYears.push(yr);
+    }
+    allYears = validYears;
+
     const neededYears = new Set([...allYears, curYr]);
     for (let y = startYr; y <= endYr; y++) {
-      neededYears.add(y);
+      if (y >= curYr) {
+        neededYears.add(y);
+      }
     }
-    allYears = Array.from(neededYears).sort();
+    allYears = Array.from(neededYears).sort((a, b) => a - b);
     await localStore.set('habit_available_years', allYears);
 
     const yearsObj = {};
@@ -1351,6 +1518,8 @@ const LocalEngine = {
       const yStr = String(y);
       let yearData = await localStore.get(`habit_year_${yStr}`);
       if (!yearData) {
+        // Do NOT auto-create historical years (< curYr) that do not exist!
+        if (y < curYr) continue;
         yearData = {
           archived: false,
           birthdays: JSON.parse(JSON.stringify(settings.birthdays || [])),
@@ -1371,7 +1540,7 @@ const LocalEngine = {
     return {
       settings,
       current_year: curYr,
-      available_years: allYears,
+      available_years: Object.keys(yearsObj).map(n => parseInt(n, 10)).sort((a, b) => a - b),
       open_banking_transactions: txns,
       years: yearsObj
     };
@@ -1396,10 +1565,9 @@ const LocalEngine = {
         await localStore.set('habit_open_banking_txns', state.open_banking_transactions);
       }
 
-      let allYears = await localStore.get('habit_available_years') || [];
       if (state.years) {
         const yearNums = Object.keys(state.years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
-        allYears = Array.from(new Set([...allYears, ...yearNums])).sort();
+        const allYears = Array.from(new Set(yearNums)).sort((a, b) => a - b);
         await localStore.set('habit_available_years', allYears);
       }
 
@@ -1452,6 +1620,16 @@ const LocalEngine = {
     allYears = Array.from(new Set([...allYears, yrNum])).sort();
     await localStore.set('habit_available_years', allYears);
 
+    return { success: true, year: yrNum, years: allYears };
+  },
+
+  async deleteBudgetYear(year) {
+    const yrNum = parseInt(year, 10);
+    const yStr = String(yrNum);
+    await localStore.del(`habit_year_${yStr}`);
+    let allYears = await localStore.get('habit_available_years') || [];
+    allYears = allYears.filter(y => y !== yrNum);
+    await localStore.set('habit_available_years', allYears);
     return { success: true, year: yrNum, years: allYears };
   },
 
@@ -1750,6 +1928,34 @@ async function createBudgetYear(year, copyFromYear) {
   } catch (e) {
     console.error('createBudgetYear error, falling back to local:', e);
     return await LocalEngine.createBudgetYear(year, copyFromYear);
+  }
+  return null;
+}
+
+async function deleteBudgetYear(year) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    return await LocalEngine.deleteBudgetYear(year);
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/year/${encodeURIComponent(year)}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+
+    // Fallback to POST if DELETE is not supported by proxy
+    const rPost = await fetch(`${getBaseApiUrl()}api/budget/year/delete`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ year })
+    });
+    if (rPost.ok) return await rPost.json();
+  } catch (e) {
+    console.error('deleteBudgetYear error, falling back to local:', e);
+    return await LocalEngine.deleteBudgetYear(year);
   }
   return null;
 }
@@ -3267,7 +3473,7 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   const allYearlyBills = [];
   const seenYBK = new Set();
-  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+  [...(yData?.yearly_recurring || []), ...(getYearData(startY, false)?.yearly_recurring || []), ...(getYearData(endY, false)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
     const k = `${b.desc || b.name}_${b.month || ''}_${b.due_day || ''}`;
     if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
   });
@@ -3289,7 +3495,7 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   const allYearlyIncome = [];
   const seenYIK = new Set();
-  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+  [...(yData?.yearly_income || []), ...(getYearData(startY, false)?.yearly_income || []), ...(getYearData(endY, false)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
     const k = `${i.desc || i.name}_${i.month || ''}_${i.due_day || ''}`;
     if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
   });
@@ -3514,8 +3720,10 @@ function calculateAndSyncRollovers(year = appState.currentYear) {
   }
   const targetY = parseInt(year, 10);
   if (!isNaN(targetY) && !yearsToSync.includes(targetY)) {
-    yearsToSync.push(targetY);
-    yearsToSync.sort((a, b) => a - b);
+    if (appState.data && appState.data.years && appState.data.years[String(targetY)]) {
+      yearsToSync.push(targetY);
+      yearsToSync.sort((a, b) => a - b);
+    }
   }
   if (yearsToSync.length === 0) {
     yearsToSync.push(2026);
@@ -4962,19 +5170,19 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
 
   (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const startY = schedule.startDate.getFullYear();
   const endY = schedule.endDate.getFullYear();
   const allYearlyBills = [];
   const seenYBK = new Set();
-  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+  [...(yData.yearly_recurring || []), ...(getYearData(startY, false)?.yearly_recurring || []), ...(getYearData(endY, false)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
     const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
     if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
   });
 
   const allYearlyIncome = [];
   const seenYIK = new Set();
-  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+  [...(yData.yearly_income || []), ...(getYearData(startY, false)?.yearly_income || []), ...(getYearData(endY, false)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
     const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
     if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
   });
@@ -6652,24 +6860,67 @@ function openAddBudgetModal() {
 
 function openArchiveManagerModal() {
   const years = appState.data.years || {};
-  const sortedYears = Object.keys(years).sort();
+  const currentY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+  const cfg = (typeof getSettings === 'function') ? getSettings() : (appState?.data?.settings || {});
+  const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+  const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+
+  const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+
+  const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+  const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+  const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+  // Initialize open years set (active year open by default)
+  if (!window.__archiveOpenYears) {
+    window.__archiveOpenYears = new Set([currentY]);
+  }
+
+  // Sort descending: active / newest year at the top
+  const allYearNums = Object.keys(years).map(y => parseInt(y, 10)).filter(n => !isNaN(n)).sort((a, b) => b - a);
 
   showModal({
     title: "📦 Archive & History Manager",
     body: `
-      <p style="font-size:12px; color:var(--text-muted); margin-bottom:14px;">
-        Archiving hides completed months from the top navigation bar while keeping all transactions, starting balances, and rollovers permanently saved in the database.
-      </p>
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+        <p style="font-size:12px; color:var(--text-muted); margin:0; flex:1; min-width:200px;">
+          Archiving hides completed months from the top navigation bar while keeping all transactions and rollovers permanently saved.
+        </p>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn secondary sm" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.toggleAllArchiveYears(true)">Expand All</button>
+          <button type="button" class="btn secondary sm" style="font-size:10.5px; padding:3px 8px;" onclick="window.budgetApp.toggleAllArchiveYears(false)">Collapse All</button>
+        </div>
+      </div>
 
-      ${sortedYears.map(y => {
-        const yData = years[y] || {};
+      ${allYearNums.map(y => {
+        const yData = years[String(y)] || {};
+        const isCurrent = (y === currentY);
+        const isWithinHorizon = (y >= minArrearsYear && y <= maxFutureYear);
+        const isOpen = window.__archiveOpenYears.has(y);
+        const archivedCount = months.filter(m => !!(yData.months && yData.months[m] && yData.months[m].archived)).length;
+
+        const delBtn = (!isCurrent && !isWithinHorizon) ? `
+          <button class="btn secondary sm" style="font-size:10.5px; padding:2px 8px; color:#ef4444; border-color:rgba(239,68,68,0.3);" onclick="window.budgetApp.deleteBudgetYear(${y})" title="Delete Year ${y} and its data file">
+            🗑️ Delete Year
+          </button>
+        ` : '';
+
         return `
-          <div style="margin-bottom:18px; border-bottom:1px solid var(--border); padding-bottom:12px;">
-            <h4 style="font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-              <span style="color:var(--heading); font-weight:700;">📅 Year ${y}</span>
-              <span style="font-size:11px; font-weight:normal; color:var(--text-muted);">Toggle tab visibility</span>
-            </h4>
-            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px;">
+          <div class="archive-year-card" style="margin-bottom:10px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:var(--card-bg, rgba(255,255,255,0.02));">
+            <div id="archive-year-header-${y}" class="archive-year-header" onclick="window.budgetApp.toggleArchiveYearFold(${y})" style="padding:10px 12px; display:flex; justify-content:space-between; align-items:center; cursor:pointer; user-select:none; background:rgba(255,255,255,0.03); border-bottom:${isOpen ? '1px solid var(--border)' : 'none'}; transition:background 0.15s ease;" title="Click to ${isOpen ? 'collapse' : 'expand'} Year ${y}">
+              <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                <span id="archive-year-chevron-${y}" style="font-size:10px; color:var(--text-muted); width:14px; display:inline-block; transition:transform 0.15s ease;">${isOpen ? '▼' : '▶'}</span>
+                <span style="color:var(--heading); font-weight:700; font-size:13px;">📅 Year ${y}</span>
+                ${isCurrent ? '<span class="badge" style="background:rgba(16,185,129,0.15); color:#10b981; font-size:9.5px; padding:1px 6px;">Active Year</span>' : ''}
+                <span class="badge" style="background:rgba(255,255,255,0.07); font-size:10px; padding:1px 6px; color:var(--text-muted);">${archivedCount} of 12 archived</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:8px;" onclick="event.stopPropagation()">
+                ${delBtn}
+              </div>
+            </div>
+            <div id="archive-year-content-${y}" style="display:${isOpen ? 'grid' : 'none'}; grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); gap:6px; padding:12px; background:var(--card-bg);">
               ${months.map(m => {
                 const md = (yData.months && yData.months[m]) || {};
                 const isArchived = !!md.archived;
@@ -9383,6 +9634,85 @@ function renderForecastOverviewView(container) {
   if (typeof calculateLiveDailyPacing === 'function' && activeWeekObj && activeWeekPred) {
     livePacing = calculateLiveDailyPacing(activeWeekObj, activeWeekPred, activeWeekActuals, cfg);
   }
+
+  // Active week transactions and cleared status resolution
+  const resolveOccDateStr = (item) => {
+    if (item.actualPaymentDate) {
+      if (typeof item.actualPaymentDate === 'string') return item.actualPaymentDate.slice(0, 10);
+      if (item.actualPaymentDate instanceof Date && !isNaN(item.actualPaymentDate)) {
+        const y = item.actualPaymentDate.getFullYear();
+        const m = String(item.actualPaymentDate.getMonth() + 1).padStart(2, '0');
+        const d = String(item.actualPaymentDate.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    }
+    if (item.exact_date) return String(item.exact_date).slice(0, 10);
+    if (item.due_day && currentMonthName) {
+      const mIdx = months.indexOf(currentMonthName);
+      if (mIdx >= 0) {
+        const y = currentYear || new Date().getFullYear();
+        const m = String(mIdx + 1).padStart(2, '0');
+        const d = String(item.due_day).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+    }
+    return '';
+  };
+
+  const todayEndMs = new Date().setHours(23, 59, 59, 999);
+
+  const activeWeekDDs = (activeWeekPred.wDDs || []).map(d => {
+    const occDateStr = resolveOccDateStr(d);
+    const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_payment');
+    const isCleared = isRecurring
+      ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr))
+      : Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
+    let pDate = null;
+    if (d.actualPaymentDate) pDate = new Date(d.actualPaymentDate);
+    else if (d.exact_date) pDate = new Date(d.exact_date);
+    else if (d.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), d.due_day);
+    const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+    return {
+      ...d,
+      is_income: false,
+      occDateStr,
+      isCleared,
+      isPastDate
+    };
+  });
+
+  const activeWeekIncomes = (activeWeekPred.wIncomes || []).map(i => {
+    const occDateStr = resolveOccDateStr(i);
+    const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income');
+    const isCleared = isRecurring
+      ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr))
+      : Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
+    let pDate = null;
+    if (i.actualPaymentDate) pDate = new Date(i.actualPaymentDate);
+    else if (i.exact_date) pDate = new Date(i.exact_date);
+    else if (i.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), i.due_day);
+    const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+    return {
+      ...i,
+      is_income: true,
+      occDateStr,
+      isCleared,
+      isPastDate
+    };
+  });
+
+  const clearedBillsCount = activeWeekDDs.filter(d => d.isCleared).length;
+  const clearedBillsTotal = activeWeekDDs.filter(d => d.isCleared).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const clearedIncomesCount = activeWeekIncomes.filter(i => i.isCleared).length;
+  const clearedIncomesTotal = activeWeekIncomes.filter(i => i.isCleared).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  const activeWeekAllTransactions = [...activeWeekDDs, ...activeWeekIncomes];
+  activeWeekAllTransactions.sort((a, b) => {
+    const tA = a.actualPaymentDate ? new Date(a.actualPaymentDate).getTime() : (parseInt(a.due_day, 10) || 0);
+    const tB = b.actualPaymentDate ? new Date(b.actualPaymentDate).getTime() : (parseInt(b.due_day, 10) || 0);
+    return tA - tB;
+  });
+  const totalClearedTransactionsCount = activeWeekAllTransactions.filter(t => t.isCleared).length;
   
   // Calculate total money in vs money out for monthly cashflow
   const totalInflows = totalCurrentInflow + forecast.totalMonthPaymentsIn;
@@ -9866,13 +10196,13 @@ function renderForecastOverviewView(container) {
                   <div class="forecast-spotlight-item">
                     <span class="forecast-spotlight-label">Bills Clearing</span>
                     <span class="forecast-spotlight-value text-red">-${curr}${(activeWeekPred.wDDTotal || 0).toFixed(2)}</span>
-                    <span class="forecast-spotlight-sub">${(activeWeekPred.wDDs || []).length} direct debits</span>
+                    <span class="forecast-spotlight-sub">${clearedBillsCount > 0 ? `<strong style="color:var(--green);">${clearedBillsCount}</strong> of ${activeWeekDDs.length} cleared (${curr}${clearedBillsTotal.toFixed(0)})` : `${activeWeekDDs.length} direct debits`}</span>
                   </div>
 
                   <div class="forecast-spotlight-item">
                     <span class="forecast-spotlight-label">Expected Inflow</span>
                     <span class="forecast-spotlight-value text-green">+${curr}${(activeWeekPred.wIncomeTotal || 0).toFixed(2)}</span>
-                    <span class="forecast-spotlight-sub">${(activeWeekPred.wIncomes || []).length} salary / incomes</span>
+                    <span class="forecast-spotlight-sub">${clearedIncomesCount > 0 ? `<strong style="color:var(--green);">${clearedIncomesCount}</strong> of ${activeWeekIncomes.length} cleared (${curr}${clearedIncomesTotal.toFixed(0)})` : `${activeWeekIncomes.length} salary / incomes`}</span>
                   </div>
 
                   <div class="forecast-spotlight-item">
@@ -9882,26 +10212,91 @@ function renderForecastOverviewView(container) {
                   </div>
                 </div>
 
-                <!-- Bills clearing this week -->
+                <!-- Transactions clearing this week -->
                 <div style="margin-top:14px;">
                   <h4 style="font-size:12.5px; font-weight:600; color:var(--heading); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
-                    <span>Bills Clearing in ${activeWeekObj?.name || 'Active Week'}</span>
-                    <span style="font-size:11px; color:var(--text-muted);">${(activeWeekPred.wDDs || []).length} items</span>
+                    <span>${activeWeekIncomes.length > 0 ? 'Transactions' : 'Bills'} Clearing in ${activeWeekObj?.name || 'Active Week'}</span>
+                    <span style="font-size:11px; color:var(--text-muted);">${totalClearedTransactionsCount > 0 ? `<strong style="color:var(--green);">${totalClearedTransactionsCount}</strong> of ` : ''}${activeWeekAllTransactions.length} items${totalClearedTransactionsCount > 0 ? ' cleared' : ''}</span>
                   </h4>
 
                   <div class="forecast-chips-scroll">
-                    ${(activeWeekPred.wDDs && activeWeekPred.wDDs.length > 0) ? activeWeekPred.wDDs.map(d => `
-                      <div class="forecast-bill-chip">
-                        <div style="display:flex; align-items:center; gap:6px; min-width:0;">
-                          <span class="forecast-bill-chip-icon">⚡</span>
-                          <div class="forecast-bill-chip-info">
-                            <span class="forecast-bill-chip-title">${d.desc || d.name}</span>
-                            <span class="forecast-bill-chip-meta">Due Day ${d.due_day} &bull; ${d.account || 'Current'}</span>
+                    ${(activeWeekAllTransactions && activeWeekAllTransactions.length > 0) ? activeWeekAllTransactions.map(t => {
+                      const isInc = Boolean(t.is_income);
+                      const cleanDesc = (t.rawDesc || t.desc || t.name || '').replace(/'/g, "\\'");
+                      const sType = t.source_type || (isInc ? 'payments_in' : 'direct_debit');
+                      const sIdx = t.source_idx !== undefined ? t.source_idx : 0;
+                      const amt = Number(t.amount) || 0;
+                      const occStr = t.occDateStr || '';
+                      const isClr = Boolean(t.isCleared);
+                      const isPast = Boolean(t.isPastDate);
+
+                      let badgeHtml = '';
+                      if (isClr) {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:700; background:rgba(16,185,129,0.22); color:var(--green); border:1px solid rgba(16,185,129,0.45); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Cleared / Paid • Click to mark Due">
+                            ✓ Cleared
+                          </button>
+                        `;
+                      } else if (isPast) {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.18); color:var(--amber); border:1px solid rgba(245,158,11,0.4); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Payment Due • Click to mark Cleared">
+                            ⚠️ Due
+                          </button>
+                        `;
+                      } else {
+                        badgeHtml = `
+                          <button type="button" class="badge" 
+                            style="font-size:9.5px; font-weight:500; background:rgba(255,255,255,0.06); color:var(--text-muted); border:1px solid rgba(255,255,255,0.12); padding:2px 7px; border-radius:12px; cursor:pointer; display:inline-flex; align-items:center; gap:3px; transition:all 0.15s ease;" 
+                            onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                            title="Upcoming Payment • Click to mark Cleared">
+                            ⏳ Upcoming
+                          </button>
+                        `;
+                      }
+
+                      const iconDisplay = isClr ? '✅' : (t.icon || (isInc ? '📥' : (t.transfer_to ? '➔' : (t.isRecurring ? '🔄' : '⚡'))));
+                      const dateMeta = t.actualDateStr || (t.due_day ? `Day ${t.due_day}` : '');
+
+                      return `
+                        <div class="forecast-bill-chip ${isClr ? 'cleared' : (isPast ? 'past-due' : '')} ${isInc ? 'income' : ''}" 
+                             style="${isClr ? 'border-left: 3.5px solid var(--green) !important; background: rgba(16, 185, 129, 0.05);' : (isPast ? 'border-left: 3.5px solid var(--amber) !important;' : '')} cursor:pointer;" 
+                             onclick="window.budgetApp.setTab('${currentMonthName}')" 
+                             title="Click to view ${activeWeekObj?.name || 'week'} in ${currentMonthName}">
+                          <div style="display:flex; align-items:center; gap:8px; min-width:0; flex:1 1 auto;">
+                            <span class="forecast-bill-chip-icon" style="font-size:15px; flex-shrink:0;">${iconDisplay}</span>
+                            <div class="forecast-bill-chip-info" style="min-width:0;">
+                              <div style="display:flex; align-items:center; gap:6px; min-width:0;">
+                                <span class="forecast-bill-chip-title" style="font-size:12px; ${isClr ? 'opacity:0.95;' : ''}">${t.desc || t.name}</span>
+                              </div>
+                              <span class="forecast-bill-chip-meta" style="font-size:10.5px;">
+                                ${dateMeta ? `Due ${dateMeta} &bull; ` : ''}${t.account || 'Current Account'}
+                                ${t.matched_payee ? ` &bull; <span style="color:var(--green); font-weight:600;">Matched: ${t.matched_payee}</span>` : ''}
+                              </span>
+                            </div>
+                          </div>
+                          <div style="display:flex; flex-direction:column; align-items:flex-end; gap:3px; flex-shrink:0;">
+                            <span class="forecast-bill-chip-amt" style="font-size:12px; font-weight:700; ${isInc ? 'color:var(--green);' : (isClr ? 'color:var(--green);' : 'color:var(--red);')}">
+                              ${isInc ? '+' : '-'}${curr}${amt.toFixed(2)}
+                            </span>
+                            <div style="display:flex; align-items:center; gap:3px;">
+                              ${badgeHtml}
+                              ${(globalEditMode || (cfg.open_banking && cfg.open_banking.enabled)) ? `
+                                <button type="button" class="btn secondary" 
+                                  style="height:18px; width:18px; font-size:9px; padding:0; display:inline-flex; align-items:center; justify-content:center; border-radius:4px;" 
+                                  onclick="event.stopPropagation(); window.budgetApp.openManualBillMatchModal('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}')" 
+                                  title="Match with Bank Transaction">🔗</button>
+                              ` : ''}
+                            </div>
                           </div>
                         </div>
-                        <span class="forecast-bill-chip-amt">-${curr}${Number(d.amount).toFixed(2)}</span>
-                      </div>
-                    `).join('') : '<div class="forecast-empty-note">No scheduled bills clearing this week</div>'}
+                      `;
+                    }).join('') : '<div class="forecast-empty-note">No scheduled transactions clearing this week</div>'}
                   </div>
                 </div>
 
@@ -10778,8 +11173,8 @@ function renderOverviewView(container) {
   const seenYBK = new Set();
   [
     ...(getYearData(currentYear)?.yearly_recurring || []),
-    ...(getYearData(startY)?.yearly_recurring || []),
-    ...(getYearData(endY)?.yearly_recurring || []),
+    ...(getYearData(startY, false)?.yearly_recurring || []),
+    ...(getYearData(endY, false)?.yearly_recurring || []),
     ...(cfg.default_yearly_recurring || [])
   ].forEach(b => {
     const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
@@ -10793,8 +11188,8 @@ function renderOverviewView(container) {
   const seenYIK = new Set();
   [
     ...(getYearData(currentYear)?.yearly_income || []),
-    ...(getYearData(startY)?.yearly_income || []),
-    ...(getYearData(endY)?.yearly_income || []),
+    ...(getYearData(startY, false)?.yearly_income || []),
+    ...(getYearData(endY, false)?.yearly_income || []),
     ...(cfg.default_yearly_income || [])
   ].forEach(i => {
     const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
@@ -10809,9 +11204,9 @@ function renderOverviewView(container) {
 
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-  const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
-  const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
-  const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
+  const allBirthdays = getYearData(currentYear)?.birthdays || cfg.birthdays || [];
+  const allRecurring = getYearData(currentYear)?.recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
   allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
@@ -10910,8 +11305,8 @@ function renderOverviewView(container) {
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
-    const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
-    const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
+    const allBirthdays = getYearData(currentYear)?.birthdays || cfg.birthdays || [];
+    const allRecurring = getYearData(currentYear)?.recurring_payments || cfg.recurring_payments || [];
     const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, currentYear) : [];
     const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, currentYear) : [];
     
@@ -10925,7 +11320,7 @@ function renderOverviewView(container) {
     const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
-    const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
+    const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
     const wIncomes = [...baseIncomes, ...wRecurringIncomes];
     const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -11204,7 +11599,7 @@ function renderOverviewView(container) {
     `
   };
 
-  const isArchived = !!(getYearData(currentYear).months[activeTab] && getYearData(currentYear).months[activeTab].archived);
+  const isArchived = !!(getYearData(currentYear)?.months?.[activeTab]?.archived);
 
   let html = `
     <!-- MONTH PAYDAY PERIOD BANNER -->
@@ -11363,9 +11758,9 @@ function renderOverviewView(container) {
                 </div>
               </div>
 
-              ${(typeof getBirthdayOccasionsForWeek === 'function' && getBirthdayOccasionsForWeek(getYearData().birthdays || cfg.birthdays, wObj, schedule, currentYear).length > 0) ? `
+              ${(typeof getBirthdayOccasionsForWeek === 'function' && getBirthdayOccasionsForWeek(getYearData()?.birthdays || cfg.birthdays, wObj, schedule, currentYear).length > 0) ? `
                 <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 10px 0;">
-                  ${getBirthdayOccasionsForWeek(getYearData().birthdays || cfg.birthdays, wObj, schedule, currentYear).map((b) => `
+                  ${getBirthdayOccasionsForWeek(getYearData()?.birthdays || cfg.birthdays, wObj, schedule, currentYear).map((b) => `
                     <div style="background:rgba(236, 72, 153, 0.12); border:1px solid rgba(236, 72, 153, 0.35); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                       <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:16px;">🎂</span>
@@ -13208,7 +13603,8 @@ function getTrajectoryAvailableMonths() {
     ? getSlidingWindowMonths()
     : [];
   return allMonths.filter(mObj => {
-    const yData = getYearData(mObj.year);
+    const yData = getYearData(mObj.year, false);
+    if (!yData) return false;
     const md = (yData && yData.months && yData.months[mObj.month]) || {};
     return !md.archived;
   });
@@ -19160,16 +19556,16 @@ window.budgetApp = {
       if (sourceIdx !== undefined && isMatch(mData.scheduled_items[sourceIdx])) return mData.scheduled_items[sourceIdx];
     } else if (sourceType === 'yearly_recurring') {
       if (yData.yearly_recurring && sourceIdx !== undefined && isMatch(yData.yearly_recurring[sourceIdx])) return yData.yearly_recurring[sourceIdx];
-      const prevYData = getYearData(appState.currentYear - 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
       if (prevYData?.yearly_recurring && sourceIdx !== undefined && isMatch(prevYData.yearly_recurring[sourceIdx])) return prevYData.yearly_recurring[sourceIdx];
-      const nextYData = getYearData(appState.currentYear + 1);
+      const nextYData = getYearData(appState.currentYear + 1, false);
       if (nextYData?.yearly_recurring && sourceIdx !== undefined && isMatch(nextYData.yearly_recurring[sourceIdx])) return nextYData.yearly_recurring[sourceIdx];
       if (cfg.default_yearly_recurring && sourceIdx !== undefined && isMatch(cfg.default_yearly_recurring[sourceIdx])) return cfg.default_yearly_recurring[sourceIdx];
     } else if (sourceType === 'yearly_income') {
       if (yData.yearly_income && sourceIdx !== undefined && isMatch(yData.yearly_income[sourceIdx])) return yData.yearly_income[sourceIdx];
-      const prevYData = getYearData(appState.currentYear - 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
       if (prevYData?.yearly_income && sourceIdx !== undefined && isMatch(prevYData.yearly_income[sourceIdx])) return prevYData.yearly_income[sourceIdx];
-      const nextYData = getYearData(appState.currentYear + 1);
+      const nextYData = getYearData(appState.currentYear + 1, false);
       if (nextYData?.yearly_income && sourceIdx !== undefined && isMatch(nextYData.yearly_income[sourceIdx])) return nextYData.yearly_income[sourceIdx];
       if (cfg.default_yearly_income && sourceIdx !== undefined && isMatch(cfg.default_yearly_income[sourceIdx])) return cfg.default_yearly_income[sourceIdx];
     } else if (sourceType === 'recurring_payment') {
@@ -19201,8 +19597,8 @@ window.budgetApp = {
 
     if (billDesc) {
       const cleanTarget = billDesc.replace(/^[🎯🎁📥]\s*/, '').trim().toLowerCase();
-      const prevYData = getYearData(appState.currentYear - 1);
-      const nextYData = getYearData(appState.currentYear + 1);
+      const prevYData = getYearData(appState.currentYear - 1, false);
+      const nextYData = getYearData(appState.currentYear + 1, false);
 
       let item = (mData.direct_debits || []).find(d => (d.desc === billDesc || d.name === billDesc) && Math.abs((Number(d.amount)||0) - amt) < 0.05)
           || (mData.direct_debits || []).find(d => d.desc === billDesc || d.name === billDesc)
@@ -22159,6 +22555,101 @@ window.budgetApp = {
     renderNav();
     renderContent();
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+  },
+
+  toggleArchiveYearFold(year) {
+    const yNum = parseInt(year, 10);
+    if (!window.__archiveOpenYears) {
+      const curY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+      window.__archiveOpenYears = new Set([curY]);
+    }
+    const contentEl = document.getElementById(`archive-year-content-${yNum}`);
+    const chevronEl = document.getElementById(`archive-year-chevron-${yNum}`);
+    const headerEl = document.getElementById(`archive-year-header-${yNum}`);
+
+    if (window.__archiveOpenYears.has(yNum)) {
+      window.__archiveOpenYears.delete(yNum);
+      if (contentEl) contentEl.style.display = 'none';
+      if (chevronEl) chevronEl.textContent = '▶';
+      if (headerEl) {
+        headerEl.style.borderBottom = 'none';
+        headerEl.title = `Click to expand Year ${yNum}`;
+      }
+    } else {
+      window.__archiveOpenYears.add(yNum);
+      if (contentEl) contentEl.style.display = 'grid';
+      if (chevronEl) chevronEl.textContent = '▼';
+      if (headerEl) {
+        headerEl.style.borderBottom = '1px solid var(--border)';
+        headerEl.title = `Click to collapse Year ${yNum}`;
+      }
+    }
+  },
+
+  toggleAllArchiveYears(expand = true) {
+    const years = appState.data?.years || {};
+    const allYearNums = Object.keys(years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
+    if (!window.__archiveOpenYears) window.__archiveOpenYears = new Set();
+    if (expand) {
+      allYearNums.forEach(y => window.__archiveOpenYears.add(y));
+    } else {
+      window.__archiveOpenYears.clear();
+    }
+    openArchiveManagerModal();
+  },
+
+  async deleteBudgetYear(year) {
+    const yrNum = parseInt(year, 10);
+    const currentY = parseInt(appState.currentYear || new Date().getFullYear(), 10);
+    if (!yrNum || isNaN(yrNum)) return;
+    if (yrNum === currentY) {
+      alert(`Cannot delete active budget year (${currentY}).`);
+      return;
+    }
+
+    const cfg = getSettings();
+    const adv = parseInt(cfg.months_in_advance !== undefined ? cfg.months_in_advance : 12, 10);
+    const arr = parseInt(cfg.months_in_arrears !== undefined ? cfg.months_in_arrears : 3, 10);
+    const curPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+      ? getCurrentPeriodMonthAndYear()
+      : { year: new Date().getFullYear(), monthIdx: new Date().getMonth() };
+    const totalCurrent = curPeriod.year * 12 + curPeriod.monthIdx;
+    const maxFutureYear = Math.floor((totalCurrent + adv) / 12);
+    const minArrearsYear = Math.floor((totalCurrent - arr) / 12);
+
+    if (yrNum >= minArrearsYear && yrNum <= maxFutureYear) {
+      alert(`Cannot delete Year ${yrNum} as it is currently within your active forecasting window (${adv} months in advance). To remove it, first adjust 'Months in advance' in Settings.`);
+      return;
+    }
+
+    const confirmDelete = confirm(`Are you sure you want to permanently delete Year ${yrNum} and all its data?\n\nThis action cannot be undone.`);
+    if (!confirmDelete) return;
+
+    const res = await deleteBudgetYear(yrNum);
+    if (appState.data && appState.data.years) {
+      delete appState.data.years[String(yrNum)];
+    }
+    if (appState.data && Array.isArray(appState.data.available_years)) {
+      appState.data.available_years = appState.data.available_years.filter(y => y !== yrNum);
+    }
+
+    if (res && res.data) {
+      if (res.data.years) {
+        delete res.data.years[String(yrNum)];
+        appState.data.years = res.data.years;
+      }
+      if (res.data.available_years) {
+        appState.data.available_years = res.data.available_years.filter(y => y !== yrNum);
+      }
+      if (res.data.settings) appState.data.settings = res.data.settings;
+    } else {
+      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
+    }
+
+    calculateAndSyncRollovers();
+    renderNav();
+    openArchiveManagerModal();
+    alert(`Year ${yrNum} deleted successfully.`);
   },
 
   syncSlidingWindowAutoArchive() {

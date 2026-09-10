@@ -64,8 +64,8 @@ export function renderOverviewView(container) {
   const seenYBK = new Set();
   [
     ...(getYearData(currentYear)?.yearly_recurring || []),
-    ...(getYearData(startY)?.yearly_recurring || []),
-    ...(getYearData(endY)?.yearly_recurring || []),
+    ...(getYearData(startY, false)?.yearly_recurring || []),
+    ...(getYearData(endY, false)?.yearly_recurring || []),
     ...(cfg.default_yearly_recurring || [])
   ].forEach(b => {
     const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
@@ -79,8 +79,8 @@ export function renderOverviewView(container) {
   const seenYIK = new Set();
   [
     ...(getYearData(currentYear)?.yearly_income || []),
-    ...(getYearData(startY)?.yearly_income || []),
-    ...(getYearData(endY)?.yearly_income || []),
+    ...(getYearData(startY, false)?.yearly_income || []),
+    ...(getYearData(endY, false)?.yearly_income || []),
     ...(cfg.default_yearly_income || [])
   ].forEach(i => {
     const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
@@ -95,9 +95,9 @@ export function renderOverviewView(container) {
 
   const budgetBillsThisMonth = (typeof getYearlyBudgetItemsForMonth === 'function') ? getYearlyBudgetItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
   const birthdayBillsThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(activeTab, months.indexOf(activeTab), appState.currentYear) : [];
-  const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
-  const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
-  const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
+  const allBirthdays = getYearData(currentYear)?.birthdays || cfg.birthdays || [];
+  const allRecurring = getYearData(currentYear)?.recurring_payments || cfg.recurring_payments || [];
+  const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
   allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
@@ -196,8 +196,8 @@ export function renderOverviewView(container) {
     const allScheduledBills = [...directDebitsWithMeta, ...yearlyBillsWithMeta, ...budgetBillsThisMonth];
     const baseDDs = getDDsForWeek(allScheduledBills, wObj, schedule);
     
-    const allBirthdays = getYearData(currentYear).birthdays || cfg.birthdays || [];
-    const allRecurring = getYearData(currentYear).recurring_payments || cfg.recurring_payments || [];
+    const allBirthdays = getYearData(currentYear)?.birthdays || cfg.birthdays || [];
+    const allRecurring = getYearData(currentYear)?.recurring_payments || cfg.recurring_payments || [];
     const wBirthdays = (typeof getBirthdaysForWeek === 'function') ? getBirthdaysForWeek(allBirthdays, wObj, schedule, currentYear) : [];
     const wRecurring = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurring, wObj, schedule, currentYear) : [];
     
@@ -211,7 +211,7 @@ export function renderOverviewView(container) {
     const yearlyIncomesWithMeta = allYearlyIncome.map((b, idx) => ({ ...b, source_type: 'yearly_income', source_idx: idx }));
     const allScheduledIncomes = [...directIncomesWithMeta, ...yearlyIncomesWithMeta];
     const baseIncomes = getIncomesForWeek(allScheduledIncomes, wObj, schedule, currentYear);
-    const allRecurringIncomes = getYearData(currentYear).recurring_incomes || cfg.recurring_incomes || [];
+    const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
     const wRecurringIncomes = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek(allRecurringIncomes, wObj, schedule, currentYear) : [];
     const wIncomes = [...baseIncomes, ...wRecurringIncomes];
     const wIncomeTotal = wIncomes.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
@@ -490,7 +490,7 @@ export function renderOverviewView(container) {
     `
   };
 
-  const isArchived = !!(getYearData(currentYear).months[activeTab] && getYearData(currentYear).months[activeTab].archived);
+  const isArchived = !!(getYearData(currentYear)?.months?.[activeTab]?.archived);
 
   let html = `
     <!-- MONTH PAYDAY PERIOD BANNER -->
@@ -649,9 +649,9 @@ export function renderOverviewView(container) {
                 </div>
               </div>
 
-              ${(typeof getBirthdayOccasionsForWeek === 'function' && getBirthdayOccasionsForWeek(getYearData().birthdays || cfg.birthdays, wObj, schedule, currentYear).length > 0) ? `
+              ${(typeof getBirthdayOccasionsForWeek === 'function' && getBirthdayOccasionsForWeek(getYearData()?.birthdays || cfg.birthdays, wObj, schedule, currentYear).length > 0) ? `
                 <div style="display:flex; flex-direction:column; gap:6px; margin:6px 0 10px 0;">
-                  ${getBirthdayOccasionsForWeek(getYearData().birthdays || cfg.birthdays, wObj, schedule, currentYear).map((b) => `
+                  ${getBirthdayOccasionsForWeek(getYearData()?.birthdays || cfg.birthdays, wObj, schedule, currentYear).map((b) => `
                     <div style="background:rgba(236, 72, 153, 0.12); border:1px solid rgba(236, 72, 153, 0.35); border-radius:6px; padding:6px 10px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                       <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:16px;">🎂</span>

@@ -112,6 +112,14 @@ class IndexedDBStore {
     });
   }
 
+  async del(key) {
+    return await this.remove(key);
+  }
+
+  async delete(key) {
+    return await this.remove(key);
+  }
+
   async keys() {
     const db = await this.getDb();
     if (!db) {
@@ -278,11 +286,27 @@ const LocalEngine = {
     const endYr = Math.floor((curYr * 12 + curM + adv) / 12);
 
     let allYears = await localStore.get('habit_available_years') || [];
+    const validYears = [];
+    for (const yr of allYears) {
+      if (yr < curYr) {
+        const yData = await localStore.get(`habit_year_${yr}`);
+        const checkEmptyFn = (typeof isYearEmptyOrPhantom === 'function') ? isYearEmptyOrPhantom : null;
+        if (checkEmptyFn && checkEmptyFn(yr, yData, curYr, settings)) {
+          await localStore.remove(`habit_year_${yr}`);
+          continue;
+        }
+      }
+      validYears.push(yr);
+    }
+    allYears = validYears;
+
     const neededYears = new Set([...allYears, curYr]);
     for (let y = startYr; y <= endYr; y++) {
-      neededYears.add(y);
+      if (y >= curYr) {
+        neededYears.add(y);
+      }
     }
-    allYears = Array.from(neededYears).sort();
+    allYears = Array.from(neededYears).sort((a, b) => a - b);
     await localStore.set('habit_available_years', allYears);
 
     const yearsObj = {};
@@ -290,6 +314,8 @@ const LocalEngine = {
       const yStr = String(y);
       let yearData = await localStore.get(`habit_year_${yStr}`);
       if (!yearData) {
+        // Do NOT auto-create historical years (< curYr) that do not exist!
+        if (y < curYr) continue;
         yearData = {
           archived: false,
           birthdays: JSON.parse(JSON.stringify(settings.birthdays || [])),
@@ -310,7 +336,7 @@ const LocalEngine = {
     return {
       settings,
       current_year: curYr,
-      available_years: allYears,
+      available_years: Object.keys(yearsObj).map(n => parseInt(n, 10)).sort((a, b) => a - b),
       open_banking_transactions: txns,
       years: yearsObj
     };
@@ -335,10 +361,9 @@ const LocalEngine = {
         await localStore.set('habit_open_banking_txns', state.open_banking_transactions);
       }
 
-      let allYears = await localStore.get('habit_available_years') || [];
       if (state.years) {
         const yearNums = Object.keys(state.years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
-        allYears = Array.from(new Set([...allYears, ...yearNums])).sort();
+        const allYears = Array.from(new Set(yearNums)).sort((a, b) => a - b);
         await localStore.set('habit_available_years', allYears);
       }
 
@@ -391,6 +416,16 @@ const LocalEngine = {
     allYears = Array.from(new Set([...allYears, yrNum])).sort();
     await localStore.set('habit_available_years', allYears);
 
+    return { success: true, year: yrNum, years: allYears };
+  },
+
+  async deleteBudgetYear(year) {
+    const yrNum = parseInt(year, 10);
+    const yStr = String(yrNum);
+    await localStore.del(`habit_year_${yStr}`);
+    let allYears = await localStore.get('habit_available_years') || [];
+    allYears = allYears.filter(y => y !== yrNum);
+    await localStore.set('habit_available_years', allYears);
     return { success: true, year: yrNum, years: allYears };
   },
 
@@ -689,6 +724,34 @@ export async function createBudgetYear(year, copyFromYear) {
   } catch (e) {
     console.error('createBudgetYear error, falling back to local:', e);
     return await LocalEngine.createBudgetYear(year, copyFromYear);
+  }
+  return null;
+}
+
+export async function deleteBudgetYear(year) {
+  const mode = await detectStorageEngine();
+  if (mode === 'local') {
+    return await LocalEngine.deleteBudgetYear(year);
+  }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/year/${encodeURIComponent(year)}`, {
+      method: 'DELETE',
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    if (r.ok) return await r.json();
+
+    // Fallback to POST if DELETE is not supported by proxy
+    const rPost = await fetch(`${getBaseApiUrl()}api/budget/year/delete`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ year })
+    });
+    if (rPost.ok) return await rPost.json();
+  } catch (e) {
+    console.error('deleteBudgetYear error, falling back to local:', e);
+    return await LocalEngine.deleteBudgetYear(year);
   }
   return null;
 }

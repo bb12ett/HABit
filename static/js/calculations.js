@@ -932,7 +932,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   const allYearlyBills = [];
   const seenYBK = new Set();
-  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+  [...(yData?.yearly_recurring || []), ...(getYearData(startY, false)?.yearly_recurring || []), ...(getYearData(endY, false)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
     const k = `${b.desc || b.name}_${b.month || ''}_${b.due_day || ''}`;
     if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
   });
@@ -954,7 +954,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
 
   const allYearlyIncome = [];
   const seenYIK = new Set();
-  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+  [...(yData?.yearly_income || []), ...(getYearData(startY, false)?.yearly_income || []), ...(getYearData(endY, false)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
     const k = `${i.desc || i.name}_${i.month || ''}_${i.due_day || ''}`;
     if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
   });
@@ -1179,8 +1179,10 @@ export function calculateAndSyncRollovers(year = appState.currentYear) {
   }
   const targetY = parseInt(year, 10);
   if (!isNaN(targetY) && !yearsToSync.includes(targetY)) {
-    yearsToSync.push(targetY);
-    yearsToSync.sort((a, b) => a - b);
+    if (appState.data && appState.data.years && appState.data.years[String(targetY)]) {
+      yearsToSync.push(targetY);
+      yearsToSync.sort((a, b) => a - b);
+    }
   }
   if (yearsToSync.length === 0) {
     yearsToSync.push(2026);
@@ -2627,19 +2629,19 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
 
   (cfg.people || []).forEach(p => personTotals[p].leftover = personTotals[p].salary - personTotals[p].out);
 
-  const yData = getYearData(year);
+  const yData = getYearData(year) || {};
   const startY = schedule.startDate.getFullYear();
   const endY = schedule.endDate.getFullYear();
   const allYearlyBills = [];
   const seenYBK = new Set();
-  [...(yData.yearly_recurring || []), ...(getYearData(startY)?.yearly_recurring || []), ...(getYearData(endY)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
+  [...(yData.yearly_recurring || []), ...(getYearData(startY, false)?.yearly_recurring || []), ...(getYearData(endY, false)?.yearly_recurring || []), ...(cfg.default_yearly_recurring || [])].forEach(b => {
     const k = `${(b.desc || b.name || '').trim().toLowerCase()}_${(b.month || '').trim().toLowerCase()}_${parseInt(b.due_day || 1, 10)}`;
     if (!seenYBK.has(k)) { seenYBK.add(k); allYearlyBills.push(b); }
   });
 
   const allYearlyIncome = [];
   const seenYIK = new Set();
-  [...(yData.yearly_income || []), ...(getYearData(startY)?.yearly_income || []), ...(getYearData(endY)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
+  [...(yData.yearly_income || []), ...(getYearData(startY, false)?.yearly_income || []), ...(getYearData(endY, false)?.yearly_income || []), ...(cfg.default_yearly_income || [])].forEach(i => {
     const k = `${(i.desc || i.name || '').trim().toLowerCase()}_${(i.month || '').trim().toLowerCase()}_${parseInt(i.due_day || 1, 10)}`;
     if (!seenYIK.has(k)) { seenYIK.add(k); allYearlyIncome.push(i); }
   });
