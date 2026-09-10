@@ -34,7 +34,7 @@ def load_version():
                             return ver
     except Exception as e:
         print(f"Notice: Unable to parse version from config.yaml: {e}")
-    return os.environ.get("APP_VERSION", "0.3.20")
+    return os.environ.get("APP_VERSION", "0.4.0")
 
 APP_VERSION = load_version()
 BUILD_ID = str(int(time.time()))
@@ -92,58 +92,6 @@ def hash_pin_for_verification(pin: str, salt_b64: str) -> str:
 
 def generate_salt_b64() -> str:
     return base64.b64encode(os.urandom(16)).decode("utf-8")
-
-def generate_key_b64() -> str:
-    return base64.b64encode(os.urandom(32)).decode("utf-8")
-
-def encrypt_dict_payload(key: bytes, data_dict: dict) -> dict:
-    plaintext = json.dumps(data_dict, ensure_ascii=False).encode("utf-8")
-    if HAS_CRYPTOGRAPHY:
-        aesgcm = AESGCM(key)
-        nonce = os.urandom(12)
-        ct = aesgcm.encrypt(nonce, plaintext, None)
-        return {
-            "nonce": base64.b64encode(nonce).decode("utf-8"),
-            "ciphertext": base64.b64encode(ct).decode("utf-8"),
-            "is_encrypted": True
-        }
-    else:
-        nonce = os.urandom(16)
-        keystream = hashlib.sha256(key + nonce).digest()
-        while len(keystream) < len(plaintext):
-            keystream += hashlib.sha256(key + keystream).digest()
-        ct = bytes(a ^ b for a, b in zip(plaintext, keystream[:len(plaintext)]))
-        tag = hmac.new(key, nonce + ct, hashlib.sha256).digest()
-        return {
-            "nonce": base64.b64encode(nonce).decode("utf-8"),
-            "ciphertext": base64.b64encode(ct).decode("utf-8"),
-            "tag": base64.b64encode(tag).decode("utf-8"),
-            "is_encrypted": True
-        }
-
-def decrypt_dict_payload(key: bytes, enc_obj: dict) -> dict:
-    if not enc_obj or not isinstance(enc_obj, dict):
-        return {}
-    nonce = base64.b64decode(enc_obj["nonce"])
-    ct = base64.b64decode(enc_obj["ciphertext"])
-    if HAS_CRYPTOGRAPHY and "tag" not in enc_obj:
-        aesgcm = AESGCM(key)
-        plaintext = aesgcm.decrypt(nonce, ct, None)
-        return json.loads(plaintext.decode("utf-8"))
-    elif "tag" in enc_obj:
-        tag = base64.b64decode(enc_obj["tag"])
-        expected_tag = hmac.new(key, nonce + ct, hashlib.sha256).digest()
-        if not hmac.compare_digest(tag, expected_tag):
-            raise ValueError("Integrity check failed / incorrect key")
-        keystream = hashlib.sha256(key + nonce).digest()
-        while len(keystream) < len(ct):
-            keystream += hashlib.sha256(key + keystream).digest()
-        plaintext = bytes(a ^ b for a, b in zip(ct, keystream[:len(ct)]))
-        return json.loads(plaintext.decode("utf-8"))
-    else:
-        aesgcm = AESGCM(key)
-        plaintext = aesgcm.decrypt(nonce, ct, None)
-        return json.loads(plaintext.decode("utf-8"))
 
 DEFAULT_SETTINGS = {
     "currency": "\u00a3",
@@ -1183,155 +1131,6 @@ def build_bundle():
             bundle_parts.append(f"// --- {fp} ---")
             bundle_parts.append(content)
 
-    # Safety patch: inject any settings functions that may be missing from an older
-    # cached build of app.js.  These are appended AFTER window.budgetApp is defined
-    # so they always win, regardless of what version of app.js was compiled in.
-    settings_patch = r"""
-// --- settings function safety patch ---
-(function() {
-  var app = window.budgetApp;
-  if (!app) return;
-
-  if (typeof app.addCurrentAccountInSettings !== 'function') {
-    app.addCurrentAccountInSettings = async function() {
-      var name = prompt('Enter current account name:');
-      if (name && name.trim()) {
-        getSettings().current_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addCreditAccountInSettings !== 'function') {
-    app.addCreditAccountInSettings = async function() {
-      var name = prompt('Enter credit card name:');
-      if (name && name.trim()) {
-        getSettings().credit_accounts.push({
-          name: name.trim(),
-          limit: 0,
-          autopay_enabled: false,
-          autopay_from: getSettings().current_accounts[0] || '',
-          autopay_when: 'week_1',
-          autopay_type: 'full',
-          autopay_fixed_amt: 0.00
-        });
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addSavingsAccountInSettings !== 'function') {
-    app.addSavingsAccountInSettings = async function() {
-      var name = prompt('Enter savings account name:');
-      if (name && name.trim()) {
-        getSettings().savings_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.editCreditAccount !== 'function') {
-    app.editCreditAccount = async function(idx, field, value) {
-      var acc = getSettings().credit_accounts[idx];
-      if (!acc) return;
-      if (field === 'autopay_enabled') {
-        acc[field] = (value === true || value === 'true');
-      } else if (field === 'limit' || field === 'autopay_fixed_amt') {
-        acc[field] = parseFloat(value) || 0;
-      } else {
-        acc[field] = value;
-      }
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.updateOpenBankingBalanceType !== 'function') {
-    app.updateOpenBankingBalanceType = function(val) {
-      var cfg = getSettings();
-      cfg.open_banking = cfg.open_banking || {};
-      cfg.open_banking.balance_type = val;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ balance_type: val }); }
-      if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-      renderContent();
-    };
-  }
-
-  if (typeof app.updateLinkedAccountBalanceType !== 'function') {
-    app.updateLinkedAccountBalanceType = async function(accountId, newBalanceType) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
-      var acc = cfg.open_banking.linked_accounts.find(function(a) { return String(a.account_id) === String(accountId) || a.account_name === accountId; });
-      if (acc) {
-        acc.balance_type = newBalanceType;
-        renderContent();
-        if (typeof mapOpenBankingAccount === 'function') {
-          try {
-            await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, acc.owner || 'Joint', newBalanceType);
-          } catch (e) {
-            console.warn("mapOpenBankingAccount error:", e);
-          }
-        }
-        if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-        if (getSettings().onboarding_complete && typeof saveBudget === 'function') { await saveBudget(appState.data); }
-        renderContent();
-      }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingChangeoverSync !== 'function') {
-    app.toggleOpenBankingChangeoverSync = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.auto_sync_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ auto_sync_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-      renderContent();
-    };
-  }
-
-  if (typeof app.updateOpenBankingChangeoverTime !== 'function') {
-    app.updateOpenBankingChangeoverTime = function(timeVal) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.changeover_sync_time = timeVal;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ changeover_sync_time: timeVal }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingSyncWeekly !== 'function') {
-    app.toggleOpenBankingSyncWeekly = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.sync_weekly_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_weekly_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingSyncPeriod !== 'function') {
-    app.toggleOpenBankingSyncPeriod = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.sync_period_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_period_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-})();
-"""
-    bundle_parts.append(settings_patch)
-
     os.makedirs("static/js", exist_ok=True)
     with open("static/js/bundle.js", "w", encoding="utf-8") as f:
         f.write("\n".join(bundle_parts))
@@ -1540,16 +1339,6 @@ def suggest_category_merchant_api():
         "success": True,
         "message": f"Merchant '{merchant}' suggested for category '{category}'. Thank you for contributing!",
         "entry": new_entry
-    })
-
-@app.route("/api/categories/export_rules", methods=["GET"])
-def export_category_rules_api():
-    data = load_data()
-    custom_rules = data.get("settings", {}).get("merchant_category_rules", {})
-    return jsonify({
-        "success": True,
-        "merchant_rules": custom_rules,
-        "count": len(custom_rules)
     })
 
 @app.route("/api/version", methods=["GET"])
@@ -4395,12 +4184,6 @@ def get_all_backup_dirs(create=False):
             except Exception as e:
                 print(f"[Backup] Notice creating directory {d}: {e}")
     return valid_dirs
-
-def get_backups_dir():
-    instance_id = get_instance_identifier()
-    d = os.path.join(CONFIG_BACKUPS_BASE, instance_id) if os.path.exists("/config") else os.path.join(DATA_DIR, "backups")
-    os.makedirs(d, exist_ok=True)
-    return d
 
 def generate_full_backup_dict():
     migrate_legacy_storage()

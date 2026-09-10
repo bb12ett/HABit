@@ -756,6 +756,23 @@ export async function deleteBudgetYear(year) {
   return null;
 }
 
+export async function propagateScheduledBillsApi(year, month) {
+  const mode = await detectStorageEngine();
+  if (mode !== 'local') {
+    try {
+      const r = await fetch(`${getBaseApiUrl()}api/budget/propagate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_year: year, source_month: month })
+      });
+      if (r.ok) return await r.json();
+    } catch (e) {
+      console.warn('propagateScheduledBillsApi server error, falling back to local:', e);
+    }
+  }
+  return null;
+}
+
 export async function exportFullBudgetBackupApi() {
   const mode = await detectStorageEngine();
   if (mode === 'local') {

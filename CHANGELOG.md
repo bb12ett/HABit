@@ -5,7 +5,7 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.3.20] - 2026-09-10
+## [0.4.0] - 2026-09-10
 
 ### Fixed
 - **🧹 Root Cause Elimination of Phantom Historical Years (2014–2025) & Clean Archive Manager**:
@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Active Forecast Horizon Protection**: Ensured future projection years within the active sliding forecast window (e.g. 2028 when configured with `months_in_advance: 18` extending from September 2026 into March 2028) are strictly protected and never treated as empty or eligible for deletion.
   - **Foldable Year Accordions in Archive Manager**: Made year sections in the Archive & History Manager collapsible cards with interactive headers and toggle chevrons (`▼ / ▶`). The active year defaults to expanded while future and historical years default to collapsed, avoiding UI clutter. Added at-a-glance archived month count badges (`X of 12 archived`) and one-click `Expand All` / `Collapse All` header controls with state persistence across month archive actions.
   - **Clean Archive Manager Experience**: Archive Manager displays only the user's active and forecast window years in clean descending chronological order (`2028, 2027, 2026`) with month visibility toggles and a discreet `🗑️ Delete Year` action button only for obsolete historical years.
+- **🧼 Comprehensive Codebase Review & Dead Code Cleanup**:
+  - Conducted full AST and call-graph audit across all Python backend modules, frontend JavaScript, HTML templates, and CSS stylesheets to identify and eliminate verified dead or orphaned code with 0 callers.
+  - **Python Backend (`app.py`)**: Removed orphaned AES/HMAC encryption utilities (`generate_key_b64`, `encrypt_dict_payload`, `decrypt_dict_payload`), dead legacy endpoint `export_category_rules_api` (`GET /api/categories/export_rules`), redundant `get_backups_dir()` helper superseded by `get_all_backup_dirs()`, and an obsolete 145-line monkey-patch script (`settings_patch`) that had duplicated native client methods into `bundle.js`.
+  - **Frontend Client (`static/js/app.js`)**: Removed 14 obsolete and dead methods whose DOM selectors or workflows were superseded by modern unified modals and sliding windows: `addDirectDebit`, `editDirectDebit`, `deleteDirectDebit`, `propagateDirectDebits`, `addYearlyRecurringBill`, `deleteYearlyRecurringBill`, `addInlineBudgetTx`, `editBudgetTxField`, `updateOpeningBalance`, `handleItemEditWithModal`, `handleItemDeleteWithModal`, `handleAddWithModal`, `editDeductionAnchorDate`, `promptCreateNewYear`, `toggleArchiveYear`, and `toggleYearDropdown`.
+  - **API Client Wiring (`static/js/api.js`)**: Added missing `export async function propagateScheduledBillsApi(year, month)` connecting the frontend to `/api/budget/propagate` with automatic local IndexedDB engine fallback, preventing potential `ReferenceError` during scheduled bills propagation.
+  - Rebuilt production and static web bundles (`bundle.js`) reducing total code bloat by over 1,200 lines while guaranteeing zero feature breakage or regression.
 
 ---
 

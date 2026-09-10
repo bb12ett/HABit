@@ -1960,6 +1960,23 @@ async function deleteBudgetYear(year) {
   return null;
 }
 
+async function propagateScheduledBillsApi(year, month) {
+  const mode = await detectStorageEngine();
+  if (mode !== 'local') {
+    try {
+      const r = await fetch(`${getBaseApiUrl()}api/budget/propagate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source_year: year, source_month: month })
+      });
+      if (r.ok) return await r.json();
+    } catch (e) {
+      console.warn('propagateScheduledBillsApi server error, falling back to local:', e);
+    }
+  }
+  return null;
+}
+
 async function exportFullBudgetBackupApi() {
   const mode = await detectStorageEngine();
   if (mode === 'local') {
@@ -19819,14 +19836,6 @@ window.budgetApp = {
     });
   },
 
-  setSubTab(subTabName) {
-    appState.activeSubTab = subTabName;
-    renderContent();
-    const container = document.getElementById('appBody');
-    if (container) container.scrollTop = 0;
-    window.scrollTo(0, 0);
-  },
-
   async switchYear(y) {
     const targetY = parseInt(y, 10);
     if (!targetY || isNaN(targetY)) return;
@@ -19852,21 +19861,6 @@ window.budgetApp = {
     const container = document.getElementById('appBody');
     if (container) container.scrollTop = 0;
     window.scrollTo(0, 0);
-  },
-
-  toggleArchiveYear() {
-    document.querySelector('.dropdown')?.classList.remove('open');
-    const yData = getYearData();
-    yData.archived = !yData.archived;
-    calculateAndSyncRollovers();
-    renderYearMenu();
-    renderNav();
-    renderContent();
-    if (getSettings().onboarding_complete) { saveBudget(appState.data); }
-  },
-
-  promptCreateNewYear() {
-    // Deprecated: new years are automatically initialized and windowed by the application
   },
 
   startOnboarding() {
@@ -20528,12 +20522,6 @@ window.budgetApp = {
     } catch (e) {
       alert(`Error: ${e.message}`);
     }
-  },
-
-  toggleYearDropdown(e) {
-    if (e) e.stopPropagation();
-    const dd = document.querySelector('.dropdown');
-    if (dd) dd.classList.toggle('open');
   },
 
   toggleGlobalEditMode() {
@@ -22505,36 +22493,6 @@ window.budgetApp = {
     });
   },
 
-  // Annual Recurring Bills in Modal
-  async addYearlyRecurringBill() {
-    const desc = document.getElementById('m-yr-desc').value.trim();
-    const month = document.getElementById('m-yr-m').value;
-    const day = parseInt(document.getElementById('m-yr-day').value, 10) || 1;
-    const amt = parseFloat(document.getElementById('m-yr-amt').value);
-    const acc = document.getElementById('m-yr-acc').value;
-
-    if (!desc || isNaN(amt)) return;
-    const yData = getYearData();
-    if (!yData.yearly_recurring) yData.yearly_recurring = [];
-    yData.yearly_recurring.push({ desc, month, due_day: day, amount: amt, account: acc });
-
-    openYearlyRecurringView();
-    calculateAndSyncRollovers();
-    renderContent();
-    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-  },
-
-  async deleteYearlyRecurringBill(idx) {
-    const yData = getYearData();
-    if (yData.yearly_recurring) {
-      yData.yearly_recurring.splice(idx, 1);
-      openYearlyRecurringView();
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
   // Archive Manager
   async toggleArchiveMonth(mName, fromModal = false, year = null) {
     const targetY = year ? parseInt(year, 10) : appState.currentYear;
@@ -22973,44 +22931,6 @@ window.budgetApp = {
     }
   },
 
-  async editBudgetTxField(bIdx, tIdx, field, value) {
-    const b = getYearData().yearly_budgets[bIdx];
-    if (b && b.transactions && b.transactions[tIdx]) {
-      if (field === 'date') {
-        if (!value || value.length < 10) return;
-        b.transactions[tIdx].date = value;
-      } else if (field === 'amount') {
-        b.transactions[tIdx].amount = parseFloat(value) || 0;
-      } else {
-        b.transactions[tIdx][field] = value;
-      }
-      calculateAndSyncRollovers();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
-  async addInlineBudgetTx(bIdx) {
-    const descEl = document.getElementById(`inline-tx-desc-${bIdx}`);
-    const amtEl = document.getElementById(`inline-tx-amt-${bIdx}`);
-    const dateEl = document.getElementById(`inline-tx-date-${bIdx}`);
-    const acctEl = document.getElementById(`inline-tx-acct-${bIdx}`);
-
-    const desc = descEl ? descEl.value.trim() : '';
-    const amt = amtEl ? parseFloat(amtEl.value) : 0;
-    const date = dateEl ? dateEl.value : '';
-    const b = getYearData().yearly_budgets[bIdx];
-    const acct = acctEl ? acctEl.value : (b ? b.account : getSettings().current_accounts[0]);
-
-    if (!desc || isNaN(amt)) return;
-    if (b) {
-      if (!b.transactions) b.transactions = [];
-      b.transactions.push({ desc, amount: amt, date, account: acct });
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
   async deleteBudgetTransaction(bIdx, tIdx) {
     const b = getYearData().yearly_budgets[bIdx];
     if (b && b.transactions) {
@@ -23077,46 +22997,6 @@ window.budgetApp = {
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
-  async updateOpeningBalance(type, name, val) {
-    const md = getMonthData(appState.activeTab);
-    const parsed = parseFloat(val) || 0;
-    if (type === 'current') {
-      if (!md.current_data[name]) md.current_data[name] = {};
-      md.current_data[name].opening = parsed;
-    } else if (type === 'credit') {
-      if (!md.credit_data[name]) md.credit_data[name] = {};
-      md.credit_data[name].opening_spent = parsed;
-    } else if (type === 'savings') {
-      if (!md.savings_data[name]) md.savings_data[name] = {};
-      md.savings_data[name].opening = parsed;
-    }
-    calculateAndSyncRollovers();
-    renderContent();
-    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-  },
-
-  handleItemEditWithModal(type, idx, fieldOrPerson, val) {
-    if (type === 'deduction_name') {
-      this.editDeductionName(idx, val);
-    } else if (type === 'deduction_field' && fieldOrPerson === 'target_account') {
-      this.editDeductionTarget(idx, val);
-    } else if (type === 'deduction_person') {
-      this.updateSalaryDeduction(idx, fieldOrPerson, val);
-    }
-  },
-
-  handleItemDeleteWithModal(type, idx) {
-    if (type === 'deduction') {
-      this.deleteSalaryDeduction(idx);
-    }
-  },
-
-  handleAddWithModal(type) {
-    if (type === 'deduction') {
-      this.addSalaryDeduction();
-    }
-  },
-
   async updateSalaryDeduction(dIdx, person, val) {
     const md = getMonthData(appState.activeTab);
     const d = md.deductions_list[dIdx];
@@ -23160,17 +23040,6 @@ window.budgetApp = {
     const d = md.deductions_list[dIdx];
     if (d) {
       d.frequency = newFreq;
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
-  async editDeductionAnchorDate(dIdx, newDate) {
-    const md = getMonthData(appState.activeTab);
-    const d = md.deductions_list[dIdx];
-    if (d) {
-      d.anchor_date = newDate;
       calculateAndSyncRollovers();
       renderContent();
       if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
@@ -23266,101 +23135,6 @@ window.budgetApp = {
 
     const cfg = getSettings();
     cfg.default_deductions = JSON.parse(JSON.stringify(currentDeducts));
-
-    calculateAndSyncRollovers();
-    renderContent();
-    if (cfg.onboarding_complete) { await saveBudget(appState.data); }
-  },
-
-  async editDirectDebit(ddIdx, field, val) {
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
-    const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
-    const md = getMonthData(currentActiveMonth);
-    const dd = md.direct_debits ? md.direct_debits[ddIdx] : null;
-    if (dd) {
-      if (field === 'due_day') dd.due_day = parseInt(val, 10) || 1;
-      else if (field === 'amount') dd.amount = parseFloat(val) || 0;
-      else dd[field] = val;
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
-  async addDirectDebit() {
-    const descEl = document.getElementById('new-dd-desc');
-    const dayEl = document.getElementById('new-dd-day');
-    const amtEl = document.getElementById('new-dd-amt');
-    const accEl = document.getElementById('new-dd-acc');
-    const transEl = document.getElementById('new-dd-transfer');
-
-    if (!descEl || !amtEl) return;
-    const desc = descEl.value.trim();
-    const day = dayEl ? parseInt(dayEl.value, 10) || 1 : 1;
-    const amt = parseFloat(amtEl.value);
-    const acc = accEl ? accEl.value : getSettings().current_accounts[0];
-    const trans = transEl ? transEl.value : 'none';
-
-    if (!desc || isNaN(amt) || amt <= 0) return;
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
-    const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
-    const yData = getYearData(appState.currentYear);
-    const cfg = getSettings();
-
-    const newDD = { desc, due_day: day, amount: amt, account: acc, transfer_to: trans, holiday_rule: 'following' };
-    if (!cfg.default_direct_debits) cfg.default_direct_debits = [];
-    cfg.default_direct_debits.push(newDD);
-
-    const mIdx = months.indexOf(currentActiveMonth);
-    for (let i = Math.max(0, mIdx); i < 12; i++) {
-      const mName = months[i];
-      if (yData.months && yData.months[mName]) {
-        if (!yData.months[mName].direct_debits) yData.months[mName].direct_debits = [];
-        yData.months[mName].direct_debits.push({ ...newDD });
-      }
-    }
-    const md = getMonthData(currentActiveMonth);
-    if (!md.direct_debits.some(d => d.desc === desc && d.due_day === day && d.amount === amt)) {
-      md.direct_debits.push({ ...newDD });
-    }
-
-    descEl.value = '';
-    amtEl.value = '';
-    calculateAndSyncRollovers();
-    renderContent();
-    if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-  },
-
-  async deleteDirectDebit(idx) {
-    const detected = (typeof detectCurrentMonthAndWeek === 'function') ? detectCurrentMonthAndWeek() : { month: 'Jan' };
-    const currentActiveMonth = months.includes(appState.activeTab) ? appState.activeTab : (detected.month || 'Jan');
-    const md = getMonthData(currentActiveMonth);
-    if (md.direct_debits) {
-      md.direct_debits.splice(idx, 1);
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    }
-  },
-
-  async propagateDirectDebits() {
-    const currentMonth = appState.activeTab;
-    const currentYear = appState.currentYear;
-    const yData = getYearData(currentYear);
-    const mIdx = months.indexOf(currentMonth);
-    const currentDDs = JSON.parse(JSON.stringify(getMonthData(currentMonth).direct_debits || []));
-
-    if (!confirm(`Propagate current Direct Debits to all following months (${months.slice(mIdx + 1).join(', ')})?`)) return;
-
-    for (let i = mIdx + 1; i < 12; i++) {
-      const targetMName = months[i];
-      if (yData.months[targetMName]) {
-        yData.months[targetMName].direct_debits = JSON.parse(JSON.stringify(currentDDs));
-      }
-    }
-
-    const cfg = getSettings();
-    cfg.default_direct_debits = JSON.parse(JSON.stringify(currentDDs));
 
     calculateAndSyncRollovers();
     renderContent();
@@ -24459,146 +24233,3 @@ if (document.readyState === 'loading') {
 } else {
   window.budgetApp.init();
 }
-
-// --- settings function safety patch ---
-(function() {
-  var app = window.budgetApp;
-  if (!app) return;
-
-  if (typeof app.addCurrentAccountInSettings !== 'function') {
-    app.addCurrentAccountInSettings = async function() {
-      var name = prompt('Enter current account name:');
-      if (name && name.trim()) {
-        getSettings().current_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addCreditAccountInSettings !== 'function') {
-    app.addCreditAccountInSettings = async function() {
-      var name = prompt('Enter credit card name:');
-      if (name && name.trim()) {
-        getSettings().credit_accounts.push({
-          name: name.trim(),
-          limit: 0,
-          autopay_enabled: false,
-          autopay_from: getSettings().current_accounts[0] || '',
-          autopay_when: 'week_1',
-          autopay_type: 'full',
-          autopay_fixed_amt: 0.00
-        });
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.addSavingsAccountInSettings !== 'function') {
-    app.addSavingsAccountInSettings = async function() {
-      var name = prompt('Enter savings account name:');
-      if (name && name.trim()) {
-        getSettings().savings_accounts.push(name.trim());
-        calculateAndSyncRollovers();
-        renderContent();
-        if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-      }
-    };
-  }
-
-  if (typeof app.editCreditAccount !== 'function') {
-    app.editCreditAccount = async function(idx, field, value) {
-      var acc = getSettings().credit_accounts[idx];
-      if (!acc) return;
-      if (field === 'autopay_enabled') {
-        acc[field] = (value === true || value === 'true');
-      } else if (field === 'limit' || field === 'autopay_fixed_amt') {
-        acc[field] = parseFloat(value) || 0;
-      } else {
-        acc[field] = value;
-      }
-      calculateAndSyncRollovers();
-      renderContent();
-      if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.updateOpenBankingBalanceType !== 'function') {
-    app.updateOpenBankingBalanceType = function(val) {
-      var cfg = getSettings();
-      cfg.open_banking = cfg.open_banking || {};
-      cfg.open_banking.balance_type = val;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ balance_type: val }); }
-      if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-      renderContent();
-    };
-  }
-
-  if (typeof app.updateLinkedAccountBalanceType !== 'function') {
-    app.updateLinkedAccountBalanceType = async function(accountId, newBalanceType) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      if (!cfg.open_banking.linked_accounts) cfg.open_banking.linked_accounts = [];
-      var acc = cfg.open_banking.linked_accounts.find(function(a) { return String(a.account_id) === String(accountId) || a.account_name === accountId; });
-      if (acc) {
-        acc.balance_type = newBalanceType;
-        renderContent();
-        if (typeof mapOpenBankingAccount === 'function') {
-          try {
-            await mapOpenBankingAccount(acc.account_id || accountId, acc.mapped_habit_account_id || null, acc.owner || 'Joint', newBalanceType);
-          } catch (e) {
-            console.warn("mapOpenBankingAccount error:", e);
-          }
-        }
-        if (typeof app.applyOpenBankingToCheckins === 'function') { app.applyOpenBankingToCheckins(); }
-        if (getSettings().onboarding_complete && typeof saveBudget === 'function') { await saveBudget(appState.data); }
-        renderContent();
-      }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingChangeoverSync !== 'function') {
-    app.toggleOpenBankingChangeoverSync = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.auto_sync_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ auto_sync_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-      renderContent();
-    };
-  }
-
-  if (typeof app.updateOpenBankingChangeoverTime !== 'function') {
-    app.updateOpenBankingChangeoverTime = function(timeVal) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.changeover_sync_time = timeVal;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ changeover_sync_time: timeVal }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingSyncWeekly !== 'function') {
-    app.toggleOpenBankingSyncWeekly = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.sync_weekly_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_weekly_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-
-  if (typeof app.toggleOpenBankingSyncPeriod !== 'function') {
-    app.toggleOpenBankingSyncPeriod = function(enabled) {
-      var cfg = getSettings();
-      if (!cfg.open_banking) cfg.open_banking = {};
-      cfg.open_banking.sync_period_changeover = !!enabled;
-      if (typeof saveOpenBankingConfig === 'function') { saveOpenBankingConfig({ sync_period_changeover: !!enabled }); }
-      if (getSettings().onboarding_complete && typeof saveBudget === 'function') { saveBudget(appState.data); }
-    };
-  }
-})();
