@@ -5,6 +5,12 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-09-15
+
+### Fixed
+- **Spend Analytics**: Removed the interactive click handler, pointer cursor styling, and pencil icon (`✏️`) from the range selection badge on the Live Spend & Categories tab. Payday cycle overrides are now restricted exclusively to the Monthly Forecasting view.
+- **Savings Trajectory**: Improved savings trajectory calculations in Year Overview by consolidating all historical savings actuals across both active and archived months, applying momentum weighting across trailing check-ins, and anchoring projections directly to the latest check-in.
+
 ## [0.4.0] - 2026-09-10
 
 ### Fixed

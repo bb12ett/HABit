@@ -437,13 +437,10 @@ export function renderSpendAnalyticsView(container) {
   const dayCount = Math.max(1, Math.round(Math.abs(eMidnight.getTime() - sMidnight.getTime()) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailySpend = grandTotal / dayCount;
 
-  let isPaydayCycle = false;
   let rangeBadgeText = '';
   if (rangeInfo.label && rangeInfo.label.startsWith('Payday:')) {
-    isPaydayCycle = true;
     rangeBadgeText = rangeInfo.label;
   } else if (timeframe === 'this_month' || timeframe === 'last_month') {
-    isPaydayCycle = true;
     rangeBadgeText = rangeInfo.label;
   } else if (timeframe === 'active_week') {
     rangeBadgeText = rangeInfo.label || `This Week (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
@@ -514,8 +511,8 @@ export function renderSpendAnalyticsView(container) {
             <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(-1)" title="Step 1 Period Earlier in History">
               ◀
             </button>
-            <div class="spend-range-badge" ${isPaydayCycle && rangeInfo.monthName ? `onclick="window.budgetApp.openDateOverrideModal('${rangeInfo.monthName}')" title="Click to override payday period for ${rangeInfo.monthName}" style="cursor:pointer;"` : ''}>
-              <span class="spend-badge-text">📅 ${rangeBadgeText} ${isPaydayCycle && rangeInfo.monthName ? '✏️' : ''}</span>
+            <div class="spend-range-badge">
+              <span class="spend-badge-text">📅 ${rangeBadgeText}</span>
               <span class="spend-badge-days">(${dayCount} ${dayCount === 1 ? 'day' : 'days'})</span>
             </div>
             <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(1)" title="Step 1 Period Later in History">

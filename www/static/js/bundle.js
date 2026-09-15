@@ -13706,6 +13706,115 @@ function computeTrajectoryMonthData(visibleMonths, sel, cfg) {
   });
 }
 
+function getActualSavingsValue(md, accountName, cfg) {
+  if (!md) return null;
+  if (accountName === 'ALL') {
+    let aSum = 0;
+    let hasAnyActual = false;
+    const accounts = cfg.savings_accounts || [];
+    accounts.forEach(acc => {
+      let actVal = null;
+      if (md.weekly_actuals) {
+        for (let w = 5; w >= 1; w--) {
+          const wAct = md.weekly_actuals[`Week ${w}`];
+          if (wAct && wAct[`sav_${acc}`] !== "" && wAct[`sav_${acc}`] !== undefined && wAct[`sav_${acc}`] !== null) {
+            actVal = parseFloat(wAct[`sav_${acc}`]);
+            break;
+          }
+        }
+      }
+      if (actVal !== null && !isNaN(actVal)) {
+        hasAnyActual = true;
+        aSum += actVal;
+      } else {
+        aSum += Number(md.savings_data?.[acc]?.opening) || 0;
+      }
+    });
+    return hasAnyActual ? aSum : null;
+  } else {
+    let actVal = null;
+    if (md.weekly_actuals) {
+      for (let w = 5; w >= 1; w--) {
+        const wAct = md.weekly_actuals[`Week ${w}`];
+        if (wAct && wAct[`sav_${accountName}`] !== "" && wAct[`sav_${accountName}`] !== undefined && wAct[`sav_${accountName}`] !== null) {
+          actVal = parseFloat(wAct[`sav_${accountName}`]);
+          break;
+        }
+      }
+    }
+    return (actVal !== null && !isNaN(actVal)) ? actVal : null;
+  }
+}
+
+function getPlannedSavingsValue(md, accountName, cfg) {
+  if (!md) return 0;
+  if (accountName === 'ALL') {
+    let pSum = 0;
+    (cfg.savings_accounts || []).forEach(acc => {
+      pSum += Number(md.savings_data?.[acc]?.opening) || 0;
+    });
+    return pSum;
+  } else {
+    return Number(md.savings_data?.[accountName]?.opening) || 0;
+  }
+}
+
+function getAllHistoricalSavingsActuals(accountName, cfg, visibleMonths = []) {
+  const yearsSet = new Set();
+
+  if (appState.data && appState.data.years) {
+    Object.keys(appState.data.years).forEach(yStr => {
+      const y = parseInt(yStr, 10);
+      if (!isNaN(y)) yearsSet.add(y);
+    });
+  }
+
+  const sliding = (typeof getSlidingWindowMonths === 'function') ? getSlidingWindowMonths() : [];
+  sliding.forEach(m => {
+    if (m && m.year) yearsSet.add(m.year);
+  });
+
+  (visibleMonths || []).forEach(m => {
+    if (m && m.year) yearsSet.add(m.year);
+  });
+
+  if (appState.currentYear) {
+    yearsSet.add(appState.currentYear);
+  }
+
+  const sortedYears = Array.from(yearsSet).sort((a, b) => a - b);
+  const actualEntries = [];
+
+  sortedYears.forEach(y => {
+    months.forEach((mName, mIdx) => {
+      const totalM = y * 12 + mIdx;
+      const yData = appState.data?.years?.[String(y)];
+      let md = yData?.months?.[mName];
+
+      if (!md && visibleMonths && visibleMonths.some(vm => vm.year === y && vm.month === mName)) {
+        md = getMonthData(mName, y);
+      }
+
+      if (md) {
+        const val = getActualSavingsValue(md, accountName, cfg);
+        if (val !== null && !isNaN(val)) {
+          actualEntries.push({
+            year: y,
+            month: mName,
+            monthIdx: mIdx,
+            totalM,
+            val,
+            planned: getPlannedSavingsValue(md, accountName, cfg)
+          });
+        }
+      }
+    });
+  });
+
+  actualEntries.sort((a, b) => a.totalM - b.totalM);
+  return actualEntries;
+}
+
 function computeTrajectorySavingsSummary(visibleMonths, cfg) {
   if (!visibleMonths || visibleMonths.length === 0) return [];
   const startM = visibleMonths[0];
@@ -13741,6 +13850,17 @@ function computeTrajectorySavingsSummary(visibleMonths, cfg) {
       if (latestActual !== null) break;
     }
 
+    // If no check-in is recorded in visibleMonths, fall back to the most recent historical check-in (including archived)
+    if (latestActual === null) {
+      const historicalActuals = getAllHistoricalSavingsActuals(acc, cfg, visibleMonths);
+      if (historicalActuals.length > 0) {
+        const lastEntry = historicalActuals[historicalActuals.length - 1];
+        latestActual = lastEntry.val;
+        latestActualMonth = `${lastEntry.month} '${String(lastEntry.year).slice(-2)}`;
+        latestPredictedAtThatMonth = lastEntry.planned;
+      }
+    }
+
     const growthAmt = (latestActual !== null) ? (latestActual - latestPredictedAtThatMonth) : (endVal - startVal);
     const growthPct = (latestActual !== null && latestPredictedAtThatMonth > 0) 
       ? ((growthAmt / latestPredictedAtThatMonth) * 100) 
@@ -13768,94 +13888,89 @@ function computeSavingsAccountChartData(visibleMonths, accountName, cfg) {
 
   visibleMonths.forEach(mObj => {
     const md = getMonthData(mObj.month, mObj.year);
-
-    if (accountName === 'ALL') {
-      let pSum = 0;
-      (cfg.savings_accounts || []).forEach(acc => {
-        pSum += Number(md.savings_data[acc]?.opening) || 0;
-      });
-      planned.push(pSum);
-
-      let aSum = 0;
-      let hasAnyActual = false;
-      (cfg.savings_accounts || []).forEach(acc => {
-        let actVal = null;
-        for (let w = 5; w >= 1; w--) {
-          const wAct = md.weekly_actuals && md.weekly_actuals[`Week ${w}`];
-          if (wAct && wAct[`sav_${acc}`] !== "" && wAct[`sav_${acc}`] !== undefined && wAct[`sav_${acc}`] !== null) {
-            actVal = parseFloat(wAct[`sav_${acc}`]);
-            break;
-          }
-        }
-        if (actVal !== null && !isNaN(actVal)) {
-          hasAnyActual = true;
-          aSum += actVal;
-        } else {
-          aSum += Number(md.savings_data[acc]?.opening) || 0;
-        }
-      });
-      actual.push(hasAnyActual ? aSum : null);
-    } else {
-      const pVal = Number(md.savings_data[accountName]?.opening) || 0;
-      planned.push(pVal);
-
-      let actVal = null;
-      for (let w = 5; w >= 1; w--) {
-        const wAct = md.weekly_actuals && md.weekly_actuals[`Week ${w}`];
-        if (wAct && wAct[`sav_${accountName}`] !== "" && wAct[`sav_${accountName}`] !== undefined && wAct[`sav_${accountName}`] !== null) {
-          actVal = parseFloat(wAct[`sav_${accountName}`]);
-          break;
-        }
-      }
-      actual.push((actVal !== null && !isNaN(actVal)) ? actVal : null);
-    }
+    planned.push(getPlannedSavingsValue(md, accountName, cfg));
+    actual.push(getActualSavingsValue(md, accountName, cfg));
   });
 
-  // Calculate growth trend extrapolation based on actuals
-  const actualEntries = [];
-  actual.forEach((val, idx) => {
-    if (val !== null && val !== undefined) {
-      actualEntries.push({ idx, val });
-    }
-  });
+  // Gather all historical actuals across all years/months (including archived and outside selected timeline)
+  const allHistoricalActuals = getAllHistoricalSavingsActuals(accountName, cfg, visibleMonths);
 
   const forecast = visibleMonths.map(() => null);
 
-  if (actualEntries.length > 0) {
-    const latest = actualEntries[actualEntries.length - 1];
+  if (allHistoricalActuals.length > 0) {
+    const latest = allHistoricalActuals[allHistoricalActuals.length - 1];
     let monthlyRate = 0;
+    let isCompound = false;
 
-    if (actualEntries.length >= 2) {
-      const first = actualEntries[0];
-      const dMonths = latest.idx - first.idx;
-      if (dMonths > 0 && first.val > 0) {
-        monthlyRate = Math.pow(latest.val / first.val, 1 / dMonths) - 1;
-        monthlyRate = Math.max(-0.25, Math.min(0.25, monthlyRate));
-      } else if (dMonths > 0) {
-        monthlyRate = (latest.val - first.val) / dMonths;
+    if (allHistoricalActuals.length >= 2) {
+      // Prioritize trailing momentum over the last few months (trailing 3 months)
+      let first = null;
+      const last3Months = allHistoricalActuals.filter(e => e.totalM >= latest.totalM - 3);
+      if (last3Months.length >= 2) {
+        first = last3Months[0];
+      } else {
+        // Fall back to trailing 6 months
+        const last6Months = allHistoricalActuals.filter(e => e.totalM >= latest.totalM - 6);
+        if (last6Months.length >= 2) {
+          first = last6Months[0];
+        } else {
+          // Fall back to the most recent 2 to 4 recorded check-ins across history
+          const recentFallback = allHistoricalActuals.slice(-4);
+          first = recentFallback[0];
+        }
+      }
+
+      if (first && first !== latest) {
+        const dMonths = latest.totalM - first.totalM;
+        if (dMonths > 0 && first.val > 0 && latest.val > 0) {
+          monthlyRate = Math.pow(latest.val / first.val, 1 / dMonths) - 1;
+          monthlyRate = Math.max(-0.25, Math.min(0.25, monthlyRate));
+          isCompound = true;
+        } else if (dMonths > 0) {
+          monthlyRate = (latest.val - first.val) / dMonths;
+          isCompound = false;
+        }
       }
     } else {
-      const baseline = planned[0];
-      if (latest.idx > 0 && baseline > 0) {
-        monthlyRate = Math.pow(latest.val / baseline, 1 / latest.idx) - 1;
+      // Single actual check-in in history: compare to baseline planned
+      const prevTotalM = latest.totalM - 1;
+      const prevY = Math.floor(prevTotalM / 12);
+      const prevM = months[((prevTotalM % 12) + 12) % 12];
+      const prevMd = getMonthData(prevM, prevY);
+      const prevPlanned = getPlannedSavingsValue(prevMd, accountName, cfg);
+      const refBase = prevPlanned > 0 ? prevPlanned : (latest.planned > 0 ? latest.planned : 0);
+
+      if (refBase > 0 && latest.val > 0) {
+        monthlyRate = Math.pow(latest.val / refBase, 1) - 1;
         monthlyRate = Math.max(-0.25, Math.min(0.25, monthlyRate));
-      } else if (latest.idx > 0) {
-        monthlyRate = (latest.val - baseline) / latest.idx;
+        isCompound = true;
+      } else if (refBase > 0) {
+        monthlyRate = latest.val - refBase;
+        isCompound = false;
       }
     }
 
-    // Connect forecast line at the latest actual check-in and extrapolate forward
-    forecast[latest.idx] = latest.val;
-    for (let i = latest.idx + 1; i < visibleMonths.length; i++) {
-      const steps = i - latest.idx;
-      let projectedVal;
-      if (Math.abs(monthlyRate) < 1) {
-        projectedVal = latest.val * Math.pow(1 + monthlyRate, steps);
+    // Extrapolate forward from latest actual across visibleMonths (regardless of selected timeline window)
+    visibleMonths.forEach((mObj, idx) => {
+      const totalM = (mObj.totalM !== undefined) ? mObj.totalM : (mObj.year * 12 + months.indexOf(mObj.month));
+      if (totalM < latest.totalM) {
+        // Earlier than latest check-in: actual check-in data / planned curve applies
+        forecast[idx] = null;
+      } else if (totalM === latest.totalM) {
+        // Anchor directly onto the latest actual check-in
+        forecast[idx] = latest.val;
       } else {
-        projectedVal = latest.val + (monthlyRate * steps);
+        // Project forward from latest check-in
+        const steps = totalM - latest.totalM;
+        let projectedVal;
+        if (isCompound) {
+          projectedVal = latest.val * Math.pow(1 + monthlyRate, steps);
+        } else {
+          projectedVal = latest.val + (monthlyRate * steps);
+        }
+        forecast[idx] = Math.max(0, Math.round(projectedVal * 100) / 100);
       }
-      forecast[i] = Math.max(0, Math.round(projectedVal * 100) / 100);
-    }
+    });
   }
 
   return {
@@ -14283,6 +14398,8 @@ if (typeof window !== 'undefined') {
   window.resetTrajectoryWindow = resetTrajectoryWindow;
   window.updateTrajectoryViewData = updateTrajectoryViewData;
   window.selectSavingsChartAccount = selectSavingsChartAccount;
+  window.computeSavingsAccountChartData = computeSavingsAccountChartData;
+  window.getAllHistoricalSavingsActuals = getAllHistoricalSavingsActuals;
 }
 
 // --- static/js/views/spend_analytics.js ---
@@ -14725,13 +14842,10 @@ function renderSpendAnalyticsView(container) {
   const dayCount = Math.max(1, Math.round(Math.abs(eMidnight.getTime() - sMidnight.getTime()) / (1000 * 60 * 60 * 24)) + 1);
   const avgDailySpend = grandTotal / dayCount;
 
-  let isPaydayCycle = false;
   let rangeBadgeText = '';
   if (rangeInfo.label && rangeInfo.label.startsWith('Payday:')) {
-    isPaydayCycle = true;
     rangeBadgeText = rangeInfo.label;
   } else if (timeframe === 'this_month' || timeframe === 'last_month') {
-    isPaydayCycle = true;
     rangeBadgeText = rangeInfo.label;
   } else if (timeframe === 'active_week') {
     rangeBadgeText = rangeInfo.label || `This Week (${formatShortDate(sDate)} – ${formatShortDate(eDate)})`;
@@ -14802,8 +14916,8 @@ function renderSpendAnalyticsView(container) {
             <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(-1)" title="Step 1 Period Earlier in History">
               ◀
             </button>
-            <div class="spend-range-badge" ${isPaydayCycle && rangeInfo.monthName ? `onclick="window.budgetApp.openDateOverrideModal('${rangeInfo.monthName}')" title="Click to override payday period for ${rangeInfo.monthName}" style="cursor:pointer;"` : ''}>
-              <span class="spend-badge-text">📅 ${rangeBadgeText} ${isPaydayCycle && rangeInfo.monthName ? '✏️' : ''}</span>
+            <div class="spend-range-badge">
+              <span class="spend-badge-text">📅 ${rangeBadgeText}</span>
               <span class="spend-badge-days">(${dayCount} ${dayCount === 1 ? 'day' : 'days'})</span>
             </div>
             <button class="btn secondary sm spend-nav-btn" onclick="window.budgetApp.shiftSpendTimeframe(1)" title="Step 1 Period Later in History">
