@@ -82,6 +82,30 @@ export function computeTrajectoryMonthData(visibleMonths, sel, cfg) {
       }
     });
 
+    let hasActualCredit = false;
+    let actualCreditTotal = 0;
+    cfg.credit_accounts.filter(c => (sel.credit || []).includes(c.name)).forEach(c => {
+      let actVal = null;
+      for (let w = 5; w >= 1; w--) {
+        const wAct = md.weekly_actuals && md.weekly_actuals[`Week ${w}`];
+        if (wAct) {
+          if (wAct[`c_avail_${c.name}`] !== "" && wAct[`c_avail_${c.name}`] !== undefined && wAct[`c_avail_${c.name}`] !== null) {
+            actVal = Math.max(0, (Number(c.limit) || 0) - (parseFloat(wAct[`c_avail_${c.name}`]) || 0));
+            break;
+          } else if (wAct[`c_spent_${c.name}`] !== "" && wAct[`c_spent_${c.name}`] !== undefined && wAct[`c_spent_${c.name}`] !== null) {
+            actVal = Math.max(0, parseFloat(wAct[`c_spent_${c.name}`]) || 0);
+            break;
+          }
+        }
+      }
+      if (actVal !== null && !isNaN(actVal)) {
+        hasActualCredit = true;
+        actualCreditTotal += actVal;
+      } else {
+        actualCreditTotal += Number(md.credit_data[c.name] && md.credit_data[c.name].opening_spent) || 0;
+      }
+    });
+
     const ddTotal = (md.direct_debits || []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
     let wTotal = 0;
     Object.values(md.weekly_items || {}).forEach(wItems => (wItems || []).forEach(it => { if (!it.is_income) wTotal += Number(it.amount) || 0; }));
@@ -95,8 +119,9 @@ export function computeTrajectoryMonthData(visibleMonths, sel, cfg) {
       savings: sTotal,
       actualSavings: hasActualSavings ? actualSavingsTotal : null,
       actualCurrent: hasActualCurrent ? actualCurrentTotal : null,
+      actualCredit: hasActualCredit ? actualCreditTotal : null,
       net: cTotal + sTotal - crTotal,
-      actualNet: (hasActualSavings || hasActualCurrent) ? (actualCurrentTotal + actualSavingsTotal - crTotal) : null,
+      actualNet: (hasActualSavings || hasActualCurrent || hasActualCredit) ? (actualCurrentTotal + actualSavingsTotal - actualCreditTotal) : null,
       out: ddTotal + wTotal
     };
   });

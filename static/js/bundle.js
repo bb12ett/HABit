@@ -1202,12 +1202,6 @@ if (typeof window !== 'undefined') {
 
 
 // --- static/js/api.js ---
-
-
-// =========================================================
-// UNIVERSAL STORAGE ADAPTER (Home Assistant + Standalone Mobile)
-// =========================================================
-
 function getBaseApiUrl() {
   let p = window.location.pathname;
   if (p.endsWith('index.html')) p = p.slice(0, -10);
@@ -1219,619 +1213,7 @@ function getApiUrl() {
   return getBaseApiUrl() + 'api/budget';
 }
 
-// ---------------------------------------------------------
-// 1. INDEXEDDB LOCAL STORAGE BACKEND
-// ---------------------------------------------------------
-class IndexedDBStore {
-  constructor(dbName = 'HABitDatabase', storeName = 'keyval') {
-    this.dbName = dbName;
-    this.storeName = storeName;
-    this.dbPromise = null;
-  }
-
-  async getDb() {
-    if (this.dbPromise) return this.dbPromise;
-    this.dbPromise = new Promise((resolve) => {
-      if (typeof indexedDB === 'undefined') {
-        resolve(null);
-        return;
-      }
-      try {
-        const req = indexedDB.open(this.dbName, 1);
-        req.onupgradeneeded = () => {
-          const db = req.result;
-          if (!db.objectStoreNames.contains(this.storeName)) {
-            db.createObjectStore(this.storeName);
-          }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = (e) => {
-          console.warn('[IndexedDB] DB open error, fallback to localStorage:', e);
-          resolve(null);
-        };
-      } catch (err) {
-        resolve(null);
-      }
-    });
-    return this.dbPromise;
-  }
-
-  async get(key) {
-    const db = await this.getDb();
-    if (!db) {
-      try {
-        const val = localStorage.getItem(key);
-        return val ? JSON.parse(val) : null;
-      } catch (e) { return null; }
-    }
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(this.storeName, 'readonly');
-        const store = tx.objectStore(this.storeName);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result !== undefined ? req.result : null);
-        req.onerror = () => resolve(null);
-      } catch (e) {
-        resolve(null);
-      }
-    });
-  }
-
-  async set(key, value) {
-    const db = await this.getDb();
-    if (!db) {
-      try {
-        localStorage.setItem(key, JSON.stringify(value));
-        return true;
-      } catch (e) { return false; }
-    }
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(this.storeName, 'readwrite');
-        const store = tx.objectStore(this.storeName);
-        const req = store.put(value, key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => resolve(false);
-      } catch (e) {
-        resolve(false);
-      }
-    });
-  }
-
-  async remove(key) {
-    const db = await this.getDb();
-    if (!db) {
-      try { localStorage.removeItem(key); return true; } catch (e) { return false; }
-    }
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(this.storeName, 'readwrite');
-        const store = tx.objectStore(this.storeName);
-        const req = store.delete(key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => resolve(false);
-      } catch (e) {
-        resolve(false);
-      }
-    });
-  }
-
-  async del(key) {
-    return await this.remove(key);
-  }
-
-  async delete(key) {
-    return await this.remove(key);
-  }
-
-  async keys() {
-    const db = await this.getDb();
-    if (!db) {
-      try { return Object.keys(localStorage); } catch (e) { return []; }
-    }
-    return new Promise((resolve) => {
-      try {
-        const tx = db.transaction(this.storeName, 'readonly');
-        const store = tx.objectStore(this.storeName);
-        const req = store.getAllKeys();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => resolve([]);
-      } catch (e) {
-        resolve([]);
-      }
-    });
-  }
-}
-
-const localStore = new IndexedDBStore();
-
-// ---------------------------------------------------------
-// 2. RUNTIME ENVIRONMENT DETECTION & PERSISTENT STORAGE
-// ---------------------------------------------------------
-let _detectedMode = null; // 'ha' | 'local'
-
-function isCapacitorNative() {
-  return Boolean(
-    (typeof window !== 'undefined' && window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()) ||
-    (typeof window !== 'undefined' && window.Capacitor && window.Capacitor.platform && window.Capacitor.platform !== 'web')
-  );
-}
-
-function getPersistentStoragePreference() {
-  if (typeof window === 'undefined') return 'auto';
-  try {
-    const saved = localStorage.getItem('habit_storage_mode');
-    if (saved === 'ha' || saved === 'local' || saved === 'auto') return saved;
-  } catch (e) {}
-  return 'auto';
-}
-
-function isStandaloneMode() {
-  const pref = getPersistentStoragePreference();
-  if (pref === 'local') return true;
-  if (pref === 'ha') return false;
-  if (isCapacitorNative()) return true;
-  if (typeof window === 'undefined') return false;
-  if (window.location.protocol === 'file:') return true;
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return false;
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return true;
-  return false;
-}
-
-function getStorageMode() {
-  if (_detectedMode) return _detectedMode;
-  const pref = getPersistentStoragePreference();
-  if (pref === 'ha') return 'ha';
-  if (pref === 'local') return 'local';
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') return 'ha';
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') return 'local';
-  return isStandaloneMode() ? 'local' : 'ha';
-}
-
-function setStorageMode(mode) {
-  _detectedMode = (mode === 'auto') ? null : mode;
-  try {
-    localStorage.setItem('habit_storage_mode', mode);
-  } catch (e) {}
-}
-
-async function detectStorageEngine() {
-  if (_detectedMode) return _detectedMode;
-
-  const pref = getPersistentStoragePreference();
-  // 1. Explicit user override in localStorage wins
-  if (pref === 'local') {
-    _detectedMode = 'local';
-    console.log('[StorageAdapter] Running in explicit Local / Standalone mode.');
-    return _detectedMode;
-  }
-  if (pref === 'ha') {
-    _detectedMode = 'ha';
-    console.log('[StorageAdapter] Running in explicit Home Assistant Server mode.');
-    return _detectedMode;
-  }
-
-  // 2. Client environment checks
-  if (isCapacitorNative() || (typeof window !== 'undefined' && window.location.protocol === 'file:')) {
-    _detectedMode = 'local';
-    console.log('[StorageAdapter] Running in Native / file: Standalone mode.');
-    return _detectedMode;
-  }
-
-  // 3. Server injection flag (Authoritative: served directly by Home Assistant Flask)
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'ha') {
-    _detectedMode = 'ha';
-    console.log('[StorageAdapter] Connected to Home Assistant server (verified via server environment tag).');
-    return _detectedMode;
-  }
-  if (typeof window !== 'undefined' && window.__HABIT_SERVER_ENV__ === 'local') {
-    _detectedMode = 'local';
-    console.log('[StorageAdapter] Running in static / local distribution.');
-    return _detectedMode;
-  }
-
-  // 4. Fallback network probe only if environment is completely ambiguous
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 4000);
-    const r = await fetch(getBaseApiUrl() + 'api/auth/status', {
-      method: 'GET',
-      cache: 'no-store',
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
-    if (r.ok || r.status === 401) {
-      _detectedMode = 'ha';
-      console.log('[StorageAdapter] Connected to Home Assistant server via API probe.');
-      return _detectedMode;
-    }
-  } catch (e) {
-    // Timeout or network unreachable
-  }
-
-  _detectedMode = 'ha';
-  console.log('[StorageAdapter] Defaulting to Home Assistant server mode.');
-  return _detectedMode;
-}
-
-// ---------------------------------------------------------
-// 3. LOCAL STORAGE ENGINE IMPLEMENTATION (PURE CLIENT-SIDE)
-// ---------------------------------------------------------
-async function hashPinLocal(pin, salt) {
-  if (typeof window !== 'undefined' && window.crypto && window.crypto.subtle) {
-    try {
-      const enc = new TextEncoder();
-      const data = enc.encode((salt || '') + ':' + String(pin));
-      const hashBuf = await window.crypto.subtle.digest('SHA-256', data);
-      return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-    } catch (e) {}
-  }
-  let h = 0;
-  const str = (salt || '') + ':' + String(pin);
-  for (let i = 0; i < str.length; i++) {
-    h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
-  }
-  return String(h);
-}
-
-const LocalEngine = {
-  async fetchBudget(year) {
-    let settings = await localStore.get('habit_settings');
-    if (!settings) {
-      settings = JSON.parse(JSON.stringify(DEFAULT_SETTINGS || {}));
-      await localStore.set('habit_settings', settings);
-    }
-
-    const curYr = year ? parseInt(year, 10) : (new Date().getFullYear());
-    const adv = parseInt(settings.months_in_advance !== undefined ? settings.months_in_advance : 12, 10);
-    const arr = parseInt(settings.months_in_arrears !== undefined ? settings.months_in_arrears : 3, 10);
-    const curM = new Date().getMonth();
-    const startYr = Math.floor((curYr * 12 + curM - arr) / 12);
-    const endYr = Math.floor((curYr * 12 + curM + adv) / 12);
-
-    let allYears = await localStore.get('habit_available_years') || [];
-    const validYears = [];
-    for (const yr of allYears) {
-      if (yr < curYr) {
-        const yData = await localStore.get(`habit_year_${yr}`);
-        const checkEmptyFn = (typeof isYearEmptyOrPhantom === 'function') ? isYearEmptyOrPhantom : null;
-        if (checkEmptyFn && checkEmptyFn(yr, yData, curYr, settings)) {
-          await localStore.remove(`habit_year_${yr}`);
-          continue;
-        }
-      }
-      validYears.push(yr);
-    }
-    allYears = validYears;
-
-    const neededYears = new Set([...allYears, curYr]);
-    for (let y = startYr; y <= endYr; y++) {
-      if (y >= curYr) {
-        neededYears.add(y);
-      }
-    }
-    allYears = Array.from(neededYears).sort((a, b) => a - b);
-    await localStore.set('habit_available_years', allYears);
-
-    const yearsObj = {};
-    for (const y of allYears) {
-      const yStr = String(y);
-      let yearData = await localStore.get(`habit_year_${yStr}`);
-      if (!yearData) {
-        // Do NOT auto-create historical years (< curYr) that do not exist!
-        if (y < curYr) continue;
-        yearData = {
-          archived: false,
-          birthdays: JSON.parse(JSON.stringify(settings.birthdays || [])),
-          recurring_payments: JSON.parse(JSON.stringify(settings.recurring_payments || [])),
-          recurring_incomes: JSON.parse(JSON.stringify(settings.recurring_incomes || [])),
-          yearly_recurring: JSON.parse(JSON.stringify(settings.default_yearly_recurring || [])),
-          yearly_income: JSON.parse(JSON.stringify(settings.default_yearly_income || [])),
-          yearly_budgets: [],
-          months: {}
-        };
-        await localStore.set(`habit_year_${yStr}`, yearData);
-      }
-      yearsObj[yStr] = yearData;
-    }
-
-    const txns = await localStore.get('habit_open_banking_txns') || [];
-
-    return {
-      settings,
-      current_year: curYr,
-      available_years: Object.keys(yearsObj).map(n => parseInt(n, 10)).sort((a, b) => a - b),
-      open_banking_transactions: txns,
-      years: yearsObj
-    };
-  },
-
-  async saveBudget(state, year) {
-    if (!state) return false;
-    try {
-      if (state.settings) {
-        await localStore.set('habit_settings', state.settings);
-      }
-
-      if (state.years && typeof state.years === 'object') {
-        for (const yStr of Object.keys(state.years)) {
-          if (state.years[yStr]) {
-            await localStore.set(`habit_year_${yStr}`, state.years[yStr]);
-          }
-        }
-      }
-
-      if (Array.isArray(state.open_banking_transactions)) {
-        await localStore.set('habit_open_banking_txns', state.open_banking_transactions);
-      }
-
-      if (state.years) {
-        const yearNums = Object.keys(state.years).map(y => parseInt(y, 10)).filter(n => !isNaN(n));
-        const allYears = Array.from(new Set(yearNums)).sort((a, b) => a - b);
-        await localStore.set('habit_available_years', allYears);
-      }
-
-      return true;
-    } catch (e) {
-      console.error('[LocalEngine] saveBudget error:', e);
-      return false;
-    }
-  },
-
-  async fetchAvailableYears() {
-    const years = await localStore.get('habit_available_years') || [new Date().getFullYear()];
-    return {
-      years: years.sort(),
-      current_year: new Date().getFullYear()
-    };
-  },
-
-  async createBudgetYear(year, copyFromYear) {
-    const yrNum = parseInt(year, 10);
-    const yStr = String(yrNum);
-
-    let baseYearData = null;
-    if (copyFromYear) {
-      baseYearData = await localStore.get(`habit_year_${copyFromYear}`);
-    }
-
-    const settings = await localStore.get('habit_settings') || DEFAULT_SETTINGS;
-    let initialBirthdays = [];
-    if (baseYearData && baseYearData.birthdays) {
-      initialBirthdays = baseYearData.birthdays.map(b => ({ ...b, transactions: [] }));
-    } else {
-      initialBirthdays = JSON.parse(JSON.stringify(settings.birthdays || []));
-    }
-
-    const newYearData = {
-      archived: false,
-      birthdays: initialBirthdays,
-      recurring_payments: baseYearData ? JSON.parse(JSON.stringify(baseYearData.recurring_payments || [])) : JSON.parse(JSON.stringify(settings.recurring_payments || [])),
-      recurring_incomes: baseYearData ? JSON.parse(JSON.stringify(baseYearData.recurring_incomes || [])) : JSON.parse(JSON.stringify(settings.recurring_incomes || [])),
-      yearly_recurring: baseYearData ? JSON.parse(JSON.stringify(baseYearData.yearly_recurring || [])) : JSON.parse(JSON.stringify(settings.default_yearly_recurring || [])),
-      yearly_income: baseYearData ? JSON.parse(JSON.stringify(baseYearData.yearly_income || [])) : JSON.parse(JSON.stringify(settings.default_yearly_income || [])),
-      yearly_budgets: [],
-      months: {}
-    };
-
-    await localStore.set(`habit_year_${yStr}`, newYearData);
-
-    let allYears = await localStore.get('habit_available_years') || [];
-    allYears = Array.from(new Set([...allYears, yrNum])).sort();
-    await localStore.set('habit_available_years', allYears);
-
-    return { success: true, year: yrNum, years: allYears };
-  },
-
-  async deleteBudgetYear(year) {
-    const yrNum = parseInt(year, 10);
-    const yStr = String(yrNum);
-    await localStore.del(`habit_year_${yStr}`);
-    let allYears = await localStore.get('habit_available_years') || [];
-    allYears = allYears.filter(y => y !== yrNum);
-    await localStore.set('habit_available_years', allYears);
-    return { success: true, year: yrNum, years: allYears };
-  },
-
-  async exportFullBudgetBackupApi() {
-    const settings = await localStore.get('habit_settings') || DEFAULT_SETTINGS;
-    const allYears = await localStore.get('habit_available_years') || [new Date().getFullYear()];
-    const txns = await localStore.get('habit_open_banking_txns') || [];
-
-    const yearsObj = {};
-    for (const yr of allYears) {
-      const yData = await localStore.get(`habit_year_${yr}`);
-      if (yData) yearsObj[String(yr)] = yData;
-    }
-
-    return {
-      version: '0.3.1',
-      exported_at: new Date().toISOString(),
-      generator: 'HABit Universal Local Engine',
-      settings,
-      available_years: allYears,
-      open_banking_transactions: txns,
-      years: yearsObj
-    };
-  },
-
-  async importFullBudgetBackupApi(data) {
-    if (!data || typeof data !== 'object') return { success: false, error: 'Invalid backup' };
-
-    if (data.settings) {
-      await localStore.set('habit_settings', data.settings);
-    }
-
-    if (data.years && typeof data.years === 'object') {
-      const yearsList = [];
-      for (const [yStr, yData] of Object.entries(data.years)) {
-        await localStore.set(`habit_year_${yStr}`, yData);
-        yearsList.push(parseInt(yStr, 10));
-      }
-      await localStore.set('habit_available_years', Array.from(new Set(yearsList)).sort());
-    }
-
-    if (Array.isArray(data.open_banking_transactions)) {
-      await localStore.set('habit_open_banking_txns', data.open_banking_transactions);
-    }
-
-    return { success: true };
-  },
-
-  async resetDatabase() {
-    const allKeys = await localStore.keys();
-    for (const k of allKeys) {
-      if (String(k).startsWith('habit_')) {
-        await localStore.remove(k);
-      }
-    }
-    return true;
-  },
-
-  async getAuthStatus() {
-    const settings = await localStore.get('habit_settings') || {};
-    const sec = settings.security || {};
-    return {
-      master_pin_enabled: Boolean(sec.master_pin_enabled),
-      joint_pin_enabled: Boolean(sec.joint_pin_enabled),
-      multi_user: Boolean(settings.enable_multi_user),
-      personas: sec.personas || {}
-    };
-  },
-
-  async unlockAuth(persona, pin) {
-    const settings = await localStore.get('habit_settings') || {};
-    const sec = settings.security || {};
-
-    let storedHash = '';
-    let salt = '';
-
-    if (persona === 'master') {
-      storedHash = sec.master_pin_hash || '';
-      salt = sec.master_salt || '';
-    } else if (persona === 'Joint') {
-      storedHash = sec.joint_pin_hash || '';
-      salt = sec.joint_salt || '';
-    } else if (sec.personas && sec.personas[persona]) {
-      storedHash = sec.personas[persona].pin_hash || '';
-      salt = sec.personas[persona].salt || '';
-    }
-
-    if (!storedHash) {
-      return { ok: true, unlocked: true };
-    }
-
-    const testHash = await hashPinLocal(pin, salt);
-    const isValid = (testHash === storedHash);
-    return { ok: isValid, unlocked: isValid, error: isValid ? null : 'Incorrect PIN' };
-  },
-
-  async setPinAuth(persona, newPin, oldPin = '', enabled = true) {
-    const settings = await localStore.get('habit_settings') || DEFAULT_SETTINGS;
-    if (!settings.security) settings.security = {};
-    const sec = settings.security;
-
-    const salt = String(Date.now()) + Math.random().toString(36).substring(2, 8);
-    const pinHash = await hashPinLocal(newPin, salt);
-
-    if (persona === 'master') {
-      sec.master_pin_enabled = !!enabled;
-      sec.master_pin_hash = pinHash;
-      sec.master_salt = salt;
-    } else if (persona === 'Joint') {
-      sec.joint_pin_enabled = !!enabled;
-      sec.joint_pin_hash = pinHash;
-      sec.joint_salt = salt;
-    } else {
-      if (!sec.personas) sec.personas = {};
-      sec.personas[persona] = {
-        enabled: !!enabled,
-        pin_hash: pinHash,
-        salt: salt
-      };
-    }
-
-    await localStore.set('habit_settings', settings);
-    return { ok: true, success: true };
-  },
-
-  async uploadBankStatement(fileContent, filename = 'statement.csv', mappedAccount = '', owner = 'Joint') {
-    if (!fileContent) return { success: false, error: 'Empty statement file' };
-
-    try {
-      const lines = fileContent.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      if (lines.length < 2) return { success: false, error: 'CSV statement requires at least a header and 1 row' };
-
-      const sep = lines[0].includes(';') ? ';' : ',';
-      const header = lines[0].split(sep).map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
-
-      let dateIdx = header.findIndex(h => h.includes('date'));
-      let descIdx = header.findIndex(h => h.includes('desc') || h.includes('narrative') || h.includes('payee') || h.includes('merchant'));
-      let amtIdx = header.findIndex(h => h.includes('amount') || h.includes('value'));
-
-      if (dateIdx === -1) dateIdx = 0;
-      if (descIdx === -1) descIdx = 1;
-      if (amtIdx === -1) amtIdx = header.length - 1;
-
-      const existingTxns = await localStore.get('habit_open_banking_txns') || [];
-      const newTxns = [];
-
-      for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(sep).map(p => p.trim().replace(/^["']|["']$/g, ''));
-        if (parts.length <= Math.max(dateIdx, descIdx, amtIdx)) continue;
-
-        const rawDate = parts[dateIdx];
-        const rawDesc = parts[descIdx] || 'Bank Transaction';
-        const rawAmt = parseFloat(parts[amtIdx].replace(/[^0-9.-]/g, ''));
-
-        if (isNaN(rawAmt)) continue;
-
-        const dateMatch = rawDesc.match(/(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/i);
-        let effectiveDate = rawDate;
-        if (dateMatch) {
-          let dStr = dateMatch[1];
-          if (dStr.includes('/')) {
-            const p = dStr.split('/');
-            effectiveDate = `${p[2]}-${p[1]}-${p[0]}`;
-          } else {
-            effectiveDate = dStr;
-          }
-        }
-        const cleanDesc = rawDesc.replace(/[,;\s]+(?:transaction\s*date|txn\s*date|tx\s*date|purchase\s*date)[:\s]+(?:\d{4}-\d{2}-\d{2}|\d{2}\/\d{2}\/\d{4}|\d{2}-\d{2}-\d{4})/gi, '').trim();
-
-        const txnId = `local_${Date.now()}_${i}_${Math.abs(rawAmt).toFixed(2)}`;
-        newTxns.push({
-          transaction_id: txnId,
-          booking_date: effectiveDate,
-          cleared_date: rawDate,
-          payment_date: effectiveDate,
-          payee_name: cleanDesc || rawDesc,
-          description: cleanDesc || rawDesc,
-          raw_info: rawDesc,
-          account_name: mappedAccount || 'Current Account',
-          owner: owner || 'Joint'
-        });
-      }
-
-      const combined = [...existingTxns, ...newTxns];
-      await localStore.set('habit_open_banking_txns', combined);
-
-      return { success: true, count: newTxns.length, total: combined.length };
-    } catch (err) {
-      return { success: false, error: err.message };
-    }
-  }
-};
-
-// ---------------------------------------------------------
-// 4. UNIFIED PUBLIC API EXPORTS (AUTO-ROUTING)
-// ---------------------------------------------------------
-
 async function fetchBudget(year) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.fetchBudget(year);
-  }
   try {
     const url = year ? `${getApiUrl()}?year=${encodeURIComponent(year)}` : getApiUrl();
     const r = await fetch(url, { 
@@ -1845,38 +1227,13 @@ async function fetchBudget(year) {
       }
     }
   } catch (e) {
-    console.error('fetchBudget network error in HA mode:', e);
+    console.error("fetchBudget error:", e);
   }
   return null;
 }
 
-async function cloneBudgetToLocal(data) {
-  if (!data) return false;
-  try {
-    return await LocalEngine.saveBudget(data);
-  } catch (e) {
-    console.error('cloneBudgetToLocal error:', e);
-    return false;
-  }
-}
-
-async function cloneLocalToServer() {
-  try {
-    const localData = await LocalEngine.fetchBudget();
-    if (!localData || !localData.settings) return false;
-    return await saveBudget(localData);
-  } catch (e) {
-    console.error('cloneLocalToServer error:', e);
-    return false;
-  }
-}
-
 async function saveBudget(state, year) {
   if (!state) return false;
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.saveBudget(state, year);
-  }
   try {
     const targetY = year || state.current_year;
     const url = targetY ? `${getApiUrl()}?year=${encodeURIComponent(targetY)}` : getApiUrl();
@@ -1886,37 +1243,29 @@ async function saveBudget(state, year) {
       headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
       body: JSON.stringify(state)
     });
-    if (r.ok) return true;
+    return r.ok;
   } catch (e) {
-    console.error('saveBudget error, falling back to local save:', e);
+    console.error("saveBudget error:", e);
+    return false;
   }
-  // If HA call fails, mirror save to local storage to prevent data loss
-  return await LocalEngine.saveBudget(state, year);
 }
 
 async function fetchAvailableYears() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.fetchAvailableYears();
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/budget/years`, {
       cache: 'no-store',
       headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
     });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      return await r.json();
+    }
   } catch (e) {
-    console.error('fetchAvailableYears error, falling back to local:', e);
-    return await LocalEngine.fetchAvailableYears();
+    console.error("fetchAvailableYears error:", e);
   }
   return null;
 }
 
 async function createBudgetYear(year, copyFromYear) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.createBudgetYear(year, copyFromYear);
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/budget/create_year`, {
       method: 'POST',
@@ -1924,19 +1273,16 @@ async function createBudgetYear(year, copyFromYear) {
       headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
       body: JSON.stringify({ year, copy_from_year: copyFromYear })
     });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      return await r.json();
+    }
   } catch (e) {
-    console.error('createBudgetYear error, falling back to local:', e);
-    return await LocalEngine.createBudgetYear(year, copyFromYear);
+    console.error("createBudgetYear error:", e);
   }
   return null;
 }
 
 async function deleteBudgetYear(year) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.deleteBudgetYear(year);
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/budget/year/${encodeURIComponent(year)}`, {
       method: 'DELETE',
@@ -1945,7 +1291,6 @@ async function deleteBudgetYear(year) {
     });
     if (r.ok) return await r.json();
 
-    // Fallback to POST if DELETE is not supported by proxy
     const rPost = await fetch(`${getBaseApiUrl()}api/budget/year/delete`, {
       method: 'POST',
       cache: 'no-store',
@@ -1954,52 +1299,41 @@ async function deleteBudgetYear(year) {
     });
     if (rPost.ok) return await rPost.json();
   } catch (e) {
-    console.error('deleteBudgetYear error, falling back to local:', e);
-    return await LocalEngine.deleteBudgetYear(year);
+    console.error("deleteBudgetYear error:", e);
   }
   return null;
 }
 
 async function propagateScheduledBillsApi(year, month) {
-  const mode = await detectStorageEngine();
-  if (mode !== 'local') {
-    try {
-      const r = await fetch(`${getBaseApiUrl()}api/budget/propagate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source_year: year, source_month: month })
-      });
-      if (r.ok) return await r.json();
-    } catch (e) {
-      console.warn('propagateScheduledBillsApi server error, falling back to local:', e);
-    }
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/budget/propagate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_year: year, source_month: month })
+    });
+    if (r.ok) return await r.json();
+  } catch (e) {
+    console.warn('propagateScheduledBillsApi error:', e);
   }
   return null;
 }
 
 async function exportFullBudgetBackupApi() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.exportFullBudgetBackupApi();
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/budget/export`, {
       cache: 'no-store',
       headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
     });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      return await r.json();
+    }
   } catch (e) {
-    console.error('exportFullBudgetBackupApi error, falling back to local:', e);
-    return await LocalEngine.exportFullBudgetBackupApi();
+    console.error("exportFullBudgetBackupApi error:", e);
   }
   return null;
 }
 
 async function importFullBudgetBackupApi(data) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.importFullBudgetBackupApi(data);
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/budget/import`, {
       method: 'POST',
@@ -2007,38 +1341,41 @@ async function importFullBudgetBackupApi(data) {
       headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
       body: JSON.stringify(data)
     });
-    if (r.ok) return await r.json();
+    if (r.ok) {
+      return await r.json();
+    }
   } catch (e) {
-    console.error('importFullBudgetBackupApi error, falling back to local:', e);
-    return await LocalEngine.importFullBudgetBackupApi(data);
+    console.error("importFullBudgetBackupApi error:", e);
   }
   return null;
 }
 
 async function resetDatabase() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.resetDatabase();
-  }
   try {
-    const r = await fetch(getApiUrl(), {
+    const resetUrl = getBaseApiUrl() + 'api/budget/reset';
+    let r = await fetch(resetUrl, {
       method: 'POST',
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
-      body: JSON.stringify({})
+      body: JSON.stringify({ action: 'reset' })
     });
-    if (r.ok) return true;
+    if (!r.ok) {
+      // Fallback to primary budget endpoint with explicit reset action
+      r = await fetch(getApiUrl(), {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+        body: JSON.stringify({ action: 'reset' })
+      });
+    }
+    return r.ok;
   } catch (e) {
-    console.error('resetDatabase error:', e);
+    console.error("resetDatabase error:", e);
+    return false;
   }
-  return await LocalEngine.resetDatabase();
 }
 
 async function getAuthStatus() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.getAuthStatus();
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/auth/status', {
       cache: 'no-store',
@@ -2046,17 +1383,12 @@ async function getAuthStatus() {
     });
     if (r.ok) return await r.json();
   } catch (e) {
-    console.error('getAuthStatus error, falling back to local:', e);
-    return await LocalEngine.getAuthStatus();
+    console.error("getAuthStatus error:", e);
   }
   return { master_pin_enabled: false, multi_user: false, personas: {} };
 }
 
 async function unlockAuth(persona, pin) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.unlockAuth(persona, pin);
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/auth/unlock', {
       method: 'POST',
@@ -2067,16 +1399,12 @@ async function unlockAuth(persona, pin) {
     const res = await r.json();
     return { ok: r.ok, ...res };
   } catch (e) {
-    console.error('unlockAuth error, falling back to local:', e);
-    return await LocalEngine.unlockAuth(persona, pin);
+    console.error("unlockAuth error:", e);
+    return { ok: false, error: e.message };
   }
 }
 
 async function setPinAuth(persona, newPin, oldPin = '', enabled = true) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.setPinAuth(persona, newPin, oldPin, enabled);
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/auth/set_pin', {
       method: 'POST',
@@ -2087,16 +1415,16 @@ async function setPinAuth(persona, newPin, oldPin = '', enabled = true) {
     const res = await r.json();
     return { ok: r.ok, ...res };
   } catch (e) {
-    console.error('setPinAuth error, falling back to local:', e);
-    return await LocalEngine.setPinAuth(persona, newPin, oldPin, enabled);
+    console.error("setPinAuth error:", e);
+    return { ok: false, error: e.message };
   }
 }
 
+// ---------------------------------------------------------
+// OPEN BANKING API
+// ---------------------------------------------------------
+
 async function getOpenBankingStatus() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return { enabled: false, provider: 'local_statement', linked_accounts: [], transaction_count: 0, is_standalone: true };
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/openbanking/status', {
       cache: 'no-store',
@@ -2104,19 +1432,12 @@ async function getOpenBankingStatus() {
     });
     if (r.ok) return await r.json();
   } catch (e) {
-    console.error('getOpenBankingStatus error:', e);
+    console.error("getOpenBankingStatus error:", e);
   }
-  return { enabled: false, provider: 'gocardless', linked_accounts: [], transaction_count: 0, is_standalone: true };
+  return { enabled: false, provider: "gocardless", linked_accounts: [], transaction_count: 0 };
 }
 
 async function saveOpenBankingConfig(cfg) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    const settings = await localStore.get('habit_settings') || {};
-    settings.open_banking = cfg;
-    await localStore.set('habit_settings', settings);
-    return true;
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/openbanking/config', {
       method: 'POST',
@@ -2126,7 +1447,7 @@ async function saveOpenBankingConfig(cfg) {
     });
     return r.ok;
   } catch (e) {
-    console.error('saveOpenBankingConfig error:', e);
+    console.error("saveOpenBankingConfig error:", e);
     return false;
   }
 }
@@ -2138,7 +1459,7 @@ async function getOpenBankingInstitutions(country = 'GB') {
     });
     if (r.ok) return await r.json();
   } catch (e) {
-    console.error('getOpenBankingInstitutions error:', e);
+    console.error("getOpenBankingInstitutions error:", e);
   }
   return { success: false, institutions: [] };
 }
@@ -2159,7 +1480,7 @@ async function createOpenBankingRequisition(institutionId, redirectUri, institut
     });
     return await r.json();
   } catch (e) {
-    console.error('createOpenBankingRequisition error:', e);
+    console.error("createOpenBankingRequisition error:", e);
     return { success: false, error: e.message };
   }
 }
@@ -2179,7 +1500,7 @@ async function callbackOpenBankingRequisition(requisitionId = null, code = null,
     });
     return await r.json();
   } catch (e) {
-    console.error('callbackOpenBankingRequisition error:', e);
+    console.error("callbackOpenBankingRequisition error:", e);
     return { success: false, error: e.message };
   }
 }
@@ -2202,7 +1523,7 @@ async function mapOpenBankingAccount(accountId, mappedHabitAccountId, owner, bal
     });
     return await r.json();
   } catch (e) {
-    console.error('mapOpenBankingAccount error:', e);
+    console.error("mapOpenBankingAccount error:", e);
     return { success: false, error: e.message };
   }
 }
@@ -2216,9 +1537,9 @@ async function syncOpenBanking() {
     });
     if (r.ok) return await r.json();
   } catch (e) {
-    console.error('syncOpenBanking error:', e);
+    console.error("syncOpenBanking error:", e);
   }
-  return { status: 'error' };
+  return { status: "error" };
 }
 
 async function unlinkOpenBanking(accountId = null, requisitionId = null) {
@@ -2231,16 +1552,12 @@ async function unlinkOpenBanking(accountId = null, requisitionId = null) {
     });
     return await r.json();
   } catch (e) {
-    console.error('unlinkOpenBanking error:', e);
+    console.error("unlinkOpenBanking error:", e);
     return { success: false, error: e.message };
   }
 }
 
 async function uploadBankStatement(fileContent, filename = 'statement.csv', mappedAccount = '', owner = 'Joint') {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    return await LocalEngine.uploadBankStatement(fileContent, filename, mappedAccount, owner);
-  }
   try {
     const r = await fetch(getBaseApiUrl() + 'api/openbanking/statement/upload', {
       method: 'POST',
@@ -2255,8 +1572,8 @@ async function uploadBankStatement(fileContent, filename = 'statement.csv', mapp
     });
     return await r.json();
   } catch (e) {
-    console.error('uploadBankStatement error, falling back to local parse:', e);
-    return await LocalEngine.uploadBankStatement(fileContent, filename, mappedAccount, owner);
+    console.error("uploadBankStatement error:", e);
+    return { success: false, error: e.message };
   }
 }
 
@@ -2267,14 +1584,9 @@ async function fetchCategories() {
       headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
     });
     if (r.ok) return await r.json();
-  } catch (e) {}
-
-  // Fallback to GitHub raw or cached categories
-  try {
-    const ghRes = await fetch('https://raw.githubusercontent.com/bb12ett/HABit/main/categories/index.json', { cache: 'force-cache' });
-    if (ghRes.ok) return await ghRes.json();
-  } catch (e) {}
-
+  } catch (e) {
+    console.error("fetchCategories error:", e);
+  }
   return null;
 }
 
@@ -2286,16 +1598,8 @@ async function syncCategoriesFromGitHub() {
       headers: { 'Content-Type': 'application/json' }
     });
     if (r.ok) return await r.json();
-  } catch (e) {}
-
-  try {
-    const ghRes = await fetch('https://raw.githubusercontent.com/bb12ett/HABit/main/categories/index.json');
-    if (ghRes.ok) {
-      const data = await ghRes.json();
-      return { success: true, count: data.categories ? data.categories.length : 0 };
-    }
   } catch (e) {
-    console.error('syncCategoriesFromGitHub error:', e);
+    console.error("syncCategoriesFromGitHub error:", e);
   }
   return { success: false };
 }
@@ -2310,29 +1614,16 @@ async function suggestCategoryMerchant(merchant, category, notes = '') {
     });
     if (r.ok) return await r.json();
   } catch (e) {
-    console.error('suggestCategoryMerchant error:', e);
+    console.error("suggestCategoryMerchant error:", e);
   }
   return { success: false };
 }
 
-// --- BACKUP & CLOUD API CLIENT ---
+// ---------------------------------------------------------
+// BACKUP & CLOUD API CLIENT
+// ---------------------------------------------------------
 
 async function fetchBackupsListApi() {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    const list = (await localStore.get('habit_snapshots')) || [];
-    const settings = (await localStore.get('habit_settings')) || {};
-    return {
-      backups: list,
-      auto_backup: settings.auto_backup || {
-        enabled: true,
-        frequency: 'daily',
-        time: '03:00',
-        retention_count: 14,
-        destinations: { local: true }
-      }
-    };
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/backups`, {
       cache: 'no-store',
@@ -2346,23 +1637,6 @@ async function fetchBackupsListApi() {
 }
 
 async function createManualBackupApi(destinations = null) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    const full = await LocalEngine.exportFullBudgetBackupApi();
-    const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const fname = `habit_backup_${ts}.json`;
-    const list = (await localStore.get('habit_snapshots')) || [];
-    list.unshift({
-      filename: fname,
-      timestamp: new Date().toISOString(),
-      size: JSON.stringify(full).length,
-      size_formatted: `${Math.round(JSON.stringify(full).length / 1024)} KB`,
-      payload: full
-    });
-    while (list.length > 14) list.pop();
-    await localStore.set('habit_snapshots', list);
-    return { success: true, local: { status: 'success', filename: fname } };
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/backups/create`, {
       method: 'POST',
@@ -2378,15 +1652,6 @@ async function createManualBackupApi(destinations = null) {
 }
 
 async function restoreBackupApi(filename) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    const list = (await localStore.get('habit_snapshots')) || [];
-    const item = list.find(b => b.filename === filename);
-    if (!item || !item.payload) return { error: 'Snapshot not found' };
-    await LocalEngine.importFullBudgetBackupApi(item.payload);
-    const data = await LocalEngine.fetchBudget();
-    return { status: 'restored', data };
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/backups/restore`, {
       method: 'POST',
@@ -2402,13 +1667,6 @@ async function restoreBackupApi(filename) {
 }
 
 async function deleteBackupApi(filename) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    let list = (await localStore.get('habit_snapshots')) || [];
-    list = list.filter(b => b.filename !== filename);
-    await localStore.set('habit_snapshots', list);
-    return { status: 'deleted' };
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/backups/${encodeURIComponent(filename)}`, {
       method: 'DELETE',
@@ -2422,13 +1680,6 @@ async function deleteBackupApi(filename) {
 }
 
 async function saveBackupSettingsApi(payload) {
-  const mode = await detectStorageEngine();
-  if (mode === 'local') {
-    const settings = (await localStore.get('habit_settings')) || {};
-    settings.auto_backup = { ...(settings.auto_backup || {}), ...payload };
-    await localStore.set('habit_settings', settings);
-    return { status: 'saved', auto_backup: settings.auto_backup };
-  }
   try {
     const r = await fetch(`${getBaseApiUrl()}api/backup/settings`, {
       method: 'POST',
@@ -2551,6 +1802,58 @@ async function disconnectGoogleDriveApi() {
   } catch (e) {
     console.error('disconnectGoogleDriveApi error:', e);
     return { status: 'error', error: e.message };
+  }
+}
+
+async function checkTermsStatusApi() {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/terms/status`, {
+      cache: 'no-store',
+      headers: { 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' }
+    });
+    const contentType = r.headers.get('content-type') || '';
+    if (r.ok) {
+      if (contentType.includes('application/json')) {
+        return await r.json();
+      }
+      const txt = await r.text();
+      try {
+        return JSON.parse(txt);
+      } catch (_) {
+        console.warn('[Terms] /api/terms/status returned non-JSON. The add-on may need a restart.');
+        return null;
+      }
+    }
+  } catch (e) {
+    console.error('checkTermsStatusApi error:', e);
+  }
+  return null;
+}
+
+async function acceptTermsApi(version) {
+  try {
+    const r = await fetch(`${getBaseApiUrl()}api/terms/accept`, {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', 'Pragma': 'no-cache', 'Cache-Control': 'no-cache' },
+      body: JSON.stringify({ version: String(version || '1.0.0').trim() })
+    });
+    const contentType = r.headers.get('content-type') || '';
+    let data = {};
+    if (contentType.includes('application/json')) {
+      data = await r.json().catch(() => ({}));
+    } else {
+      const txt = await r.text().catch(() => '');
+      try {
+        data = JSON.parse(txt);
+      } catch (_) {
+        return { ok: false, error: 'Server returned a non-JSON response (' + r.status + '). Please restart the HABit add-on in Home Assistant to apply backend updates.' };
+      }
+    }
+    return { ok: r.ok, data };
+  } catch (e) {
+    console.error('acceptTermsApi error:', e);
+    return { ok: false, error: e.message };
   }
 }
 
@@ -3262,7 +2565,6 @@ function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
 
 function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   if (!r) return false;
-  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
   const mIdx = months.indexOf(mName);
   if (mIdx === -1) return false;
   const sched = calculateMonthSchedule(year, mIdx);
@@ -3271,7 +2573,18 @@ function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   const startMs = sched.startDate.getTime();
   const endMs = sched.endDate.getTime();
 
-  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income') {
+  if (r.start_date) {
+    const sDate = new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00');
+    if (endMs < sDate.getTime()) return false;
+  }
+  if (r.end_date) {
+    const eDate = new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59');
+    if (startMs > eDate.getTime()) return false;
+  }
+
+  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
+
+  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income' || (r.month && (!r.frequency || r.frequency === 'yearly'))) {
     let targetMIdx = r.month ? months.indexOf(r.month) : (r.start_date ? new Date(r.start_date).getMonth() : 0);
     if (targetMIdx === -1) {
       targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
@@ -3318,7 +2631,7 @@ function getNextOccurrenceDate(r, fromDate = new Date(), year = appState.current
   const start = r.start_date ? new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00') : new Date(year, 0, 1);
   const end = r.end_date ? new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59') : null;
 
-  const freq = r.frequency || 'monthly';
+  const freq = r.frequency || (r.month ? 'yearly' : 'monthly');
   const intervalN = Math.max(1, parseInt(r.interval_n || 1, 10));
   const fromDateZero = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate(), 0, 0, 0);
   const holidayRule = r.holiday_rule || (r.is_income ? 'previous' : 'following');
@@ -3532,6 +2845,9 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     return false;
   });
 
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const birthdaysThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(mName, mIdx, year) : [];
 
   const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
@@ -3568,10 +2884,10 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
           });
         }
       });
-      (md.direct_debits || []).forEach(dd => {
+      (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
         if (dd.account === acc || (!dd.account && acc === cfg.current_accounts[0])) bal -= Number(dd.amount) || 0;
       });
-      monthlyPaymentsInThisMonth.forEach(pi => {
+      monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
         if (pi.account === acc || (!pi.account && acc === cfg.current_accounts[0])) bal += Number(pi.amount) || 0;
       });
       yearlyBillsThisMonth.forEach(yb => {
@@ -3599,7 +2915,7 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
         const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.current_accounts[0];
-          const isCurrent = it.account_type === 'current' || (it.desc && it.desc.toLowerCase().includes('cash'));
+          const isCurrent = it.account_type === 'current' || (!it.account_type && it.desc && it.desc.toLowerCase().includes('cash'));
           if (isCurrent && targetAcct === acc) {
             const amt = Number(it.amount) || 0;
             bal = it.is_income ? bal + amt : bal - amt;
@@ -3619,10 +2935,10 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
       closingCredit[c.name] = parseFloat(actSpent) || 0;
     } else {
       let spent = (md.credit_data && md.credit_data[c.name]) ? (Number(md.credit_data[c.name].opening_spent) || 0) : 0;
-      (md.direct_debits || []).forEach(dd => {
+      (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
         if (dd.account === c.name) spent += Number(dd.amount) || 0;
       });
-      monthlyPaymentsInThisMonth.forEach(pi => {
+      monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
         if (pi.account === c.name) spent -= Number(pi.amount) || 0;
       });
       yearlyBillsThisMonth.forEach(yb => {
@@ -3648,7 +2964,7 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
         const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.credit_accounts[0]?.name;
-          const isCredit = it.account_type === 'credit' || (!it.desc || !it.desc.toLowerCase().includes('cash'));
+          const isCredit = it.account_type === 'credit' || (!it.account_type && (!it.desc || !it.desc.toLowerCase().includes('cash')));
           if (isCredit && targetAcct === c.name) {
             const amt = Number(it.amount) || 0;
             spent = it.is_income ? spent - amt : spent + amt;
@@ -3663,11 +2979,11 @@ function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     const s = (md.savings_data && md.savings_data[acc]) ? md.savings_data[acc] : { opening: 0 };
     const autoInflow = (savingsInflowFromSalary[acc] || 0) + (savingsInflowFromDD[acc] || 0);
     let directDebitOutflow = 0;
-    (md.direct_debits || []).forEach(dd => {
+    (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
       if (dd.account === acc) directDebitOutflow += Number(dd.amount) || 0;
     });
     let paymentsInInflow = 0;
-    monthlyPaymentsInThisMonth.forEach(pi => {
+    monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
       if (pi.account === acc) paymentsInInflow += Number(pi.amount) || 0;
     });
     let yearlyBillOutflow = 0;
@@ -3903,11 +3219,13 @@ function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) 
     const strategy = b.deduction_strategy || 'none';
 
     // 1. Dated transactions strictly falling in this month's payday date range
+    let thisMonthSpent = 0;
     (b.transactions || []).forEach((t, tIdx) => {
       if (t.date) {
         const tDate = new Date(t.date.includes('T') ? t.date : t.date + 'T12:00:00');
         const tMs = tDate.getTime();
         if (tMs >= startMs && tMs <= endMs) {
+          thisMonthSpent += (Number(t.amount) || 0);
           const occDateStr = t.date || '';
           items.push({
             desc: `🎯 ${b.name}${t.desc ? ': ' + t.desc : ''}`,
@@ -3955,27 +3273,30 @@ function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.currentYear) 
       if (thisMonthTotalM >= curTotalM && thisMonthTotalM <= targetTotalM) {
         const totalRemainingMonths = Math.max(1, targetTotalM - curTotalM + 1);
         const spreadAmt = remaining / totalRemainingMonths;
-        const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
-        items.push({
-          desc: `🎯 ${b.name} (Monthly Spread)`,
-          rawDesc: `🎯 ${b.name} (Monthly Spread)`,
-          due_day: schedule.startDate.getDate(),
-          exact_date: exactDate,
-          actualPaymentDate: exactDate,
-          amount: spreadAmt,
-          account: b.account,
-          is_budget_item: true,
-          status: b.status || 'due',
-          auto_cleared: Boolean(b.auto_cleared),
-          manually_cleared: Boolean(b.manually_cleared),
-          cleared_dates: b.cleared_dates || [],
-          matched_txn_id: b.matched_txn_id,
-          matched_date: b.matched_date,
-          matched_payee: b.matched_payee,
-          source_type: 'budget_bill',
-          budget_idx: bIdx,
-          raw_target: b
-        });
+        const netSpreadAmt = Math.max(0, spreadAmt - thisMonthSpent);
+        if (netSpreadAmt > 0) {
+          const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
+          items.push({
+            desc: `🎯 ${b.name} (Monthly Spread)`,
+            rawDesc: `🎯 ${b.name} (Monthly Spread)`,
+            due_day: schedule.startDate.getDate(),
+            exact_date: exactDate,
+            actualPaymentDate: exactDate,
+            amount: netSpreadAmt,
+            account: b.account,
+            is_budget_item: true,
+            status: b.status || 'due',
+            auto_cleared: Boolean(b.auto_cleared),
+            manually_cleared: Boolean(b.manually_cleared),
+            cleared_dates: b.cleared_dates || [],
+            matched_txn_id: b.matched_txn_id,
+            matched_date: b.matched_date,
+            matched_payee: b.matched_payee,
+            source_type: 'budget_bill',
+            budget_idx: bIdx,
+            raw_target: b
+          });
+        }
       }
     } else if (strategy === 'target_date' && remaining > 0 && b.end_date) {
       const endDateObj = new Date(b.end_date.includes('T') ? b.end_date : b.end_date + 'T12:00:00');
@@ -5214,12 +4535,43 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
   const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => totalDD += (Number(yb.amount) || 0));
-  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
-  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => {
+    const acc = yb.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(yb.amount) || 0);
+    }
+  });
+  budgetBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
+  birthdayBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
 
   let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => {
+    const acc = yi.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalMonthPaymentsIn += (Number(yi.amount) || 0);
+    }
+  });
+  allRecurringIncomes.forEach(ri => {
+    schedule.weeks.forEach(wObj => {
+      const occs = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek([ri], wObj, schedule, year) : [];
+      occs.forEach(occ => {
+        const acc = occ.account || ri.account || (cfg.current_accounts && cfg.current_accounts[0]);
+        if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+          totalMonthPaymentsIn += (Number(occ.amount) || 0);
+        }
+      });
+    });
+  });
 
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -5517,6 +4869,12 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
     return sum;
   }, 0);
 
+  const autoSavingsFromDDTotal = Object.values(autoSavingsFromDD || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const totalSavingsTransfers = totalSalarySavingsIn + autoSavingsFromDDTotal;
+  const birthdayBillsTotal = birthdayBillsThisMonth.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+  const budgetBillsTotal = budgetBillsThisMonth.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+  const contractualFixedBills = Math.max(0, totalDD - autoSavingsFromDDTotal - birthdayBillsTotal - budgetBillsTotal);
+
   let latestVariance = null;
   for (let i = weeklyPredictions.length - 1; i >= 0; i--) {
     if (weeklyPredictions[i].variance !== null) {
@@ -5581,6 +4939,11 @@ function calculateMonthForecast(monthName = appState.activeTab, year = appState.
     totalOutgoings,
     weeklyAvg,
     totalAutoPayMonth,
+    autoSavingsFromDDTotal,
+    totalSavingsTransfers,
+    birthdayBillsTotal,
+    budgetBillsTotal,
+    contractualFixedBills,
     latestVariance,
     isCurrentMonth,
     activeWeekIndex,
@@ -8330,58 +7693,9 @@ async function openDebugLogModal() {
 }
 
 function openDisclaimerModal() {
-  showModal({
-    title: '⚖️ Financial Disclaimer & Terms of Use',
-    body: `
-      <div style="display:flex; flex-direction:column; gap:14px; line-height:1.5; font-size:12px; color:var(--text); max-height:450px; overflow-y:auto; padding-right:6px;">
-        <div style="background:rgba(239, 68, 68, 0.08); border:1.5px solid #ef4444; border-radius:8px; padding:12px; display:flex; gap:10px; align-items:flex-start;">
-          <div style="font-size:22px; line-height:1; flex-shrink:0;">⚠️</div>
-          <div style="font-size:11.5px; line-height:1.45; color:var(--text);">
-            <strong style="color:#ef4444; font-size:12px; display:block; margin-bottom:2px; text-transform:uppercase; letter-spacing:0.5px;">Important Notice — Estimations &amp; Planning Only</strong>
-            HABit is an informational personal cashflow tracking tool. It is not an accounting service, financial adviser, or banking institution.
-          </div>
-        </div>
-
-        <div>
-          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">1. Informational &amp; Estimation Purposes Only</h4>
-          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
-            All calculations, safe-to-spend daily pace metrics, month-end projections, credit card auto-pay calculations, bank holiday shift schedules, and bank balances provided by HABit are mathematical estimates intended strictly for personal planning and budgeting reference. Projections may contain errors, rounding variances, or timing delays from manual entries or third-party banking APIs.
-          </p>
-        </div>
-
-        <div>
-          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">2. Not Professional Financial Advice</h4>
-          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
-            Nothing contained within this software constitutes regulated financial, investment, legal, tax, or debt management advice. The author and contributors do not hold themselves out as financial advisers, accountants, or certified financial planners.
-          </p>
-        </div>
-
-        <div>
-          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">3. User Responsibility &amp; Independent Verification</h4>
-          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
-            <strong>You are solely responsible for independently verifying all account balances, credit card limits, bill due dates, and direct debit commitments directly with your official financial institutions</strong> before making payment, purchase, or transfer decisions. You should never rely solely on this software to prevent overdrafts, missed payments, or fees.
-          </p>
-        </div>
-
-        <div>
-          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">4. Limitation of Liability</h4>
-          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
-            To the fullest extent permitted by applicable law, this software is provided &ldquo;as is&rdquo; without warranty of any kind, express or implied. Under no circumstances shall the authors, maintainers, or contributors be held liable for any direct, indirect, incidental, or consequential damages, including without limitation overdraft fees, bank charges, late payment penalties, interest charges, or financial losses arising out of or in connection with the use of or inability to use this application.
-          </p>
-        </div>
-
-        <div>
-          <h4 style="margin:0 0 4px 0; font-size:12.5px; color:var(--heading);">5. Open Banking &amp; Third-Party Services</h4>
-          <p style="margin:0; font-size:11.5px; color:var(--text-muted);">
-            Open Banking integrations, statement file parsers, and external APIs are provided for user convenience. The authors bear no responsibility for third-party API availability, data accuracy, consent token expiration, or transmission interruptions.
-          </p>
-        </div>
-      </div>
-    `,
-    actions: `
-      <button class="btn green" onclick="window.budgetApp.closeModal()">I Understand &amp; Agree</button>
-    `
-  });
+  if (window.budgetApp && typeof window.budgetApp.openTermsModal === 'function') {
+    return window.budgetApp.openTermsModal(true);
+  }
 }
 
 function openRecategorizeModal(txnId, merchantName, currentCatId) {
@@ -9323,13 +8637,13 @@ const FORECAST_OVERVIEW_TILES = [
   {
     id: 'actual_variance',
     type: 'kpi',
-    title: 'Check-in Variance',
+    title: 'Sunday Target',
     category: 'Variances & Health',
-    icon: '⚖️',
-    desc: 'Live net balance vs predicted net plan from your account check-in',
-    explanation: 'Measures whether you have more or less money than predicted by your budget plan at the point of your latest check-in or bank balance sync.',
-    formula: 'Actual Net Balance - Predicted Net Target',
-    tip: 'A green surplus means you are ahead of your plan. A red deficit indicates discretionary spending or unbudgeted charges exceeded the forecast.',
+    icon: '🎯',
+    desc: 'Live net balance vs closing target for Sunday from your account check-in',
+    explanation: 'Measures your current cash position against your Sunday closing target. A positive number indicates you have cash cushion remaining before the week ends; a negative number indicates a shortfall against your closing goal.',
+    formula: 'Actual Net Balance Today - Sunday Closing Target',
+    tip: 'Review your Sunday Target to ensure you have enough funds to cover remaining weekend spending.',
     target: 'active_week',
     defaultVisible: true
   },
@@ -9628,6 +8942,11 @@ function renderForecastOverviewView(container) {
     totalSavingsOpening,
     totalSalarySavingsIn,
     totalAutoPayMonth,
+    autoSavingsFromDDTotal,
+    totalSavingsTransfers,
+    birthdayBillsTotal,
+    budgetBillsTotal,
+    contractualFixedBills,
     latestVariance,
     activeWeekIndex,
     cycleStart,
@@ -9732,9 +9051,11 @@ function renderForecastOverviewView(container) {
   const totalClearedTransactionsCount = activeWeekAllTransactions.filter(t => t.isCleared).length;
   
   // Calculate total money in vs money out for monthly cashflow
-  const totalInflows = totalCurrentInflow + forecast.totalMonthPaymentsIn;
+  const totalInflows = totalCurrentInflow + (forecast.totalMonthPaymentsIn || 0);
   const totalCommittedBills = totalDD;
-  const totalDiscretionaryBudget = totalWeeklySpend;
+  // Discretionary budget from current accounts (to avoid double-counting credit card spend with credit auto-pay)
+  const totalDiscretionaryBudget = totalWeeklyCurrentSpend;
+  const totalWeeklyAllSpend = totalWeeklySpend;
   const totalOutflows = totalCommittedBills + totalDiscretionaryBudget + totalAutoPayMonth;
   const netMonthlySurplus = totalInflows - totalOutflows;
 
@@ -9756,12 +9077,37 @@ function renderForecastOverviewView(container) {
   let pacingStatusText = 'On Track';
   let daysRemainingInWeek = 7;
 
+  // 1. Calculate days remaining in active week (including today)
   if (livePacing && livePacing.isPacingActive) {
-    daysRemainingInWeek = Math.max(1, livePacing.totalDays - livePacing.elapsedDays + 1);
-    const unspentBudget = Math.max(0, activeWeekPred.wSpend - livePacing.pacedDiscretionarySpendToDate);
-    safeDailySpend = unspentBudget / daysRemainingInWeek;
+    const totalDays = Math.max(1, livePacing.totalDays || 7);
+    daysRemainingInWeek = Math.max(1, totalDays - (livePacing.elapsedDays || 1) + 1);
+  } else if (activeWeekObj && activeWeekObj.startDate && activeWeekObj.endDate) {
+    const sDate = new Date(activeWeekObj.startDate);
+    const eDate = new Date(activeWeekObj.endDate);
+    const startMid = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
+    const endMid = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate(), 23, 59, 59).getTime();
+    const weekTotalDays = Math.max(1, Math.round((endMid - startMid) / (1000 * 60 * 60 * 24)));
+    daysRemainingInWeek = weekTotalDays;
+    const nowMs = new Date().getTime();
+    if (nowMs >= startMid && nowMs <= endMid) {
+      daysRemainingInWeek = Math.max(1, Math.ceil((endMid - nowMs) / (1000 * 60 * 60 * 24)));
+    }
+  }
 
-    if (livePacing.liveDailyVariance !== null) {
+  // 2. Calculate Safe-to-Spend based on real available cash above target
+  const hasActual = (activeWeekPred && activeWeekPred.actualNet !== null && activeWeekPred.actualNet !== undefined);
+
+  if (hasActual) {
+    // True discretionary money remaining before Sunday without missing target:
+    // (Actual Balance - Sunday Target) - Upcoming Bills + Upcoming Inflows
+    const upcomingBills = livePacing ? (livePacing.upcomingDDTotal || 0) : 0;
+    const upcomingInflow = livePacing ? (livePacing.upcomingIncomeTotal || 0) : 0;
+    const actualSurplusAboveTarget = (activeWeekPred.actualNet - activeWeekPred.predictedNet);
+    const remainingToSpend = actualSurplusAboveTarget - upcomingBills + upcomingInflow;
+
+    safeDailySpend = Math.max(0, remainingToSpend / daysRemainingInWeek);
+
+    if (livePacing && livePacing.liveDailyVariance !== null && livePacing.liveDailyVariance !== undefined) {
       if (livePacing.liveDailyVariance >= 15) {
         pacingStatusText = 'Ahead of Budget Pace';
       } else if (livePacing.liveDailyVariance < -25) {
@@ -9769,19 +9115,14 @@ function renderForecastOverviewView(container) {
       } else {
         pacingStatusText = 'On Track';
       }
+    } else {
+      pacingStatusText = remainingToSpend <= 0 ? 'Over Budget Pace' : (remainingToSpend < (activeWeekPred.wSpend || 0) * (daysRemainingInWeek / 7) ? 'Tight Budget' : 'On Track');
     }
-  } else if (activeWeekObj) {
-    if (activeWeekObj.startDate && activeWeekObj.endDate) {
-      const nowMs = new Date().getTime();
-      const sDate = new Date(activeWeekObj.startDate);
-      const eDate = new Date(activeWeekObj.endDate);
-      const startMid = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
-      const endMid = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate(), 23, 59, 59).getTime();
-      if (nowMs >= startMid && nowMs <= endMid) {
-        daysRemainingInWeek = Math.max(1, Math.ceil((endMid - nowMs) / (1000 * 60 * 60 * 24)));
-      }
-    }
-    safeDailySpend = (activeWeekPred.wSpend || 0) / daysRemainingInWeek;
+  } else {
+    // No actual check-in balance entered: steady planned pace
+    const weekTotalDays = livePacing?.totalDays || 7;
+    safeDailySpend = (activeWeekPred.wSpend || 0) / Math.max(1, weekTotalDays);
+    pacingStatusText = 'On Track';
   }
 
   // Upcoming scheduled bills in next 14 days
@@ -9844,7 +9185,7 @@ function renderForecastOverviewView(container) {
           projectedNet: fNet,
           projectedCurrent: f.projectedMonthEndCurrent,
           totalInflow: f.totalCurrentInflow + f.totalMonthPaymentsIn,
-          totalOutgoings: f.totalOutgoings + f.totalAutoPayMonth
+          totalOutgoings: f.totalDD + f.totalWeeklyCurrentSpend + f.totalAutoPayMonth
         });
       }
     } catch (e) {
@@ -9866,7 +9207,7 @@ function renderForecastOverviewView(container) {
     },
     operating_cash: {
       val: `${curr}${projectedMonthEndCurrent.toFixed(2)}`,
-      sub: `Start: ${curr}${totalCurrentOpening.toFixed(0)} | Inflows: +${curr}${totalInflows.toFixed(0)}`,
+      sub: `Start: ${curr}${totalCurrentOpening.toFixed(0)} | Inflows: +${curr}${totalInflows.toFixed(0)} | Outflows: -${curr}${totalOutflows.toFixed(0)}`,
       tag: 'OPERATING CASH',
       valClass: projectedMonthEndCurrent >= 0 ? 'val-blue' : 'val-red',
       cardClass: projectedMonthEndCurrent >= 0 ? 'accent-blue' : 'accent-red'
@@ -9903,8 +9244,12 @@ function renderForecastOverviewView(container) {
       const isSurplus = hasActVar ? actVar >= 0 : true;
       return {
         val: hasActVar ? `${isSurplus ? '+' : '-'}${curr}${Math.abs(actVar).toFixed(2)}` : 'Pending',
-        sub: hasActVar ? (isSurplus ? '✨ Surplus vs planned net target' : '⚠️ Deficit vs planned net target') : 'Enter check-in to calculate variance',
-        tag: 'CHECK-IN VARIANCE',
+        sub: hasActVar
+          ? (isSurplus
+              ? `✨ +${curr}${Math.abs(actVar).toFixed(2)} above Sunday closing target`
+              : `⚠️ -${curr}${Math.abs(actVar).toFixed(2)} below Sunday closing target`)
+          : 'Enter check-in to calculate Sunday target position',
+        tag: 'SUNDAY TARGET',
         valClass: hasActVar ? (isSurplus ? 'val-green' : 'val-red') : 'val-teal',
         cardClass: hasActVar ? (isSurplus ? 'accent-green' : 'accent-red') : 'accent-teal'
       };
@@ -9916,7 +9261,9 @@ function renderForecastOverviewView(container) {
       const isDailyAhead = hasLiveVariance ? dailyVar >= 0 : false;
       return {
         val: hasLiveVariance ? `${isDailyAhead ? '+' : '-'}${curr}${Math.abs(dailyVar).toFixed(2)}` : (isDailyPacingOn ? 'Syncing...' : 'Off'),
-        sub: hasLiveVariance ? (isDailyAhead ? '✨ Ahead of today’s paced net' : '⚠️ Behind today’s paced budget') : (isDailyPacingOn ? 'Bank sync active' : 'Enable in Open Banking'),
+        sub: hasLiveVariance
+          ? (isDailyAhead ? `✨ +${curr}${Math.abs(dailyVar).toFixed(2)} ahead of today’s pace` : `⚠️ -${curr}${Math.abs(dailyVar).toFixed(2)} behind today’s pace`)
+          : (isDailyPacingOn ? 'Bank sync active' : 'Enable in Open Banking'),
         tag: 'LIVE DAILY VARIANCE',
         valClass: hasLiveVariance ? (isDailyAhead ? 'val-green' : 'val-red') : 'val-amber',
         cardClass: hasLiveVariance ? (isDailyAhead ? 'accent-green' : 'accent-red') : 'accent-amber'
@@ -9924,28 +9271,37 @@ function renderForecastOverviewView(container) {
     })(),
     weekly_budget: {
       val: `${curr}${activeWeekPred.wSpend ? activeWeekPred.wSpend.toFixed(2) : '0.00'}`,
-      sub: (livePacing && livePacing.isPacingActive && livePacing.pacedDiscretionarySpendToDate > 0)
-        ? `Spent: ${curr}${livePacing.pacedDiscretionarySpendToDate.toFixed(0)} | Left: ${curr}${Math.max(0, activeWeekPred.wSpend - livePacing.pacedDiscretionarySpendToDate).toFixed(0)}`
-        : `Planned flexible budget (${activeWeekObj?.name || 'Active Week'})`,
+      sub: (() => {
+        if (livePacing && livePacing.isPacingActive && (activeWeekPred.wSpend || 0) > 0) {
+          const pacedSpent = (activeWeekPred.wSpend || 0) * livePacing.dayFraction;
+          const pacedLeft = Math.max(0, (activeWeekPred.wSpend || 0) * (1 - livePacing.dayFraction));
+          return `Paced: ${curr}${pacedSpent.toFixed(0)} spent | ${curr}${pacedLeft.toFixed(0)} left`;
+        }
+        return `Planned flexible budget (${activeWeekObj?.name || 'Active Week'})`;
+      })(),
       tag: 'WEEKLY BUDGET',
       valClass: 'val-blue',
       cardClass: 'accent-blue'
     },
     monthly_burn_rate: (() => {
-      const dailyBurn = totalCycleDays > 0 ? totalOutflows / totalCycleDays : totalOutflows / 30;
+      const burnOutflows = Math.max(0, (totalCommittedBills - (autoSavingsFromDDTotal || 0)) + totalWeeklySpend);
+      const dailyBurn = totalCycleDays > 0 ? burnOutflows / totalCycleDays : burnOutflows / 30;
       return {
         val: `${curr}${dailyBurn.toFixed(2)}<span style="font-size:14px; font-weight:500; color:var(--text-muted);">/day</span>`,
-        sub: `Total Outflows: ${curr}${totalOutflows.toFixed(0)} across ${totalCycleDays} days`,
+        sub: `Cost of living: ${curr}${burnOutflows.toFixed(0)} across ${totalCycleDays} days`,
         tag: 'DAILY BURN RATE',
         valClass: 'val-red',
         cardClass: 'accent-red'
       };
     })(),
     fixed_bills_ratio: (() => {
-      const ratio = totalInflows > 0 ? Math.round((totalCommittedBills / totalInflows) * 100) : 0;
+      const fixedBills = contractualFixedBills !== undefined
+        ? contractualFixedBills
+        : Math.max(0, totalCommittedBills - (autoSavingsFromDDTotal || 0) - (birthdayBillsTotal || 0) - (budgetBillsTotal || 0));
+      const ratio = totalInflows > 0 ? Math.round((fixedBills / totalInflows) * 100) : 0;
       return {
         val: `${ratio}%`,
-        sub: `${curr}${totalCommittedBills.toFixed(0)} bills out of ${curr}${totalInflows.toFixed(0)} income`,
+        sub: `${curr}${fixedBills.toFixed(0)} essential bills out of ${curr}${totalInflows.toFixed(0)} income`,
         tag: 'FIXED BILLS RATIO',
         valClass: ratio <= 50 ? 'val-green' : (ratio <= 65 ? 'val-amber' : 'val-red'),
         cardClass: ratio <= 50 ? 'accent-green' : (ratio <= 65 ? 'accent-amber' : 'accent-red')
@@ -9953,7 +9309,7 @@ function renderForecastOverviewView(container) {
     })(),
     emergency_runway: (() => {
       const liquidReserves = Math.max(0, projectedMonthEndCurrent + (cfg.track_savings ? projectedMonthEndSavings : 0));
-      const monthlyEssentialExpenses = totalCommittedBills + totalWeeklySpend;
+      const monthlyEssentialExpenses = Math.max(1, (totalCommittedBills - (autoSavingsFromDDTotal || 0)) + totalWeeklySpend);
       const runwayMonths = monthlyEssentialExpenses > 0 ? (liquidReserves / monthlyEssentialExpenses).toFixed(1) : '∞';
       const isHighRunway = (runwayMonths === '∞' || Number(runwayMonths) >= 3);
       return {
@@ -9972,13 +9328,14 @@ function renderForecastOverviewView(container) {
       cardClass: 'accent-purple'
     },
     savings_rate: (() => {
-      const hasDeficit = netMonthlySurplus < 0;
-      const sRate = totalInflows > 0 ? Math.round((netMonthlySurplus / totalInflows) * 100) : 0;
+      const savingsTransfers = totalSavingsTransfers || 0;
+      const actualSavingsAmount = Math.max(0, netMonthlySurplus) + savingsTransfers;
+      const sRate = totalInflows > 0 ? Math.round((actualSavingsAmount / totalInflows) * 100) : 0;
       return {
         val: `${sRate}%`,
-        sub: hasDeficit
-          ? `Projected Deficit: -${curr}${Math.abs(netMonthlySurplus).toFixed(0)} of ${curr}${totalInflows.toFixed(0)}`
-          : `Projected Surplus: +${curr}${netMonthlySurplus.toFixed(0)} of ${curr}${totalInflows.toFixed(0)}`,
+        sub: netMonthlySurplus < 0
+          ? `Projected Deficit: -${curr}${Math.abs(netMonthlySurplus).toFixed(0)}${savingsTransfers > 0 ? ` (+${curr}${savingsTransfers.toFixed(0)} saved)` : ''}`
+          : `Total Savings: ${curr}${actualSavingsAmount.toFixed(0)} of ${curr}${totalInflows.toFixed(0)}${savingsTransfers > 0 ? ` (${curr}${savingsTransfers.toFixed(0)} auto-saved)` : ''}`,
         tag: 'SAVINGS RATE',
         valClass: sRate >= 15 ? 'val-green' : (sRate > 0 ? 'val-blue' : 'val-red'),
         cardClass: sRate >= 15 ? 'accent-green' : (sRate > 0 ? 'accent-blue' : 'accent-red')
@@ -10061,7 +9418,7 @@ function renderForecastOverviewView(container) {
         <div class="forecast-cycle-bar-wrap">
           <div class="forecast-cycle-bar-labels">
             <span>Cycle Progress</span>
-            <span class="forecast-cycle-percent">${percentElapsed}% complete &bull; ${Math.max(0, totalCycleDays - elapsedCycleDays)} days until next payday cycle</span>
+            <span class="forecast-cycle-percent">${percentElapsed}% complete &bull; ${Math.max(1, totalCycleDays - elapsedCycleDays + 1)} days remaining in cycle (incl. today)</span>
           </div>
           <div class="forecast-cycle-track">
             <div class="forecast-cycle-fill" style="width: ${percentElapsed}%;"></div>
@@ -10131,7 +9488,7 @@ function renderForecastOverviewView(container) {
                     <div style="display:flex; align-items:center; gap:4px;">
                       ${!globalEditMode ? `
                         <button class="tile-info-chip" onclick="event.stopPropagation(); window.budgetApp.flipForecastTile('${tile.id}')" title="Learn what this metric means">ⓘ</button>
-                        <span class="tile-nav-cue" title="Click to navigate">↗</span>
+                        <button type="button" class="tile-nav-cue" style="background:none; border:none; padding:0; cursor:pointer; font-size:12px; color:var(--text-muted);" onclick="event.stopPropagation(); window.budgetApp.navigateForecastTile('${tile.id}', '${tile.target}')" title="Jump directly to ${tile.target === 'bills' ? 'Scheduled Bills' : (tile.target === 'year' ? 'Year View' : currentMonthName)}">↗</button>
                       ` : ''}
                     </div>
                   </div>
@@ -10356,13 +9713,16 @@ function renderForecastOverviewView(container) {
                     const statusClass = isCurrent ? 'status-active' : (isPast ? 'status-past' : 'status-upcoming');
 
                     return `
-                      <div class="forecast-week-runway-card ${isCurrent ? 'current' : ''} ${isPast ? 'past' : ''}" onclick="window.budgetApp.setTab('${currentMonthName}')" title="Open ${wObj?.name} in ${currentMonthName}">
+                      <div class="forecast-week-runway-card ${isCurrent ? 'current' : ''} ${isPast ? 'past' : ''}" onclick="window.budgetApp.openWeekCalculationModal(${idx})" title="Click to view live calculation breakdown & clearing transactions">
                         <div class="forecast-week-runway-top">
                           <div>
                             <strong class="forecast-week-runway-name">${wObj?.name}</strong>
                             <div class="forecast-week-runway-date">${wObj?.label ? wObj.label.replace(/^Week \d+ /, '') : ''}</div>
                           </div>
-                          <span class="forecast-week-status-pill ${statusClass}">${statusLabel}</span>
+                          <div style="display:flex; align-items:center; gap:6px;">
+                            <span class="forecast-week-status-pill ${statusClass}">${statusLabel}</span>
+                            <button type="button" class="week-nav-shortcut" style="background:none; border:none; padding:0 2px; cursor:pointer; font-size:12px; color:var(--text-muted); line-height:1;" onclick="event.stopPropagation(); window.budgetApp.setTab('${currentMonthName}'); setTimeout(() => { const el = document.querySelectorAll('.week-card')[${idx}]; if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }); }, 120);" title="Jump directly to ${wObj?.name} in spreadsheet">↗</button>
+                          </div>
                         </div>
 
                         <div class="forecast-week-runway-rows">
@@ -10420,17 +9780,21 @@ function renderForecastOverviewView(container) {
                   <h3 class="forecast-card-title">${currentMonthName} Cashflow Architecture</h3>
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
-                  <span class="md3-badge ${netMonthlySurplus >= 0 ? 'md3-badge-green' : 'md3-badge-red'}">
+                  <span class="md3-badge ${netMonthlySurplus >= 0 ? 'md3-badge-green' : 'md3-badge-red'}" style="cursor:pointer;" onclick="window.budgetApp.openTileCalculationModal('cashflow_architecture')" title="Inspect calculation breakdown">
                     ${netMonthlySurplus >= 0 ? 'Surplus' : 'Deficit'} ${curr}${Math.abs(netMonthlySurplus).toFixed(0)}
                   </span>
-                  <button class="tile-info-chip" onclick="window.budgetApp.flipForecastTile('cashflow_architecture')" title="What is this section?">ⓘ</button>
+                  <button class="tile-info-chip" onclick="window.budgetApp.openTileCalculationModal('cashflow_architecture')" title="Calculation breakdown">ⓘ</button>
+                  <button type="button" class="tile-nav-cue" style="background:none; border:none; padding:0; cursor:pointer; font-size:12px; color:var(--text-muted);" onclick="window.budgetApp.openTileCalculationModal('cashflow_architecture')" title="Inspect calculation breakdown">↗</button>
                 </div>
               </div>
 
               <div class="forecast-card-body">
-                <div class="forecast-cashflow-segments-bar">
-                  <div class="forecast-segment-fill fill-bills" style="width: ${totalInflows > 0 ? Math.min(100, (totalCommittedBills / totalInflows) * 100) : 40}%;" title="Fixed Bills: ${curr}${totalCommittedBills.toFixed(2)}"></div>
-                  <div class="forecast-segment-fill fill-discretionary" style="width: ${totalInflows > 0 ? Math.min(100, (totalDiscretionaryBudget / totalInflows) * 100) : 40}%;" title="Weekly Spend: ${curr}${totalDiscretionaryBudget.toFixed(2)}"></div>
+                <div class="forecast-cashflow-segments-bar" style="cursor:pointer;" onclick="window.budgetApp.openTileCalculationModal('cashflow_architecture')" title="Click to view Cashflow Architecture breakdown">
+                  <div class="forecast-segment-fill fill-bills" style="width: ${totalInflows > 0 ? Math.min(100, (totalCommittedBills / totalInflows) * 100) : 35}%;" title="Fixed Bills: ${curr}${totalCommittedBills.toFixed(2)}"></div>
+                  <div class="forecast-segment-fill fill-discretionary" style="width: ${totalInflows > 0 ? Math.min(100, (totalDiscretionaryBudget / totalInflows) * 100) : 35}%;" title="Weekly Spend: ${curr}${totalDiscretionaryBudget.toFixed(2)}"></div>
+                  ${totalAutoPayMonth > 0 ? `
+                    <div class="forecast-segment-fill fill-autopay" style="width: ${totalInflows > 0 ? Math.min(100, (totalAutoPayMonth / totalInflows) * 100) : 10}%; background:var(--purple); opacity:0.85;" title="Credit Auto-Pay: ${curr}${totalAutoPayMonth.toFixed(2)}"></div>
+                  ` : ''}
                   <div class="forecast-segment-fill fill-surplus" style="width: ${totalInflows > 0 ? Math.max(0, (netMonthlySurplus / totalInflows) * 100) : 20}%;" title="Projected Surplus: ${curr}${Math.max(0, netMonthlySurplus).toFixed(2)}"></div>
                 </div>
 
@@ -10441,8 +9805,14 @@ function renderForecastOverviewView(container) {
                   </div>
                   <div class="forecast-legend-item">
                     <span class="legend-dot dot-discretionary"></span>
-                    <span class="legend-text">Discretionary: <strong>${curr}${totalDiscretionaryBudget.toFixed(2)}</strong> (${totalInflows > 0 ? Math.round((totalDiscretionaryBudget / totalInflows) * 100) : 0}%)</span>
+                    <span class="legend-text">Weekly Spend (Cash): <strong>${curr}${totalDiscretionaryBudget.toFixed(2)}</strong> (${totalInflows > 0 ? Math.round((totalDiscretionaryBudget / totalInflows) * 100) : 0}%)</span>
                   </div>
+                  ${totalAutoPayMonth > 0 ? `
+                    <div class="forecast-legend-item">
+                      <span class="legend-dot" style="background:var(--purple);"></span>
+                      <span class="legend-text">Credit Auto-Pay: <strong>${curr}${totalAutoPayMonth.toFixed(2)}</strong> (${totalInflows > 0 ? Math.round((totalAutoPayMonth / totalInflows) * 100) : 0}%)</span>
+                    </div>
+                  ` : ''}
                   <div class="forecast-legend-item">
                     <span class="legend-dot dot-surplus"></span>
                     <span class="legend-text">Surplus: <strong>${curr}${Math.max(0, netMonthlySurplus).toFixed(2)}</strong></span>
@@ -10459,7 +9829,7 @@ function renderForecastOverviewView(container) {
                     <strong class="text-red">-${curr}${totalCommittedBills.toFixed(2)}</strong>
                   </div>
                   <div class="forecast-cashflow-row">
-                    <span>Weekly Living Budget:</span>
+                    <span>Weekly Living Budget (Cash):</span>
                     <strong class="text-red">-${curr}${totalDiscretionaryBudget.toFixed(2)}</strong>
                   </div>
                   ${totalAutoPayMonth > 0 ? `
@@ -10699,8 +10069,737 @@ function handleForecastTileClick(event, tileId, target) {
     flipForecastTile(tileId);
     return;
   }
-  navigateForecastTile(tileId, target);
+  openTileCalculationModal(tileId, target);
 }
+
+function openTileCalculationModal(tileId, target = 'month') {
+  const cfg = getSettings();
+  const curr = cfg.currency || '£';
+  const currentPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: appState.currentYear, month: appState.currentTab || 'Jan' };
+  const currentYear = currentPeriod.year;
+  const currentMonthName = currentPeriod.month;
+  const mIdx = months.indexOf(currentMonthName);
+
+  const forecast = (typeof calculateMonthForecast === 'function')
+    ? calculateMonthForecast(currentMonthName, currentYear)
+    : null;
+  if (!forecast) return;
+
+  const yData = getYearData(currentYear) || {};
+  const mData = (typeof getMonthData === 'function')
+    ? (getMonthData(currentMonthName, currentYear) || {})
+    : ((yData.months && yData.months[currentMonthName]) ? yData.months[currentMonthName] : {});
+  const schedule = forecast.schedule || calculateMonthSchedule(currentYear, mIdx);
+  const tile = FORECAST_OVERVIEW_TILES.find(t => t.id === tileId) || { id: tileId, title: 'Calculation Breakdown', icon: '📊' };
+
+  let modalTitle = `${tile.icon} ${tile.title} Breakdown`;
+  let liveBadge = '';
+  let formulaHtml = '';
+  let sectionsHtml = '';
+  let navTarget = target || tile.target || 'month';
+  let navBtnLabel = `📅 View ${currentMonthName} Detail &rarr;`;
+  if (navTarget === 'bills') navBtnLabel = '📋 View Bills &rarr;';
+  if (navTarget === 'year') navBtnLabel = '📊 View Year &rarr;';
+
+  const renderRow = (label, amt, color = 'var(--text)', sub = '') => `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+      <div style="padding-right:8px;">
+        <span style="color:var(--text);">${label}</span>
+        ${sub ? `<div style="font-size:10px; color:var(--text-muted); margin-top:1px;">${sub}</div>` : ''}
+      </div>
+      <strong style="color:${color}; white-space:nowrap; margin-left:10px;">${amt}</strong>
+    </div>
+  `;
+
+  const renderSectionHeader = (title, total = '') => `
+    <div style="font-size:11px; font-weight:700; color:var(--curr-border); text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 6px 0; display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px solid var(--border); padding-bottom:4px;">
+      <span>${title}</span>
+      ${total ? `<span style="font-size:11.5px; font-weight:700; color:var(--heading);">${total}</span>` : ''}
+    </div>
+  `;
+
+  if (tileId === 'operating_cash') {
+    const openAmt = forecast.totalCurrentOpening;
+    const inAmt = forecast.totalCurrentInflow + forecast.totalMonthPaymentsIn;
+    const ddAmt = forecast.totalDD;
+    const autoPayAmt = forecast.totalAutoPayMonth;
+    const cashAmt = forecast.totalWeeklyCurrentSpend;
+    const endAmt = forecast.projectedMonthEndCurrent;
+    liveBadge = `<span style="background:${endAmt >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${endAmt >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${endAmt.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Starting Cash:</strong> ${curr}${openAmt.toFixed(2)}</div>
+        <div style="color:var(--green);"><strong>+ Inflows (Salary & Scheduled):</strong> +${curr}${inAmt.toFixed(2)}</div>
+        <div style="color:var(--red);"><strong>- Direct Debits from Current:</strong> -${curr}${ddAmt.toFixed(2)}</div>
+        ${autoPayAmt > 0 ? `<div style="color:var(--amber);"><strong>- Credit Auto-Pay Settlements:</strong> -${curr}${autoPayAmt.toFixed(2)}</div>` : ''}
+        <div style="color:var(--red);"><strong>- Weekly Cash Spending:</strong> -${curr}${cashAmt.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${endAmt >= 0 ? 'var(--green)' : 'var(--red)'};">
+          = Projected Month-End Cash: ${curr}${endAmt.toFixed(2)}
+        </div>
+      </div>
+    `;
+
+    let accList = '';
+    (cfg.current_accounts || []).forEach(acc => {
+      const val = Number(mData.current_data?.[acc]?.opening) || 0;
+      accList += renderRow(acc, `${curr}${val.toFixed(2)}`);
+    });
+
+    let infList = '';
+    (mData.deductions_list || []).forEach(d => {
+      if (cfg.current_accounts.includes(d.target_account)) {
+        cfg.people.forEach(p => {
+          const amt = d.is_salary ? getDeductionSalaryForMonth(d, p, schedule).total : ((d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0));
+          if (amt > 0) infList += renderRow(`${d.name} (${p}) &rarr; ${d.target_account}`, `+${curr}${amt.toFixed(2)}`, 'var(--green)');
+        });
+      }
+    });
+    (yData.recurring_incomes || []).forEach(ri => {
+      const occs = (typeof getRecurringForWeek === 'function') ? schedule.weeks.flatMap(w => getRecurringForWeek([ri], w, schedule, currentYear)) : [];
+      if (occs.length > 0) {
+        const sum = occs.reduce((s, o) => s + (Number(o.amount) || 0), 0);
+        infList += renderRow(`${ri.name || ri.desc || 'Scheduled Inflow'} (${occs.length}x)`, `+${curr}${sum.toFixed(2)}`, 'var(--green)');
+      }
+    });
+
+    let ddList = '';
+    (mData.direct_debits || []).forEach(d => {
+      ddList += renderRow(d.name || d.desc, `-${curr}${Number(d.amount || 0).toFixed(2)}`, 'var(--red)', `${d.account || 'Joint Account'} &bull; Day ${d.due_day || '-'}`);
+    });
+
+    sectionsHtml = `
+      ${renderSectionHeader('1. Opening Balances by Account', `${curr}${openAmt.toFixed(2)}`)}
+      ${accList || '<div style="color:var(--text-muted); font-size:12px;">No current accounts.</div>'}
+
+      ${renderSectionHeader('2. Salary & Scheduled Inflows', `+${curr}${inAmt.toFixed(2)}`)}
+      ${infList || '<div style="color:var(--text-muted); font-size:12px;">No inflows.</div>'}
+
+      ${renderSectionHeader('3. Direct Debits from Current Accounts', `-${curr}${ddAmt.toFixed(2)}`)}
+      <div style="max-height:150px; overflow-y:auto; padding-right:4px;">${ddList || '<div style="color:var(--text-muted); font-size:12px;">No direct debits.</div>'}</div>
+
+      ${autoPayAmt > 0 ? `
+        ${renderSectionHeader('4. Credit Auto-Pay Settlements', `-${curr}${autoPayAmt.toFixed(2)}`)}
+        ${(cfg.credit_accounts || []).filter(c => c.autopay_enabled).map(c => {
+          const debt = Number(mData.credit_data?.[c.name]?.opening_spent) || 0;
+          return renderRow(`${c.name} Settlement (Auto-Pay)`, `-${curr}${debt.toFixed(2)}`, 'var(--amber)', `Paid from ${c.autopay_from || 'Joint Account'}`);
+        }).join('')}
+      ` : ''}
+
+      ${renderSectionHeader('5. Weekly Cash Allowance (4 Weeks)', `-${curr}${cashAmt.toFixed(2)}`)}
+      ${renderRow('Cash allowance for flexible expenses', `-${curr}${cashAmt.toFixed(2)}`, 'var(--red)', `Total planned living cash across cycle weeks`)}
+    `;
+  } else if (tileId === 'fixed_bills_ratio') {
+    const fixedBills = forecast.contractualFixedBills !== undefined
+      ? forecast.contractualFixedBills
+      : Math.max(0, forecast.totalDD - (forecast.autoSavingsFromDDTotal || 0) - (forecast.birthdayBillsTotal || 0) - (forecast.budgetBillsTotal || 0));
+    const totalInflow = forecast.totalCurrentInflow + forecast.totalMonthPaymentsIn;
+    const ratio = totalInflow > 0 ? Math.round((fixedBills / totalInflow) * 100) : 0;
+    liveBadge = `<span style="background:${ratio <= 50 ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)'}; color:${ratio <= 50 ? 'var(--green)' : 'var(--amber)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${ratio}%</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Contractual Essential Bills:</strong> ${curr}${fixedBills.toFixed(2)}</div>
+        <div style="color:var(--green);"><strong>Total Inflow (Salary & Scheduled):</strong> ${curr}${totalInflow.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${ratio <= 50 ? 'var(--green)' : 'var(--amber)'};">
+          = (${curr}${fixedBills.toFixed(0)} &divide; ${curr}${totalInflow.toFixed(0)}) &times; 100 = ${ratio}%
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+          ${ratio <= 50 ? '✅ Healthy: Within the recommended 50% guideline for essential fixed commitments.' : '⚠️ Above 50%: Fixed bills take up over half your income.'}
+        </div>
+      </div>
+    `;
+
+    let billsList = '';
+    (mData.direct_debits || []).forEach(d => {
+      const isSaving = d.transfer_to && (cfg.savings_accounts || []).includes(d.transfer_to);
+      if (!isSaving) {
+        billsList += renderRow(d.name || d.desc, `${curr}${Number(d.amount || 0).toFixed(2)}`, 'var(--red)', `${d.account || 'Joint Account'} &bull; Due Day ${d.due_day || '-'}`);
+      }
+    });
+
+    let excludedList = '';
+    (mData.direct_debits || []).forEach(d => {
+      const isSaving = d.transfer_to && (cfg.savings_accounts || []).includes(d.transfer_to);
+      if (isSaving) {
+        excludedList += renderRow(d.name || d.desc, `${curr}${Number(d.amount || 0).toFixed(2)}`, 'var(--purple)', `Excluded: Internal transfer to ${d.transfer_to}`);
+      }
+    });
+
+    sectionsHtml = `
+      ${renderSectionHeader('Contractual Essential Bills Included', `${curr}${fixedBills.toFixed(2)}`)}
+      <div style="max-height:180px; overflow-y:auto; padding-right:4px;">${billsList || '<div style="color:var(--text-muted); font-size:12px;">No contractual bills.</div>'}</div>
+
+      ${excludedList ? `
+        ${renderSectionHeader('Excluded Items (Savings Transfers & Non-Contractual)', `${curr}${(forecast.autoSavingsFromDDTotal || 0).toFixed(2)}`)}
+        ${excludedList}
+      ` : ''}
+    `;
+  } else if (tileId === 'monthly_burn_rate') {
+    const autoSavings = forecast.autoSavingsFromDDTotal || 0;
+    const essentialBills = Math.max(0, forecast.totalDD - autoSavings);
+    const weeklySpend = forecast.totalWeeklySpend;
+    const burnOutflows = essentialBills + weeklySpend;
+    const days = forecast.totalCycleDays || 28;
+    const dailyBurn = days > 0 ? burnOutflows / days : burnOutflows / 30;
+    liveBadge = `<span style="background:rgba(239,68,68,0.15); color:var(--red); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${dailyBurn.toFixed(2)}/day</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Essential Living Outflows:</strong> ${curr}${essentialBills.toFixed(2)} (Bills) + ${curr}${weeklySpend.toFixed(2)} (Weekly Living) = ${curr}${burnOutflows.toFixed(2)}</div>
+        <div><strong>Payday Cycle Duration:</strong> ${days} days</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--red);">
+          = ${curr}${burnOutflows.toFixed(2)} &divide; ${days} days = ${curr}${dailyBurn.toFixed(2)} per day
+        </div>
+      </div>
+    `;
+
+    const catMap = {};
+    (schedule.weeks || []).forEach(w => {
+      const items = (typeof getWeekItems === 'function') ? getWeekItems(currentMonthName, w.name, currentYear) : [];
+      items.forEach(it => {
+        if (!it.is_income) {
+          const cat = it.desc || 'General';
+          catMap[cat] = (catMap[cat] || 0) + (Number(it.amount) || 0);
+        }
+      });
+    });
+
+    sectionsHtml = `
+      ${renderSectionHeader('1. Fixed Essential Bills', `${curr}${essentialBills.toFixed(2)}`)}
+      ${renderRow('Contractual Bills (Mortgage, Utilities, Tax, etc.)', `${curr}${essentialBills.toFixed(2)}`, 'var(--red)', `${curr}${(essentialBills / days).toFixed(2)} / day`)}
+
+      ${renderSectionHeader('2. Weekly Living Expenses by Category', `${curr}${weeklySpend.toFixed(2)}`)}
+      ${Object.entries(catMap).map(([cat, amt]) => renderRow(cat, `${curr}${amt.toFixed(2)}`, 'var(--text)', `${curr}${(amt / days).toFixed(2)} / day`)).join('')}
+    `;
+  } else if (tileId === 'emergency_runway') {
+    const autoSavings = forecast.autoSavingsFromDDTotal || 0;
+    const essentialBills = Math.max(0, forecast.totalDD - autoSavings);
+    const weeklySpend = forecast.totalWeeklySpend;
+    const monthlyEssentials = essentialBills + weeklySpend;
+    const liquidReserves = Math.max(0, forecast.projectedMonthEndCurrent + (cfg.track_savings ? forecast.projectedMonthEndSavings : 0));
+    const runwayMonths = monthlyEssentials > 0 ? (liquidReserves / monthlyEssentials).toFixed(1) : '∞';
+    liveBadge = `<span style="background:rgba(16,185,129,0.15); color:var(--green); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${runwayMonths} months</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Total Liquid Reserves:</strong> ${curr}${liquidReserves.toFixed(2)} (Current + Savings)</div>
+        <div><strong>Monthly Living Essentials:</strong> ${curr}${monthlyEssentials.toFixed(2)} / month</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--green);">
+          = ${curr}${liquidReserves.toFixed(0)} &divide; ${curr}${monthlyEssentials.toFixed(0)} = ${runwayMonths} months of survival runway
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Liquid Reserves Breakdown', `${curr}${liquidReserves.toFixed(2)}`)}
+      ${renderRow('Projected Current Cash', `${curr}${forecast.projectedMonthEndCurrent.toFixed(2)}`, 'var(--green)')}
+      ${cfg.track_savings ? renderRow('Projected Savings Portfolio', `${curr}${forecast.projectedMonthEndSavings.toFixed(2)}`, 'var(--purple)') : ''}
+
+      ${renderSectionHeader('Monthly Essentials Breakdown', `${curr}${monthlyEssentials.toFixed(2)} / mo`)}
+      ${renderRow('Contractual Fixed Bills', `${curr}${essentialBills.toFixed(2)}`, 'var(--red)')}
+      ${renderRow('Planned Living Spend (Groceries, Fuel, etc.)', `${curr}${weeklySpend.toFixed(2)}`, 'var(--red)')}
+    `;
+  } else if (tileId === 'projected_net_worth') {
+    const curEnd = forecast.projectedMonthEndCurrent;
+    const savEnd = cfg.track_savings ? forecast.projectedMonthEndSavings : 0;
+    const credEnd = forecast.projectedMonthEndCredit;
+    const netEnd = curEnd + savEnd - credEnd;
+    liveBadge = `<span style="background:${netEnd >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${netEnd >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${netEnd.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div style="color:var(--green);"><strong>Current Accounts:</strong> +${curr}${curEnd.toFixed(2)}</div>
+        <div style="color:var(--purple);"><strong>+ Savings Portfolio:</strong> +${curr}${savEnd.toFixed(2)}</div>
+        <div style="color:var(--red);"><strong>- Credit Card Debt:</strong> -${curr}${credEnd.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${netEnd >= 0 ? 'var(--green)' : 'var(--red)'};">
+          = Projected Net Worth: ${curr}${netEnd.toFixed(2)}
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Current Operating Accounts', `${curr}${curEnd.toFixed(2)}`)}
+      ${(cfg.current_accounts || []).map(acc => renderRow(acc, `${curr}${(forecast.weeklyPredictions?.[schedule.numWeeks - 1]?.weekCurrentSnap?.[acc] || 0).toFixed(2)}`)).join('')}
+
+      ${cfg.track_savings ? `
+        ${renderSectionHeader('Savings Accounts', `${curr}${savEnd.toFixed(2)}`)}
+        ${(cfg.savings_accounts || []).map(s => renderRow(s, `${curr}${(forecast.weeklyPredictions?.[schedule.numWeeks - 1]?.weekSavingsSnap?.[s] || 0).toFixed(2)}`, 'var(--purple)')).join('')}
+      ` : ''}
+
+      ${renderSectionHeader('Credit Card Debt', `-${curr}${credEnd.toFixed(2)}`)}
+      ${(cfg.credit_accounts || []).map(c => renderRow(c.name, `-${curr}${(forecast.weeklyPredictions?.[schedule.numWeeks - 1]?.weekCreditSnap?.[c.name] || 0).toFixed(2)}`, 'var(--red)')).join('')}
+    `;
+  } else if (tileId === 'credit_runway' || tileId === 'autopay_impact') {
+    const debt = forecast.projectedMonthEndCredit;
+    const limit = forecast.totalCreditLimit;
+    const autoPay = forecast.totalAutoPayMonth;
+    liveBadge = `<span style="background:rgba(239,68,68,0.15); color:var(--red); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${debt.toFixed(2)} Debt</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Opening Credit Debt:</strong> -${curr}${forecast.totalCreditOpeningSpent.toFixed(2)}</div>
+        <div style="color:var(--green);"><strong>+ Auto-Pay Settlements:</strong> +${curr}${autoPay.toFixed(2)}</div>
+        <div style="color:var(--red);"><strong>- Planned Card Spending:</strong> -${curr}${(forecast.totalWeeklySpend - forecast.totalWeeklyCurrentSpend).toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--red);">
+          = Month-End Credit Debt: -${curr}${debt.toFixed(2)} (Available Line: ${curr}${(limit - debt).toFixed(2)})
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Credit Cards Position', `-${curr}${debt.toFixed(2)}`)}
+      ${(cfg.credit_accounts || []).map(c => {
+        const spent = Number(mData.credit_data?.[c.name]?.opening_spent) || 0;
+        const lim = Number(c.limit) || 0;
+        return renderRow(c.name, `-${curr}${spent.toFixed(2)}`, 'var(--red)', `Limit: ${curr}${lim.toFixed(0)} &bull; Auto-Pay: ${c.autopay_enabled ? 'Yes (' + c.autopay_type + ')' : 'No'}`);
+      }).join('')}
+    `;
+  } else if (tileId === 'savings_portfolio' || tileId === 'savings_rate') {
+    const savGrowth = forecast.totalSavingsTransfers || 0;
+    const savOpen = forecast.totalSavingsOpening;
+    const savEnd = forecast.projectedMonthEndSavings;
+    liveBadge = `<span style="background:rgba(168,85,247,0.15); color:var(--purple); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">+${curr}${savGrowth.toFixed(2)} / mo</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Starting Savings:</strong> ${curr}${savOpen.toFixed(2)}</div>
+        <div style="color:var(--purple);"><strong>+ Monthly Net Contributions:</strong> +${curr}${savGrowth.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--purple);">
+          = Projected Month-End Savings: ${curr}${savEnd.toFixed(2)}
+        </div>
+      </div>
+    `;
+
+    let savItems = '';
+    (mData.deductions_list || []).forEach(d => {
+      if ((cfg.savings_accounts || []).includes(d.target_account)) {
+        cfg.people.forEach(p => {
+          const amt = (d.amounts && typeof d.amounts[p] !== 'undefined') ? Number(d.amounts[p]) : (d.person === p ? Number(d.amount) : 0);
+          if (amt > 0) savItems += renderRow(`Salary Transfer (${p}) &rarr; ${d.target_account}`, `+${curr}${amt.toFixed(2)}`, 'var(--purple)');
+        });
+      }
+    });
+    (mData.direct_debits || []).forEach(d => {
+      if (d.transfer_to && (cfg.savings_accounts || []).includes(d.transfer_to)) {
+        savItems += renderRow(`Direct Debit Transfer &rarr; ${d.transfer_to} (${d.name || d.desc})`, `+${curr}${Number(d.amount || 0).toFixed(2)}`, 'var(--purple)');
+      }
+    });
+
+    sectionsHtml = `
+      ${renderSectionHeader('Monthly Savings Contributions', `+${curr}${savGrowth.toFixed(2)}`)}
+      ${savItems || '<div style="color:var(--text-muted); font-size:12px;">No savings transfers scheduled.</div>'}
+    `;
+  } else if (tileId === 'weekly_budget') {
+    const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
+    const activeW = schedule.weeks[activeWIdx] || schedule.weeks[0];
+    const items = (typeof getWeekItems === 'function') ? getWeekItems(currentMonthName, activeW?.name, currentYear) : [];
+    const totalW = items.filter(i => !i.is_income).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+    liveBadge = `<span style="background:rgba(56,189,248,0.15); color:var(--curr-border); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${totalW.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Active Week:</strong> ${activeW?.name} (${activeW?.label || ''})</div>
+        <div><strong>Total Discretionary Living Allowance:</strong> ${curr}${totalW.toFixed(2)}</div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Weekly Allowance Breakdown by Category', `${curr}${totalW.toFixed(2)}`)}
+      ${items.filter(i => !i.is_income).map(it => renderRow(it.desc, `${curr}${Number(it.amount || 0).toFixed(2)}`, 'var(--text)', `Account: ${it.account_name || 'Credit Card'}`)).join('')}
+    `;
+  } else if (tileId === 'safe_to_spend') {
+    const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
+    const activeW = schedule.weeks[activeWIdx] || schedule.weeks[0];
+    const activeWPred = forecast.weeklyPredictions[activeWIdx] || {};
+    const activeWActuals = (typeof getMonthData === 'function')
+      ? (getMonthData(currentMonthName, currentYear)?.weekly_actuals?.[activeW?.name] || {})
+      : (mData.weekly_actuals?.[activeW?.name] || {});
+    const livePacing = (typeof calculateLiveDailyPacing === 'function' && activeW && activeWPred)
+      ? calculateLiveDailyPacing(activeW, activeWPred, activeWActuals, cfg)
+      : null;
+
+    let daysRemainingInWeek = 7;
+    if (livePacing && livePacing.isPacingActive) {
+      const totalDays = Math.max(1, livePacing.totalDays || 7);
+      daysRemainingInWeek = Math.max(1, totalDays - (livePacing.elapsedDays || 1) + 1);
+    } else if (activeW && activeW.startDate && activeW.endDate) {
+      const sDate = new Date(activeW.startDate);
+      const eDate = new Date(activeW.endDate);
+      const startMid = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate()).getTime();
+      const endMid = new Date(eDate.getFullYear(), eDate.getMonth(), eDate.getDate(), 23, 59, 59).getTime();
+      const weekTotalDays = Math.max(1, Math.round((endMid - startMid) / (1000 * 60 * 60 * 24)));
+      daysRemainingInWeek = weekTotalDays;
+      const nowMs = new Date().getTime();
+      if (nowMs >= startMid && nowMs <= endMid) {
+        daysRemainingInWeek = Math.max(1, Math.ceil((endMid - nowMs) / (1000 * 60 * 60 * 24)));
+      }
+    }
+
+    const hasActual = (activeWPred && activeWPred.actualNet !== null && activeWPred.actualNet !== undefined);
+    const weekSpendTotal = activeWPred.wSpend || 0;
+    let safeDailySpend = 0;
+    let pacingStatusText = 'On Track';
+    let remainingToSpend = 0;
+    let actualSurplusAboveTarget = 0;
+    let upcomingBills = 0;
+    let upcomingInflow = 0;
+
+    if (hasActual) {
+      upcomingBills = livePacing ? (livePacing.upcomingDDTotal || 0) : 0;
+      upcomingInflow = livePacing ? (livePacing.upcomingIncomeTotal || 0) : 0;
+      actualSurplusAboveTarget = (activeWPred.actualNet - activeWPred.predictedNet);
+      remainingToSpend = actualSurplusAboveTarget - upcomingBills + upcomingInflow;
+      safeDailySpend = Math.max(0, remainingToSpend / daysRemainingInWeek);
+
+      if (livePacing && livePacing.liveDailyVariance !== null && livePacing.liveDailyVariance !== undefined) {
+        if (livePacing.liveDailyVariance >= 15) {
+          pacingStatusText = 'Ahead of Budget Pace';
+        } else if (livePacing.liveDailyVariance < -25) {
+          pacingStatusText = 'Over Budget Pace';
+        } else {
+          pacingStatusText = 'On Track';
+        }
+      } else {
+        pacingStatusText = remainingToSpend <= 0 ? 'Over Budget Pace' : (remainingToSpend < (weekSpendTotal) * (daysRemainingInWeek / 7) ? 'Tight Budget' : 'On Track');
+      }
+    } else {
+      const weekTotalDays = livePacing?.totalDays || 7;
+      safeDailySpend = (activeWPred.wSpend || 0) / Math.max(1, weekTotalDays);
+      pacingStatusText = 'On Track';
+    }
+
+    liveBadge = `<span style="background:${safeDailySpend >= 20 ? 'rgba(16,185,129,0.15)' : (safeDailySpend > 0 ? 'rgba(245,158,11,0.15)' : 'rgba(239,68,68,0.15)')}; color:${safeDailySpend >= 20 ? 'var(--green)' : (safeDailySpend > 0 ? 'var(--amber)' : 'var(--red)')}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${curr}${safeDailySpend.toFixed(2)} / day</span>`;
+
+    if (hasActual) {
+      formulaHtml = `
+        <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+          <div><strong>Actual Net Check-in Today:</strong> ${curr}${activeWPred.actualNet.toFixed(2)}</div>
+          <div><strong>Sunday Closing Target:</strong> ${curr}${activeWPred.predictedNet.toFixed(2)}</div>
+          <div style="color:${actualSurplusAboveTarget >= 0 ? 'var(--green)' : 'var(--red)'};">
+            <strong>Cushion Above Sunday Target:</strong> ${actualSurplusAboveTarget >= 0 ? '+' : ''}${curr}${actualSurplusAboveTarget.toFixed(2)}
+          </div>
+          ${upcomingBills > 0 ? `<div style="color:var(--red);"><strong>- Upcoming Bills Before Sunday:</strong> -${curr}${upcomingBills.toFixed(2)}</div>` : ''}
+          ${upcomingInflow > 0 ? `<div style="color:var(--green);"><strong>+ Upcoming Inflows Before Sunday:</strong> +${curr}${upcomingInflow.toFixed(2)}</div>` : ''}
+          <div style="border-top:1px dashed var(--border); margin-top:4px; padding-top:4px;">
+            <strong>True Discretionary Cash Remaining:</strong> ${curr}${Math.max(0, remainingToSpend).toFixed(2)}
+          </div>
+          <div><strong>Days Remaining in Week:</strong> ${daysRemainingInWeek} days (including today)</div>
+          <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${safeDailySpend >= 20 ? 'var(--green)' : (safeDailySpend > 0 ? 'var(--amber)' : 'var(--red)')};">
+            = Safe-to-Spend Daily Pace: ${curr}${Math.max(0, remainingToSpend).toFixed(2)} &divide; ${daysRemainingInWeek} days = ${curr}${safeDailySpend.toFixed(2)} / day
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+            ${pacingStatusText}: ${remainingToSpend <= 0 ? '⚠️ No safe spending allowance remaining without missing your Sunday target.' : (safeDailySpend < 10 ? '⚠️ Discretionary allowance is running very tight to protect your Sunday target.' : '✅ Healthy daily pace to finish the week on or ahead of target.')}
+          </div>
+        </div>
+      `;
+    } else {
+      formulaHtml = `
+        <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+          <div><strong>Weekly Planned Budget:</strong> ${curr}${weekSpendTotal.toFixed(2)}</div>
+          <div><strong>Days in Week:</strong> ${daysRemainingInWeek} days</div>
+          <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--curr-border);">
+            = Planned Daily Pace: ${curr}${weekSpendTotal.toFixed(2)} &divide; ${daysRemainingInWeek} days = ${curr}${safeDailySpend.toFixed(2)} / day
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+            💡 Enter an account check-in to see your live pacing based on actual bank balances.
+          </div>
+        </div>
+      `;
+    }
+
+    const weekItems = (typeof getWeekItems === 'function')
+      ? getWeekItems(currentMonthName, activeW?.name, currentYear)
+      : (mData.weekly_items?.[activeW?.name] || []);
+
+    sectionsHtml = `
+      ${renderSectionHeader('Active Week Pacing Parameters', pacingStatusText)}
+      ${renderRow('Sunday Closing Target', `${curr}${activeWPred.predictedNet.toFixed(2)}`)}
+      ${hasActual ? renderRow('Live Net Check-in', `${curr}${activeWPred.actualNet.toFixed(2)}`, activeWPred.actualNet >= activeWPred.predictedNet ? 'var(--green)' : 'var(--red)') : ''}
+      ${renderRow('Planned Week Allowance', `${curr}${weekSpendTotal.toFixed(2)}`)}
+      ${renderRow('Days Remaining (incl. Today)', `${daysRemainingInWeek} days`)}
+
+      ${renderSectionHeader('Active Week Discretionary Budget Categories', `${curr}${weekSpendTotal.toFixed(2)}`)}
+      <div style="max-height:160px; overflow-y:auto; padding-right:4px;">
+        ${(weekItems || []).filter(i => !i.is_income).map(it => renderRow(it.desc || 'General', `${curr}${Number(it.amount || 0).toFixed(2)}`, 'var(--text)', `Account: ${it.account_name || 'Credit Card'}`)).join('') || '<div style="color:var(--text-muted); font-size:12px;">No budget items.</div>'}
+      </div>
+    `;
+  } else if (tileId === 'actual_variance') {
+    const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
+    const activeWPred = forecast.weeklyPredictions[activeWIdx] || {};
+    const hasActual = (activeWPred.actualNet !== null && activeWPred.actualNet !== undefined);
+    const variance = hasActual ? (activeWPred.actualNet - activeWPred.predictedNet) : 0;
+    liveBadge = `<span style="background:${variance >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Actual Net Check-in Today:</strong> ${hasActual ? curr + activeWPred.actualNet.toFixed(2) : 'No check-in entered yet'}</div>
+        <div><strong>Sunday Closing Target:</strong> ${curr}${activeWPred.predictedNet.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'};">
+          = Variance vs Target: ${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)} ${variance >= 0 ? '(Surplus / Ahead)' : '(Deficit / Behind)'}
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Sunday Closing Target Breakdown', `${curr}${activeWPred.predictedNet.toFixed(2)}`)}
+      ${renderRow('Week Starting Net Balance', `${curr}${(activeWPred.startNet || 0).toFixed(2)}`)}
+      ${renderRow('Inflows Clearing This Week', `+${curr}${(activeWPred.wIncomeTotal || 0).toFixed(2)}`, 'var(--green)')}
+      ${renderRow('Scheduled Bills Clearing This Week', `-${curr}${(activeWPred.wDDTotal || 0).toFixed(2)}`, 'var(--red)')}
+      ${renderRow('Weekly Living Budget Allowance', `-${curr}${(activeWPred.wSpend || 0).toFixed(2)}`, 'var(--red)')}
+    `;
+  } else if (tileId === 'daily_variance') {
+    const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
+    const activeW = schedule.weeks[activeWIdx] || schedule.weeks[0];
+    const activeWPred = forecast.weeklyPredictions[activeWIdx] || {};
+    const activeWActuals = (mData.weekly_actuals && activeW?.name && mData.weekly_actuals[activeW.name]) || {};
+    const livePacing = (typeof calculateLiveDailyPacing === 'function' && activeW && activeWPred)
+      ? calculateLiveDailyPacing(activeW, activeWPred, activeWActuals, cfg)
+      : null;
+    const hasActual = (activeWPred.actualNet !== null && activeWPred.actualNet !== undefined);
+    const variance = (hasActual && livePacing && livePacing.liveDailyVariance !== null && livePacing.liveDailyVariance !== undefined)
+      ? livePacing.liveDailyVariance
+      : (hasActual ? (activeWPred.actualNet - activeWPred.predictedNet) : 0);
+    const pacedTarget = (livePacing && livePacing.pacedTargetNetToday !== null && livePacing.pacedTargetNetToday !== undefined)
+      ? livePacing.pacedTargetNetToday
+      : (activeWPred.predictedNet || 0);
+    const elapsed = (livePacing && typeof livePacing.elapsedDays === 'number') ? livePacing.elapsedDays : 1;
+    const totalDays = (livePacing && typeof livePacing.totalDays === 'number') ? livePacing.totalDays : 7;
+    const daysRemaining = Math.max(0, totalDays - elapsed);
+    const now = new Date();
+    liveBadge = `<span style="background:${variance >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Actual Net Check-in:</strong> ${hasActual ? curr + activeWPred.actualNet.toFixed(2) : 'No check-in entered'}</div>
+        <div><strong>Paced Target Net Today:</strong> ${curr}${pacedTarget.toFixed(2)}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'};">
+          = Live Daily Variance: ${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)} ${variance >= 0 ? '(Pacing Surplus)' : '(Pacing Deficit)'}
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('Intra-Week Pacing Parameters', '')}
+      ${renderRow('Day of Week', `${now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}`)}
+      ${renderRow('Elapsed Days in Week', `${elapsed} of ${totalDays} days`)}
+      ${renderRow('Days Remaining in Week', `${daysRemaining} day${daysRemaining === 1 ? '' : 's'}`)}
+      ${renderRow('Planned Week Spend', `${curr}${(activeWPred.wSpend || 0).toFixed(2)}`)}
+    `;
+  } else if (tileId === 'cashflow_architecture') {
+    const totalInflow = forecast.totalCurrentInflow + forecast.totalMonthPaymentsIn;
+    const fixedBills = forecast.contractualFixedBills !== undefined
+      ? forecast.contractualFixedBills
+      : Math.max(0, forecast.totalDD - (forecast.autoSavingsFromDDTotal || 0));
+    const weeklySpend = forecast.totalWeeklyCurrentSpend;
+    const autoPay = forecast.totalAutoPayMonth;
+    const surplus = totalInflow - fixedBills - weeklySpend - autoPay;
+
+    modalTitle = `🍰 Cashflow Architecture Breakdown`;
+    liveBadge = `<span style="background:${surplus >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${surplus >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">Surplus: ${curr}${surplus.toFixed(2)}</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div style="color:var(--green);"><strong>Total Expected Inflows:</strong> +${curr}${totalInflow.toFixed(2)}</div>
+        <div style="color:var(--red);"><strong>- Fixed Essential Bills:</strong> -${curr}${fixedBills.toFixed(2)} (${totalInflow > 0 ? Math.round((fixedBills / totalInflow) * 100) : 0}%)</div>
+        <div style="color:var(--red);"><strong>- Weekly Living Budget (Cash):</strong> -${curr}${weeklySpend.toFixed(2)} (${totalInflow > 0 ? Math.round((weeklySpend / totalInflow) * 100) : 0}%)</div>
+        ${autoPay > 0 ? `<div style="color:var(--amber);"><strong>- Credit Auto-Pay Settlements:</strong> -${curr}${autoPay.toFixed(2)} (${totalInflow > 0 ? Math.round((autoPay / totalInflow) * 100) : 0}%)</div>` : ''}
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${surplus >= 0 ? 'var(--green)' : 'var(--red)'};">
+          = Projected Net Monthly Surplus: ${curr}${surplus.toFixed(2)}
+        </div>
+      </div>
+    `;
+
+    sectionsHtml = `
+      ${renderSectionHeader('1. Inflows (Salary & Scheduled)', `+${curr}${totalInflow.toFixed(2)}`)}
+      ${renderRow('Primary Inflows', `+${curr}${totalInflow.toFixed(2)}`, 'var(--green)')}
+
+      ${renderSectionHeader('2. Committed Contractual Bills', `-${curr}${fixedBills.toFixed(2)}`)}
+      ${renderRow('Fixed Direct Debits & Regular Bills', `-${curr}${fixedBills.toFixed(2)}`, 'var(--red)')}
+
+      ${renderSectionHeader('3. Planned Weekly Living Spend', `-${curr}${weeklySpend.toFixed(2)}`)}
+      ${renderRow('Discretionary Cash Allowances', `-${curr}${weeklySpend.toFixed(2)}`, 'var(--red)')}
+
+      ${autoPay > 0 ? `
+        ${renderSectionHeader('4. Credit Card Settlements', `-${curr}${autoPay.toFixed(2)}`)}
+        ${renderRow('Auto-Pay Deductions from Current', `-${curr}${autoPay.toFixed(2)}`, 'var(--amber)')}
+      ` : ''}
+    `;
+  } else if (tileId === 'cycle_velocity') {
+    const days = forecast.totalCycleDays || 28;
+    const elapsed = forecast.elapsedCycleDays || 0;
+    const pct = forecast.percentElapsed || 0;
+    liveBadge = `<span style="background:rgba(56,189,248,0.15); color:var(--curr-border); padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${pct}% elapsed</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <div><strong>Cycle Start Date:</strong> ${forecast.cycleStart?.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</div>
+        <div><strong>Cycle End Date:</strong> ${forecast.cycleEnd?.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+        <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:var(--curr-border);">
+          = ${elapsed} of ${days} days elapsed (${pct}% of payday cycle)
+        </div>
+      </div>
+    `;
+  } else {
+    formulaHtml = `
+      <div style="font-size:12px; color:var(--heading);">
+        <p>${tile.explanation || ''}</p>
+        <div style="background:var(--card-bg); padding:8px 10px; border-radius:6px; border:1px solid var(--border); margin-top:6px;">
+          <code>${tile.formula || ''}</code>
+        </div>
+      </div>
+    `;
+  }
+
+  const modalBody = `
+    <div style="font-size:13px; line-height:1.5;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-size:12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">Live Calculated Metric</span>
+        ${liveBadge}
+      </div>
+
+      <div style="background:var(--card-bg, #1e293b); border:1.5px solid var(--border, #334155); border-radius:8px; padding:12px 14px; margin-bottom:12px;">
+        <div style="font-size:10.5px; font-weight:700; color:var(--curr-border); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Calculation Formula & Live Figures</div>
+        ${formulaHtml}
+      </div>
+
+      ${sectionsHtml}
+    </div>
+  `;
+
+  showModal({
+    title: modalTitle,
+    body: modalBody,
+    actions: `
+      <button class="btn primary" onclick="window.budgetApp.navigateForecastTile('${tile.id}', '${navTarget}'); window.budgetApp.closeModal();">
+        ${navBtnLabel}
+      </button>
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>
+    `
+  });
+}
+
+function openWeekCalculationModal(weekIdx = 0) {
+  const cfg = getSettings();
+  const curr = cfg.currency || '£';
+  const currentPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
+    ? getCurrentPeriodMonthAndYear()
+    : { year: appState.currentYear, month: appState.currentTab || 'Jan' };
+  const currentYear = currentPeriod.year;
+  const currentMonthName = currentPeriod.month;
+
+  const forecast = (typeof calculateMonthForecast === 'function')
+    ? calculateMonthForecast(currentMonthName, currentYear)
+    : null;
+  if (!forecast || !forecast.weeklyPredictions || !forecast.weeklyPredictions[weekIdx]) return;
+
+  const wp = forecast.weeklyPredictions[weekIdx];
+  const wObj = wp.wObj || { name: `Week ${weekIdx + 1}`, label: '' };
+  const yData = getYearData(currentYear) || {};
+  const mData = (yData.months && yData.months[currentMonthName]) ? yData.months[currentMonthName] : {};
+
+  const startNet = (wp.startNet !== undefined && wp.startNet !== null) ? wp.startNet : 0;
+  const inAmt = wp.wIncomeTotal || 0;
+  const ddAmt = wp.wDDTotal || 0;
+  const spendAmt = wp.wSpend || 0;
+  const closeNet = wp.predictedNet || 0;
+
+  const renderRow = (label, amt, color = 'var(--text)', sub = '') => `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+      <div style="padding-right:8px;">
+        <span style="color:var(--text);">${label}</span>
+        ${sub ? `<div style="font-size:10px; color:var(--text-muted); margin-top:1px;">${sub}</div>` : ''}
+      </div>
+      <strong style="color:${color}; white-space:nowrap; margin-left:10px;">${amt}</strong>
+    </div>
+  `;
+
+  const renderSectionHeader = (title, total = '') => `
+    <div style="font-size:11px; font-weight:700; color:var(--curr-border); text-transform:uppercase; letter-spacing:0.5px; margin:14px 0 6px 0; display:flex; justify-content:space-between; align-items:center; border-bottom:1.5px solid var(--border); padding-bottom:4px;">
+      <span>${title}</span>
+      ${total ? `<span style="font-size:11.5px; font-weight:700; color:var(--heading);">${total}</span>` : ''}
+    </div>
+  `;
+
+  const liveBadge = `<span style="background:${closeNet >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${closeNet >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">Target: ${curr}${closeNet.toFixed(2)}</span>`;
+
+  const formulaHtml = `
+    <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+      <div><strong>Week Starting Net Position:</strong> ${curr}${startNet.toFixed(2)}</div>
+      <div style="color:var(--green);"><strong>+ Inflows Clearing:</strong> +${curr}${inAmt.toFixed(2)}</div>
+      <div style="color:var(--red);"><strong>- Scheduled Bills Clearing:</strong> -${curr}${ddAmt.toFixed(2)}</div>
+      <div style="color:var(--red);"><strong>- Weekly Living Budget:</strong> -${curr}${spendAmt.toFixed(2)}</div>
+      <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${closeNet >= 0 ? 'var(--green)' : 'var(--red)'};">
+        = Sunday Closing Net Target: ${curr}${closeNet.toFixed(2)}
+      </div>
+    </div>
+  `;
+
+  let infList = '';
+  (wp.wIncomes || []).forEach(inc => {
+    infList += renderRow(inc.desc || inc.name || inc.rawDesc, `+${curr}${Number(inc.amount || 0).toFixed(2)}`, 'var(--green)', `${inc.account || 'Joint Account'} &bull; ${inc.actualDateStr || ''}`);
+  });
+
+  let ddList = '';
+  (wp.wDDs || []).forEach(b => {
+    ddList += renderRow(b.desc || b.name, `-${curr}${Number(b.amount || 0).toFixed(2)}`, 'var(--red)', `${b.account || 'Joint Account'} &bull; ${b.actualDateStr || ('Day ' + b.due_day)}`);
+  });
+
+  let spendList = '';
+  const weekItems = (typeof getWeekItems === 'function')
+    ? getWeekItems(currentMonthName, wObj.name, currentYear)
+    : (mData.weekly_items?.[wObj.name] || []);
+  (weekItems || []).filter(i => !i.is_income).forEach(it => {
+    spendList += renderRow(it.desc || 'General', `-${curr}${Number(it.amount || 0).toFixed(2)}`, 'var(--text)', `Account: ${it.account_name || 'Credit Card'}`);
+  });
+
+  const sectionsHtml = `
+    ${inAmt > 0 ? `
+      ${renderSectionHeader('1. Inflows Clearing This Week', `+${curr}${inAmt.toFixed(2)}`)}
+      ${infList || '<div style="color:var(--text-muted); font-size:12px;">None</div>'}
+    ` : ''}
+
+    ${renderSectionHeader('2. Scheduled Direct Debits & Bills Clearing', `-${curr}${ddAmt.toFixed(2)}`)}
+    <div style="max-height:160px; overflow-y:auto; padding-right:4px;">
+      ${ddList || '<div style="color:var(--text-muted); font-size:12px;">No bills clearing this week.</div>'}
+    </div>
+
+    ${renderSectionHeader('3. Discretionary Living Budget Categories', `-${curr}${spendAmt.toFixed(2)}`)}
+    <div style="max-height:160px; overflow-y:auto; padding-right:4px;">
+      ${spendList || '<div style="color:var(--text-muted); font-size:12px;">No discretionary spending planned.</div>'}
+    </div>
+  `;
+
+  const modalBody = `
+    <div style="font-size:13px; line-height:1.5;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <span style="font-size:12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:0.5px;">${wObj.label || wObj.name}</span>
+        ${liveBadge}
+      </div>
+
+      <div style="background:var(--card-bg, #1e293b); border:1.5px solid var(--border, #334155); border-radius:8px; padding:12px 14px; margin-bottom:12px;">
+        <div style="font-size:10.5px; font-weight:700; color:var(--curr-border); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px;">Week Calculation Formula</div>
+        ${formulaHtml}
+      </div>
+
+      ${sectionsHtml}
+    </div>
+  `;
+
+  showModal({
+    title: `📅 ${wObj.name} Cashflow Breakdown`,
+    body: modalBody,
+    actions: `
+      <button class="btn primary" onclick="window.budgetApp.setTab('${currentMonthName}'); setTimeout(() => { const el = document.querySelectorAll('.week-card')[${weekIdx}]; if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }); }, 120); window.budgetApp.closeModal();">
+        📅 Open ${wObj.name} in Spreadsheet &rarr;
+      </button>
+      <button class="btn secondary" onclick="window.budgetApp.closeModal()">Close</button>
+    `
+  });
+}
+
 
 function navigateForecastTile(tileId, target) {
   const currentPeriod = (typeof getCurrentPeriodMonthAndYear === 'function')
@@ -11121,6 +11220,8 @@ if (typeof window !== 'undefined') {
   window.resetOverviewTilesToDefault = resetOverviewTilesToDefault;
   window.openOverviewTilesModal = openOverviewTilesModal;
   window.filterOverviewTilesModal = filterOverviewTilesModal;
+  window.openTileCalculationModal = openTileCalculationModal;
+  window.openWeekCalculationModal = openWeekCalculationModal;
 }
 
 // --- static/js/views/overview.js ---
@@ -11226,12 +11327,43 @@ function renderOverviewView(container) {
   const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
-  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
-  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => {
+    const acc = yb.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(yb.amount) || 0);
+    }
+  });
+  budgetBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
+  birthdayBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
 
   let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => {
+    const acc = yi.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalMonthPaymentsIn += (Number(yi.amount) || 0);
+    }
+  });
+  allRecurringIncomes.forEach(ri => {
+    schedule.weeks.forEach(wObj => {
+      const occs = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek([ri], wObj, schedule, currentYear) : [];
+      occs.forEach(occ => {
+        const acc = occ.account || ri.account || (cfg.current_accounts && cfg.current_accounts[0]);
+        if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+          totalMonthPaymentsIn += (Number(occ.amount) || 0);
+        }
+      });
+    });
+  });
   
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -11640,6 +11772,7 @@ function renderOverviewView(container) {
         <div class="summary-breakdown-list">
           <div class="summary-breakdown-row"><span>Opening Balances:</span><strong>${curr}${totalCurrentOpening.toFixed(2)}</strong></div>
           <div class="summary-breakdown-row" style="color:var(--green);"><span>Salary / Deductions Inflow:</span><strong>+${curr}${totalCurrentInflow.toFixed(2)}</strong></div>
+          ${totalMonthPaymentsIn > 0 ? `<div class="summary-breakdown-row" style="color:var(--green);"><span>Scheduled Inflows:</span><strong>+${curr}${totalMonthPaymentsIn.toFixed(2)}</strong></div>` : ''}
           <div class="summary-breakdown-row" style="color:var(--red);"><span>Direct Debits:</span><strong>-${curr}${totalDD.toFixed(2)}</strong></div>
           ${totalAutoPayMonth > 0 ? `<div class="summary-breakdown-row" style="color:var(--amber);"><span>Credit Auto-Pay Transfers:</span><strong>-${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>` : ''}
           <div class="summary-breakdown-row"><span>Weekly Current Expenses:</span><strong>-${curr}${totalWeeklyCurrentSpend.toFixed(2)}</strong></div>
@@ -12471,16 +12604,18 @@ function renderOverviewView(container) {
               </tr>
             </thead>
             <tbody>
-              ${getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
-                if (b.frequency === 'monthly') return true;
-                if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
-                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
-                }
-                if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
-                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
-                }
-                return true;
-              }).map((b) => {
+              ${(() => {
+                const displayedScheduledItems = getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
+                  if (b.frequency === 'monthly') return true;
+                  if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income' || b.month) {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                  }
+                  if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
+                  }
+                  return true;
+                });
+                return displayedScheduledItems.map((b) => {
                 const isInc = !!b.is_income;
                 let cadenceBadge = '';
                 if (b.frequency === 'monthly') cadenceBadge = `<span class="badge" style="background:#0284c7; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Monthly In' : '📅 Monthly DD'}</span>`;
@@ -12551,18 +12686,36 @@ function renderOverviewView(container) {
                     ` : ''}
                   </tr>
                 `;
-              }).join('')}
+              }).join('');
+              })()}
             </tbody>
             <tfoot>
-              <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
-                <td colspan="3"><strong style="color:var(--heading);">Total Scheduled Outgoings:</strong></td>
-                <td class="text-right" style="color:var(--red); font-size:13px; font-weight:700;">-${curr}${totalDD.toFixed(2)}</td>
-                <td colspan="${globalEditMode ? 4 : 3}">
-                  <span style="font-size:11px; color:var(--text-muted);">
-                    Scheduled Inflows: <strong style="color:var(--green);">+${curr}${totalMonthPaymentsIn.toFixed(2)}</strong> | Net: <strong style="color:${(totalMonthPaymentsIn - totalDD) >= 0 ? 'var(--green)' : 'var(--red)'};">${(totalMonthPaymentsIn - totalDD) >= 0 ? '+' : ''}${curr}${(totalMonthPaymentsIn - totalDD).toFixed(2)}</strong>
-                  </span>
-                </td>
-              </tr>
+              ${(() => {
+                const displayedScheduledItems = getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
+                  if (b.frequency === 'monthly') return true;
+                  if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income' || b.month) {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                  }
+                  if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
+                  }
+                  return true;
+                });
+                const tableScheduledOutgoings = displayedScheduledItems.filter(b => !b.is_income).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+                const tableScheduledInflows = displayedScheduledItems.filter(b => b.is_income).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+                const tableNet = tableScheduledInflows - tableScheduledOutgoings;
+                return `
+                  <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
+                    <td colspan="3"><strong style="color:var(--heading);">Total Scheduled Outgoings:</strong></td>
+                    <td class="text-right" style="color:var(--red); font-size:13px; font-weight:700;">-${curr}${tableScheduledOutgoings.toFixed(2)}</td>
+                    <td colspan="${globalEditMode ? 4 : 3}">
+                      <span style="font-size:11px; color:var(--text-muted);">
+                        Scheduled Inflows: <strong style="color:var(--green);">+${curr}${tableScheduledInflows.toFixed(2)}</strong> | Net: <strong style="color:${tableNet >= 0 ? 'var(--green)' : 'var(--red)'};">${tableNet >= 0 ? '+' : ''}${curr}${tableNet.toFixed(2)}</strong>
+                      </span>
+                    </td>
+                  </tr>
+                `;
+              })()}
             </tfoot>
           </table>
         </div>
@@ -13686,6 +13839,30 @@ function computeTrajectoryMonthData(visibleMonths, sel, cfg) {
       }
     });
 
+    let hasActualCredit = false;
+    let actualCreditTotal = 0;
+    cfg.credit_accounts.filter(c => (sel.credit || []).includes(c.name)).forEach(c => {
+      let actVal = null;
+      for (let w = 5; w >= 1; w--) {
+        const wAct = md.weekly_actuals && md.weekly_actuals[`Week ${w}`];
+        if (wAct) {
+          if (wAct[`c_avail_${c.name}`] !== "" && wAct[`c_avail_${c.name}`] !== undefined && wAct[`c_avail_${c.name}`] !== null) {
+            actVal = Math.max(0, (Number(c.limit) || 0) - (parseFloat(wAct[`c_avail_${c.name}`]) || 0));
+            break;
+          } else if (wAct[`c_spent_${c.name}`] !== "" && wAct[`c_spent_${c.name}`] !== undefined && wAct[`c_spent_${c.name}`] !== null) {
+            actVal = Math.max(0, parseFloat(wAct[`c_spent_${c.name}`]) || 0);
+            break;
+          }
+        }
+      }
+      if (actVal !== null && !isNaN(actVal)) {
+        hasActualCredit = true;
+        actualCreditTotal += actVal;
+      } else {
+        actualCreditTotal += Number(md.credit_data[c.name] && md.credit_data[c.name].opening_spent) || 0;
+      }
+    });
+
     const ddTotal = (md.direct_debits || []).reduce((s, d) => s + (Number(d.amount) || 0), 0);
     let wTotal = 0;
     Object.values(md.weekly_items || {}).forEach(wItems => (wItems || []).forEach(it => { if (!it.is_income) wTotal += Number(it.amount) || 0; }));
@@ -13699,8 +13876,9 @@ function computeTrajectoryMonthData(visibleMonths, sel, cfg) {
       savings: sTotal,
       actualSavings: hasActualSavings ? actualSavingsTotal : null,
       actualCurrent: hasActualCurrent ? actualCurrentTotal : null,
+      actualCredit: hasActualCredit ? actualCreditTotal : null,
       net: cTotal + sTotal - crTotal,
-      actualNet: (hasActualSavings || hasActualCurrent) ? (actualCurrentTotal + actualSavingsTotal - crTotal) : null,
+      actualNet: (hasActualSavings || hasActualCurrent || hasActualCredit) ? (actualCurrentTotal + actualSavingsTotal - actualCreditTotal) : null,
       out: ddTotal + wTotal
     };
   });
@@ -15324,7 +15502,6 @@ if (typeof window !== 'undefined') {
 // --- static/js/views/settings.js ---
 
 
-
 function renderSettingsView(container) {
   const cfg = getSettings();
   const currentWidgets = cfg.enabled_widgets || [];
@@ -15333,8 +15510,6 @@ function renderSettingsView(container) {
   if (currentTheme === 'dark') currentTheme = 'navy_dark';
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
-  const storageMode = typeof getStorageMode === 'function' ? getStorageMode() : 'ha';
-  const storagePref = typeof getPersistentStoragePreference === 'function' ? getPersistentStoragePreference() : 'auto';
 
   // Visible accounts and members for current user persona
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
@@ -16159,61 +16334,6 @@ function renderSettingsView(container) {
           </div>
         </div>
 
-        <!-- APPLICATION RUNTIME & UNIVERSAL STORAGE ADAPTER -->
-        <div id="storageEngineSettingsPanel" class="panel" style="margin-top:20px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-            <div>
-              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
-                <span>📱</span> Application Runtime &amp; Storage Engine
-              </h3>
-              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
-                Select how HABit stores your financial data. Your selection is strictly persistent across browser reloads.
-              </p>
-            </div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <span class="badge" style="background:${storageMode === 'ha' ? 'rgba(16,185,129,0.2)' : 'rgba(56,189,248,0.2)'}; color:${storageMode === 'ha' ? 'var(--green)' : 'var(--primary)'}; border:1px solid ${storageMode === 'ha' ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.4)'}; padding:4px 10px; font-size:11px; font-weight:bold;">
-                Active: ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
-              </span>
-            </div>
-          </div>
-
-          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:12px;">
-            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:8px;">
-              Storage Engine Preference (Saved in Browser):
-            </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-              <button type="button" class="btn ${storagePref === 'auto' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('auto')">
-                🔄 Auto-Detect ${storagePref === 'auto' ? '✓' : ''}
-              </button>
-              <button type="button" class="btn ${storagePref === 'ha' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('ha')">
-                🏠 Force Home Assistant (/data) ${storagePref === 'ha' ? '✓' : ''}
-              </button>
-              <button type="button" class="btn ${storagePref === 'local' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('local')">
-                📱 Force Standalone Local (IndexedDB) ${storagePref === 'local' ? '✓' : ''}
-              </button>
-            </div>
-            <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">
-              ${storageMode === 'ha' 
-                ? '🏠 <strong>Home Assistant Mode:</strong> Data is saved directly to your Home Assistant host disk (<code>/data</code>) with live sensor entity broadcasting. Offline changes are not kept here.' 
-                : '📱 <strong>Standalone Local Mode:</strong> Data is isolated entirely within this device\'s in-browser IndexedDB storage. It does not sync to Home Assistant sensors or other devices.'}
-            </div>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-top:4px;">
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.copyServerDataToLocalPrompt()" title="Clone active server budget into browser IndexedDB for offline safety">
-                📋 Clone Server Data &rarr; Local Storage
-              </button>
-              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.exportFullBudgetBackup()" title="Download complete multi-year archive">
-                💾 Export Full Backup
-              </button>
-            </div>
-            <div style="font-size:11px; color:var(--text-muted);">
-              Preference: <code style="color:var(--primary); font-weight:bold;">${storagePref}</code>
-            </div>
-          </div>
-        </div>
-
         <!-- AUTOMATED BACKUP & CLOUD SYNC PANEL -->
         <div class="panel" style="margin-top:20px; border:1px solid rgba(56, 189, 248, 0.3); background:rgba(56, 189, 248, 0.03);">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
@@ -16339,6 +16459,31 @@ function renderSettingsView(container) {
           </div>
         </div>
 
+        <!-- LEGAL & FINANCIAL DISCLAIMER PANEL -->
+        <div class="panel" style="margin-top:20px; border:1px solid rgba(148, 163, 184, 0.25); background:rgba(148, 163, 184, 0.03);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:8px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>⚖️</span> Legal &amp; Financial Disclaimer
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Terms of use, financial advice disclaimers, algorithmic calculation boundaries, and limitation of liability.
+              </p>
+            </div>
+            <span id="termsSettingsBadge" class="badge" style="font-size:11px; padding:3px 10px; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.4); color:var(--green, #10b981); font-weight:700;">
+              Checking status...
+            </span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:rgba(0,0,0,0.12); padding:10px 14px; border-radius:6px; border:1px solid var(--border); margin-top:8px;">
+            <div style="font-size:11.5px; color:var(--text-muted); line-height:1.4; max-width:580px;">
+              <span>HABit is an independent personal estimation utility. All projections, safe-to-spend allowances, and cashflow schedules are mathematical models. Acceptance is logged per version to ensure compliance.</span>
+            </div>
+            <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;" onclick="window.budgetApp.openTermsModal(true)">
+              <span>📜</span> View Full Terms &amp; Conditions
+            </button>
+          </div>
+        </div>
+
         <!-- DANGER ZONE / FACTORY RESET PANEL -->
         <div class="panel" style="margin-top:20px; border:1px solid rgba(239, 68, 68, 0.4); background:rgba(239, 68, 68, 0.04);">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
@@ -16361,7 +16506,7 @@ function renderSettingsView(container) {
       </div>
 
       <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <button type="button" class="btn secondary" style="font-size:11.5px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openDisclaimerModal()">
+        <button type="button" class="btn secondary" style="font-size:11.5px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openTermsModal(true)">
           <span>⚖️</span> Financial Disclaimer &amp; Terms
         </button>
         <button class="btn green" onclick="window.budgetApp.saveSettingsForm()">Save Settings</button>
@@ -18055,6 +18200,9 @@ function renderContent() {
       if (window.budgetApp && typeof window.budgetApp.loadBackupsList === 'function') {
         setTimeout(() => window.budgetApp.loadBackupsList(), 50);
       }
+      if (window.budgetApp && typeof window.budgetApp.loadTermsSettingsStatus === 'function') {
+        setTimeout(() => window.budgetApp.loadTermsSettingsStatus(), 50);
+      }
       return;
     }
     if (appState.activeTab === 'Budgets') {
@@ -18336,11 +18484,172 @@ function initDesktopRail() {
   } catch (err) {}
 }
 
+let termsOnAcceptedCallback = null;
+let termsCurrentVersion = '1.1.0';
+
+function showTermsGateOverlay(termsStatus, onAcceptedCallback) {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (!overlay) return;
+
+  const versionBadge = document.getElementById('termsGateVersionBadge');
+  if (versionBadge) {
+    versionBadge.innerText = `v${termsStatus?.latest_version || '1.1.0'}`;
+  }
+
+  const checkAdvice = document.getElementById('termsCheckAdvice');
+  const checkLiability = document.getElementById('termsCheckLiability');
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const closeBtn = document.getElementById('termsCloseReadOnlyBtn');
+  const checkboxesContainer = document.getElementById('termsGateCheckboxes');
+  const errEl = document.getElementById('termsGateError');
+
+  if (checkAdvice) checkAdvice.checked = false;
+  if (checkLiability) checkLiability.checked = false;
+  if (acceptBtn) {
+    acceptBtn.disabled = true;
+    acceptBtn.style.display = 'inline-flex';
+    acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+  }
+  if (closeBtn) closeBtn.style.display = 'none';
+  if (checkboxesContainer) checkboxesContainer.style.display = 'flex';
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  termsOnAcceptedCallback = onAcceptedCallback || null;
+  termsCurrentVersion = termsStatus?.latest_version || '1.1.0';
+
+  overlay.classList.add('active');
+  overlay.style.setProperty('display', 'flex', 'important');
+}
+
+function openTermsModal(readOnly = true) {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (!overlay) return;
+
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const closeBtn = document.getElementById('termsCloseReadOnlyBtn');
+  const checkboxesContainer = document.getElementById('termsGateCheckboxes');
+  const errEl = document.getElementById('termsGateError');
+
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  if (readOnly) {
+    if (acceptBtn) acceptBtn.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'inline-flex';
+    if (checkboxesContainer) checkboxesContainer.style.display = 'none';
+  } else {
+    if (acceptBtn) acceptBtn.style.display = 'inline-flex';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (checkboxesContainer) checkboxesContainer.style.display = 'flex';
+  }
+
+  overlay.classList.add('active');
+  overlay.style.setProperty('display', 'flex', 'important');
+}
+
+function closeTermsModal() {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.style.setProperty('display', 'none', 'important');
+  }
+}
+
+function onTermsCheckboxChange() {
+  const checkAdvice = document.getElementById('termsCheckAdvice');
+  const checkLiability = document.getElementById('termsCheckLiability');
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  if (acceptBtn) {
+    const isChecked = Boolean(checkAdvice?.checked && checkLiability?.checked);
+    acceptBtn.disabled = !isChecked;
+  }
+}
+
+async function handleAcceptTermsClick() {
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const errEl = document.getElementById('termsGateError');
+
+  if (acceptBtn) {
+    acceptBtn.disabled = true;
+    acceptBtn.innerText = 'Recording acceptance...';
+  }
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  try {
+    const res = await acceptTermsApi(termsCurrentVersion);
+    if (res && res.ok && res.data && res.data.success) {
+      closeTermsModal();
+      if (typeof termsOnAcceptedCallback === 'function') {
+        const cb = termsOnAcceptedCallback;
+        termsOnAcceptedCallback = null;
+        await cb();
+      }
+    } else {
+      const errMsg = (res && res.data && res.data.message)
+        ? res.data.message
+        : (res && res.error)
+          ? res.error
+          : 'Failed to record terms acceptance. If HABit was recently updated, please Rebuild (or restart) the HABit add-on in Home Assistant.';
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.innerText = errMsg;
+      }
+      if (acceptBtn) {
+        acceptBtn.disabled = false;
+        acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+      }
+    }
+  } catch (e) {
+    console.error('Error accepting terms:', e);
+    if (errEl) {
+      errEl.style.display = 'block';
+      errEl.innerText = e.message || 'Error communicating with server.';
+    }
+    if (acceptBtn) {
+      acceptBtn.disabled = false;
+      acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+    }
+  }
+}
+
 async function init() {
   try {
     // Automatically enable full-bleed kiosk mode when embedded in Home Assistant Ingress
     enableHomeAssistantKioskMode();
     initDesktopRail();
+
+    // 1. Mandatory Financial Disclaimer & Terms of Use Gatekeeper Check (Fail-Closed)
+    const termsStatus = await checkTermsStatusApi();
+    const isExplicitlyAccepted = Boolean(termsStatus && termsStatus.accepted === true && !termsStatus.needs_acceptance);
+    if (!isExplicitlyAccepted) {
+      console.log('[BudgetApp] Financial Disclaimer & Terms acceptance required (v' + (termsStatus?.latest_version || '1.1.0') + '). Halting data load.');
+      showTermsGateOverlay(termsStatus || { needs_acceptance: true, latest_version: '1.1.0' }, async () => {
+        await proceedWithAppInit();
+      });
+      return;
+    }
+
+    await proceedWithAppInit();
+  } catch (err) {
+    console.error("Initialization error:", err);
+    const errBanner = document.getElementById('errorBanner');
+    if (errBanner) {
+      errBanner.style.display = 'block';
+      errBanner.innerText = `Init Error: ${err.message}\n${err.stack}`;
+    }
+  }
+}
+
+async function proceedWithAppInit() {
+  try {
 
     // Build ID check & storage cache purge
     const currentBuild = window.__BUILD_ID__ || '';
@@ -18380,14 +18689,13 @@ async function init() {
       });
     }
     const data = await fetchBudget();
-    const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
       if (typeof reconcileYearlyRecurringCommitments === 'function') {
         reconcileYearlyRecurringCommitments(appState.data);
       }
-    } else if (initialMode === 'ha') {
-      console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
+    } else {
+      console.warn('[BudgetApp] Server data unavailable.');
       const errEl = document.getElementById('errorBanner');
       if (errEl) {
         errEl.style.display = 'block';
@@ -18411,6 +18719,7 @@ async function init() {
         const state = urlParams.get('state') || urlParams.get('session_id');
 
         if (code || reqId || state) {
+          console.log('[OpenBanking] Handling return callback:', { reqId, code, state });
           const explicitRedirect = (appState.data?.settings?.open_banking?.redirect_uri || '').trim();
           const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
           const cbRes = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
@@ -18450,10 +18759,8 @@ async function init() {
       console.warn('[Categories] Init categories notice:', catErr);
     }
 
-    this.updateStorageModeIndicator();
-
     if (!cfg.onboarding_complete) {
-      if (initialMode === 'ha' && (!data || Object.keys(data).length === 0)) {
+      if (!data || Object.keys(data).length === 0) {
         console.warn('[BudgetApp] Suppressing onboarding: server data not reached.');
       } else {
         startOnboarding();
@@ -18512,6 +18819,10 @@ async function init() {
 let tabTransitionTimer = null;
 window.budgetApp = {
   init,
+  openTermsModal,
+  closeTermsModal,
+  onTermsCheckboxChange,
+  handleAcceptTermsClick,
   renderContent,
   renderForecastOverviewView,
   flipForecastTile,
@@ -18537,6 +18848,8 @@ window.budgetApp = {
   resetOverviewTilesToDefault,
   openOverviewTilesModal,
   filterOverviewTilesModal,
+  openTileCalculationModal,
+  openWeekCalculationModal,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
@@ -19902,7 +20215,29 @@ window.budgetApp = {
   },
 
   openDisclaimerModal() {
-    return openDisclaimerModal();
+    return openTermsModal(true);
+  },
+
+  async loadTermsSettingsStatus() {
+    const badge = document.getElementById('termsSettingsBadge');
+    if (!badge) return;
+    try {
+      const status = await checkTermsStatusApi();
+      if (status && status.accepted) {
+        const dateStr = status.accepted_at ? new Date(status.accepted_at).toLocaleDateString() : '';
+        badge.innerHTML = `✓ Accepted (v${status.accepted_version || '1.0.0'}${dateStr ? ' • ' + dateStr : ''})`;
+        badge.style.background = 'rgba(16, 185, 129, 0.15)';
+        badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        badge.style.color = 'var(--green, #10b981)';
+      } else {
+        badge.innerHTML = `⚠️ Acceptance Required (v${status?.latest_version || '1.1.0'})`;
+        badge.style.background = 'rgba(239, 68, 68, 0.15)';
+        badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        badge.style.color = 'var(--red, #ef4444)';
+      }
+    } catch (e) {
+      console.warn('Could not load terms settings status:', e);
+    }
   },
 
   async copyDebugLog() {
@@ -19979,93 +20314,6 @@ window.budgetApp = {
 
   startOnboarding() {
     startOnboarding();
-  },
-
-  updateStorageModeIndicator() {
-    const btn = document.getElementById('storageModeIndicatorBtn');
-    if (!btn) return;
-    const mode = getStorageMode();
-    if (mode === 'local') {
-      btn.style.display = 'inline-flex';
-      btn.title = 'Currently using Standalone Local Storage (IndexedDB). Click to manage storage settings.';
-    } else {
-      btn.style.display = 'none';
-    }
-  },
-
-  openStorageSettings() {
-    this.setPrimarySection('settings');
-    setTimeout(() => {
-      const el = document.getElementById('storageEngineSettingsPanel');
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.boxShadow = '0 0 0 2px var(--primary, #38bdf8)';
-        setTimeout(() => { el.style.boxShadow = ''; }, 2000);
-      }
-    }, 150);
-  },
-
-  async changeStorageEnginePreference(newMode) {
-    const currentPref = getPersistentStoragePreference();
-    if (currentPref === newMode) return;
-
-    if (newMode === 'local') {
-      const hasExistingData = appState.data && appState.data.years && Object.keys(appState.data.years).length > 0;
-      let shouldCopy = false;
-      if (hasExistingData) {
-        shouldCopy = confirm(
-          "Switch to Standalone Local (IndexedDB) Storage?\n\n" +
-          "Your active budget is currently loaded from Home Assistant. Would you like to copy your active budget into this browser/device's local storage now so your budget stays intact?"
-        );
-      }
-      if (shouldCopy) {
-        await cloneBudgetToLocal(appState.data);
-      }
-    } else if (newMode === 'ha') {
-      const haReachable = await (async () => {
-        try {
-          const r = await fetch(getBaseApiUrl() + 'api/auth/status', { cache: 'no-store' });
-          return r.ok || r.status === 401;
-        } catch (e) { return false; }
-      })();
-      if (!haReachable && (typeof window === 'undefined' || window.__HABIT_SERVER_ENV__ !== 'ha')) {
-        if (!confirm("Home Assistant server could not be confirmed reachable right now. Do you still want to set preference to Home Assistant?")) {
-          return;
-        }
-      }
-    }
-
-    setStorageMode(newMode);
-    console.log('[BudgetApp] Storage preference changed to:', newMode);
-    this.updateStorageModeIndicator();
-
-    const fresh = await fetchBudget(appState.currentYear);
-    if (fresh && typeof fresh === 'object' && Object.keys(fresh).length > 0) {
-      appState.data = fresh;
-    }
-    renderContent();
-  },
-
-  async copyServerDataToLocalPrompt() {
-    if (!appState.data || !appState.data.years) {
-      alert("No active budget data to clone.");
-      return;
-    }
-    const ok = confirm("Clone all current budget data, accounts, settings, and transactions into this device's local offline database (IndexedDB)?");
-    if (ok) {
-      const res = await cloneBudgetToLocal(appState.data);
-      if (res) {
-        alert("Active budget data successfully cloned to device local storage!");
-      } else {
-        alert("Failed to clone data to local storage.");
-      }
-    }
-  },
-
-  async toggleStorageModeOverride() {
-    const current = getStorageMode();
-    const next = current === 'ha' ? 'local' : 'ha';
-    await this.changeStorageEnginePreference(next);
   },
 
   exportFullBudgetBackup() {
@@ -24224,11 +24472,72 @@ window.budgetApp = {
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
-  async resetAllData() {
-    if (confirm("Are you sure you want to completely RESET all data to default? This cannot be undone!")) {
-      await resetDatabase();
-      window.location.reload();
+  resetAllData() {
+    showModal({
+      title: '⚠️ Confirm Factory Reset',
+      body: `
+        <div style="text-align:center; padding:8px 0 14px 0;">
+          <div style="font-size:42px; margin-bottom:10px; line-height:1;">⚠️</div>
+          <h4 style="margin:0 0 6px 0; font-size:16px; color:var(--red, #ef4444); font-weight:700;">
+            Are you absolutely sure?
+          </h4>
+          <p style="margin:0 0 12px 0; font-size:13px; color:var(--text-main); line-height:1.5;">
+            This action will <strong style="color:var(--red, #ef4444);">permanently erase</strong> all budgets, transactions, custom categories, accounts, and personal settings from disk and memory.
+          </p>
+        </div>
+
+        <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; font-size:12px; color:var(--text-muted); line-height:1.45; margin-bottom:6px;">
+          <div style="font-weight:600; color:var(--red, #ef4444); margin-bottom:4px;">What happens next:</div>
+          <ul style="margin:0; padding-left:18px;">
+            <li>All multi-year actuals, budgets, and Open Banking link records will be wiped.</li>
+            <li>Browser storage (cache, tile preferences, theme) will be cleared.</li>
+            <li>The page will reload and launch the <strong>5-step Onboarding Setup Wizard</strong>.</li>
+            <li>Any exported backup archives in your backup folder will be safely kept.</li>
+          </ul>
+        </div>
+      `,
+      actions: `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+        <button type="button" id="btnExecuteFactoryReset" class="btn red" style="font-weight:700;" onclick="window.budgetApp.executeFactoryReset()">
+          ⚠️ Yes, Erase &amp; Reset Everything
+        </button>
+      `,
+      hideCalc: true
+    });
+  },
+
+  async executeFactoryReset() {
+    const btn = document.getElementById('btnExecuteFactoryReset');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Resetting application...';
+      btn.style.opacity = '0.7';
     }
+
+    try {
+      const ok = await resetDatabase();
+      if (!ok) {
+        console.warn('[FactoryReset] resetDatabase returned non-ok status, proceeding with client purge.');
+      }
+    } catch (err) {
+      console.error('[FactoryReset] Error invoking resetDatabase:', err);
+    }
+
+    // Thoroughly purge all client storage
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (storageErr) {
+      console.warn('[FactoryReset] Error clearing browser storage:', storageErr);
+    }
+
+    // Reset runtime app state
+    if (appState) {
+      appState.data = null;
+    }
+
+    // Reload browser to fetch pristine default state and launch Onboarding Wizard
+    window.location.reload();
   },
 
   async applyRecategorizationFromModal() {

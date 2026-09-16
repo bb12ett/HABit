@@ -7,6 +7,8 @@
 ### *A private, payday-anchored household cashflow and budget manager for Home Assistant*
 
 [![Open your Home Assistant instance and show the add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbb12ett%2FHABit)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![Legal Disclaimer & Terms](https://img.shields.io/badge/Legal-Financial_Disclaimer_%26_Terms_v1.1.0-red.svg)](DISCLAIMER.md)
 
 </div>
 
@@ -108,16 +110,22 @@ Questions, feature suggestions, or bug reports?
 ---
 
 ## ⚖️ Financial Disclaimer & Limitation of Liability
-
-**HABit** is an open-source, self-hosted budgeting and cashflow estimation tool provided for **informational and personal planning purposes only**.
-
-- **Not Financial Advice**: HABit is not a registered financial adviser, accountant, or banking institution. Nothing contained in this application or its documentation constitutes financial, investment, legal, tax, or debt management advice.
-- **Estimations & Projections**: All figures, safe-to-spend pace indicators, month-end projections, credit card auto-pay calculations, and bank holiday bill shift schedules are mathematical estimates and may contain variances, rounding differences, or third-party banking sync delays.
+ 
+**HABit** is an open-source, self-hosted budgeting and cashflow estimation tool provided strictly for **informational and personal planning purposes only**.
+ 
+> [!CAUTION]
+> **Use Entirely at Your Own Risk:** HABit is provided on an **"as is" and "with all faults"** basis without warranty of any kind. Calculations, Safe-to-Spend allowances, cashflow projections, recurring bill shifts, and account balances may contain mathematical errors, programming bugs, rounding anomalies, or logic defects. **Never make spending, transfer, or debt payoff decisions based on figures shown in this app without independently verifying them directly with your official financial institutions.**
+ 
+- **Not Financial Advice**: HABit is not a registered financial adviser, certified accountant, or banking institution. Nothing contained in this application or its documentation constitutes financial, investment, legal, tax, or debt management advice.
+- **Estimations & Projections**: All figures, daily safe-to-spend pace indicators, month-end projections, credit card auto-pay calculations, and bank holiday bill shift schedules are mathematical approximations and may contain variances, rounding differences, or third-party banking sync delays.
 - **Independent Verification Required**: **You are solely responsible for verifying your real-world bank balances, scheduled bill dates, and direct debit commitments directly with your official financial institutions** before making financial decisions, expenditures, or transfers.
-- **Limitation of Liability**: To the maximum extent permitted by applicable law, the authors, maintainers, and contributors shall not be liable for any direct, indirect, incidental, or consequential financial losses, bank fees, overdraft charges, late payment penalties, or interest charges arising from the use of or inability to use this software.
-
+- **Full Exclusion of Liability**: To the maximum extent permitted by applicable law, the author, developers, maintainers, and contributors shall not be liable for any direct, indirect, incidental, or consequential financial losses, bank fees, overdraft charges, late payment penalties, credit score impacts, or interest charges arising from the use of or inability to use this software, even if caused by a provable software bug or calculation flaw.
+ 
+📄 **Read the complete, legally binding terms and full liability waiver:**  
+👉 **[DISCLAIMER.md](DISCLAIMER.md)** (or on the [Project Wiki](wiki/Financial-Disclaimer.md)).
+ 
 ---
-
+ 
 <div align="center">
   <sub>Built with ❤️ for the Home Assistant Community by bb12ett</sub>
 </div>

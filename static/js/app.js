@@ -50,11 +50,6 @@ import {
   propagateScheduledBillsApi,
   exportFullBudgetBackupApi,
   importFullBudgetBackupApi,
-  getStorageMode,
-  setStorageMode,
-  getPersistentStoragePreference,
-  cloneBudgetToLocal,
-  cloneLocalToServer,
   getBaseApiUrl,
   fetchBackupsListApi,
   createManualBackupApi,
@@ -67,7 +62,9 @@ import {
   disconnectOneDriveApi,
   saveGoogleDriveApi,
   testGoogleDriveUploadApi,
-  disconnectGoogleDriveApi
+  disconnectGoogleDriveApi,
+  checkTermsStatusApi,
+  acceptTermsApi
 } from './api.js';
 
 import {
@@ -179,7 +176,9 @@ import {
   toggleOverviewTileExpansion,
   resetOverviewTilesToDefault,
   openOverviewTilesModal,
-  filterOverviewTilesModal
+  filterOverviewTilesModal,
+  openTileCalculationModal,
+  openWeekCalculationModal
 } from './views/forecast_overview.js';
 
 import {
@@ -657,6 +656,9 @@ export function renderContent() {
       if (window.budgetApp && typeof window.budgetApp.loadBackupsList === 'function') {
         setTimeout(() => window.budgetApp.loadBackupsList(), 50);
       }
+      if (window.budgetApp && typeof window.budgetApp.loadTermsSettingsStatus === 'function') {
+        setTimeout(() => window.budgetApp.loadTermsSettingsStatus(), 50);
+      }
       return;
     }
     if (appState.activeTab === 'Budgets') {
@@ -938,11 +940,172 @@ export function initDesktopRail() {
   } catch (err) {}
 }
 
+let termsOnAcceptedCallback = null;
+let termsCurrentVersion = '1.1.0';
+
+export function showTermsGateOverlay(termsStatus, onAcceptedCallback) {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (!overlay) return;
+
+  const versionBadge = document.getElementById('termsGateVersionBadge');
+  if (versionBadge) {
+    versionBadge.innerText = `v${termsStatus?.latest_version || '1.1.0'}`;
+  }
+
+  const checkAdvice = document.getElementById('termsCheckAdvice');
+  const checkLiability = document.getElementById('termsCheckLiability');
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const closeBtn = document.getElementById('termsCloseReadOnlyBtn');
+  const checkboxesContainer = document.getElementById('termsGateCheckboxes');
+  const errEl = document.getElementById('termsGateError');
+
+  if (checkAdvice) checkAdvice.checked = false;
+  if (checkLiability) checkLiability.checked = false;
+  if (acceptBtn) {
+    acceptBtn.disabled = true;
+    acceptBtn.style.display = 'inline-flex';
+    acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+  }
+  if (closeBtn) closeBtn.style.display = 'none';
+  if (checkboxesContainer) checkboxesContainer.style.display = 'flex';
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  termsOnAcceptedCallback = onAcceptedCallback || null;
+  termsCurrentVersion = termsStatus?.latest_version || '1.1.0';
+
+  overlay.classList.add('active');
+  overlay.style.setProperty('display', 'flex', 'important');
+}
+
+export function openTermsModal(readOnly = true) {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (!overlay) return;
+
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const closeBtn = document.getElementById('termsCloseReadOnlyBtn');
+  const checkboxesContainer = document.getElementById('termsGateCheckboxes');
+  const errEl = document.getElementById('termsGateError');
+
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  if (readOnly) {
+    if (acceptBtn) acceptBtn.style.display = 'none';
+    if (closeBtn) closeBtn.style.display = 'inline-flex';
+    if (checkboxesContainer) checkboxesContainer.style.display = 'none';
+  } else {
+    if (acceptBtn) acceptBtn.style.display = 'inline-flex';
+    if (closeBtn) closeBtn.style.display = 'none';
+    if (checkboxesContainer) checkboxesContainer.style.display = 'flex';
+  }
+
+  overlay.classList.add('active');
+  overlay.style.setProperty('display', 'flex', 'important');
+}
+
+export function closeTermsModal() {
+  const overlay = document.getElementById('termsGateOverlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+    overlay.style.setProperty('display', 'none', 'important');
+  }
+}
+
+export function onTermsCheckboxChange() {
+  const checkAdvice = document.getElementById('termsCheckAdvice');
+  const checkLiability = document.getElementById('termsCheckLiability');
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  if (acceptBtn) {
+    const isChecked = Boolean(checkAdvice?.checked && checkLiability?.checked);
+    acceptBtn.disabled = !isChecked;
+  }
+}
+
+export async function handleAcceptTermsClick() {
+  const acceptBtn = document.getElementById('termsAcceptBtn');
+  const errEl = document.getElementById('termsGateError');
+
+  if (acceptBtn) {
+    acceptBtn.disabled = true;
+    acceptBtn.innerText = 'Recording acceptance...';
+  }
+  if (errEl) {
+    errEl.style.display = 'none';
+    errEl.innerText = '';
+  }
+
+  try {
+    const res = await acceptTermsApi(termsCurrentVersion);
+    if (res && res.ok && res.data && res.data.success) {
+      closeTermsModal();
+      if (typeof termsOnAcceptedCallback === 'function') {
+        const cb = termsOnAcceptedCallback;
+        termsOnAcceptedCallback = null;
+        await cb();
+      }
+    } else {
+      const errMsg = (res && res.data && res.data.message)
+        ? res.data.message
+        : (res && res.error)
+          ? res.error
+          : 'Failed to record terms acceptance. If HABit was recently updated, please Rebuild (or restart) the HABit add-on in Home Assistant.';
+      if (errEl) {
+        errEl.style.display = 'block';
+        errEl.innerText = errMsg;
+      }
+      if (acceptBtn) {
+        acceptBtn.disabled = false;
+        acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+      }
+    }
+  } catch (e) {
+    console.error('Error accepting terms:', e);
+    if (errEl) {
+      errEl.style.display = 'block';
+      errEl.innerText = e.message || 'Error communicating with server.';
+    }
+    if (acceptBtn) {
+      acceptBtn.disabled = false;
+      acceptBtn.innerText = 'Accept Terms & Continue to HABit →';
+    }
+  }
+}
+
 export async function init() {
   try {
     // Automatically enable full-bleed kiosk mode when embedded in Home Assistant Ingress
     enableHomeAssistantKioskMode();
     initDesktopRail();
+
+    // 1. Mandatory Financial Disclaimer & Terms of Use Gatekeeper Check (Fail-Closed)
+    const termsStatus = await checkTermsStatusApi();
+    const isExplicitlyAccepted = Boolean(termsStatus && termsStatus.accepted === true && !termsStatus.needs_acceptance);
+    if (!isExplicitlyAccepted) {
+      console.log('[BudgetApp] Financial Disclaimer & Terms acceptance required (v' + (termsStatus?.latest_version || '1.1.0') + '). Halting data load.');
+      showTermsGateOverlay(termsStatus || { needs_acceptance: true, latest_version: '1.1.0' }, async () => {
+        await proceedWithAppInit();
+      });
+      return;
+    }
+
+    await proceedWithAppInit();
+  } catch (err) {
+    console.error("Initialization error:", err);
+    const errBanner = document.getElementById('errorBanner');
+    if (errBanner) {
+      errBanner.style.display = 'block';
+      errBanner.innerText = `Init Error: ${err.message}\n${err.stack}`;
+    }
+  }
+}
+
+export async function proceedWithAppInit() {
+  try {
 
     // Build ID check & storage cache purge
     const currentBuild = window.__BUILD_ID__ || '';
@@ -982,14 +1145,13 @@ export async function init() {
       });
     }
     const data = await fetchBudget();
-    const initialMode = getStorageMode();
     if (data && typeof data === 'object' && Object.keys(data).length > 0) {
       appState.data = data;
       if (typeof reconcileYearlyRecurringCommitments === 'function') {
         reconcileYearlyRecurringCommitments(appState.data);
       }
-    } else if (initialMode === 'ha') {
-      console.warn('[BudgetApp] Server data unavailable in Home Assistant mode.');
+    } else {
+      console.warn('[BudgetApp] Server data unavailable.');
       const errEl = document.getElementById('errorBanner');
       if (errEl) {
         errEl.style.display = 'block';
@@ -1013,6 +1175,7 @@ export async function init() {
         const state = urlParams.get('state') || urlParams.get('session_id');
 
         if (code || reqId || state) {
+          console.log('[OpenBanking] Handling return callback:', { reqId, code, state });
           const explicitRedirect = (appState.data?.settings?.open_banking?.redirect_uri || '').trim();
           const redirectUri = explicitRedirect || (window.location.protocol + "//" + window.location.host + window.location.pathname);
           const cbRes = await callbackOpenBankingRequisition(reqId || state, code, state, redirectUri);
@@ -1052,10 +1215,8 @@ export async function init() {
       console.warn('[Categories] Init categories notice:', catErr);
     }
 
-    this.updateStorageModeIndicator();
-
     if (!cfg.onboarding_complete) {
-      if (initialMode === 'ha' && (!data || Object.keys(data).length === 0)) {
+      if (!data || Object.keys(data).length === 0) {
         console.warn('[BudgetApp] Suppressing onboarding: server data not reached.');
       } else {
         startOnboarding();
@@ -1114,6 +1275,10 @@ export async function init() {
 let tabTransitionTimer = null;
 window.budgetApp = {
   init,
+  openTermsModal,
+  closeTermsModal,
+  onTermsCheckboxChange,
+  handleAcceptTermsClick,
   renderContent,
   renderForecastOverviewView,
   flipForecastTile,
@@ -1139,6 +1304,8 @@ window.budgetApp = {
   resetOverviewTilesToDefault,
   openOverviewTilesModal,
   filterOverviewTilesModal,
+  openTileCalculationModal,
+  openWeekCalculationModal,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
@@ -2504,7 +2671,29 @@ window.budgetApp = {
   },
 
   openDisclaimerModal() {
-    return openDisclaimerModal();
+    return openTermsModal(true);
+  },
+
+  async loadTermsSettingsStatus() {
+    const badge = document.getElementById('termsSettingsBadge');
+    if (!badge) return;
+    try {
+      const status = await checkTermsStatusApi();
+      if (status && status.accepted) {
+        const dateStr = status.accepted_at ? new Date(status.accepted_at).toLocaleDateString() : '';
+        badge.innerHTML = `✓ Accepted (v${status.accepted_version || '1.0.0'}${dateStr ? ' • ' + dateStr : ''})`;
+        badge.style.background = 'rgba(16, 185, 129, 0.15)';
+        badge.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+        badge.style.color = 'var(--green, #10b981)';
+      } else {
+        badge.innerHTML = `⚠️ Acceptance Required (v${status?.latest_version || '1.1.0'})`;
+        badge.style.background = 'rgba(239, 68, 68, 0.15)';
+        badge.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        badge.style.color = 'var(--red, #ef4444)';
+      }
+    } catch (e) {
+      console.warn('Could not load terms settings status:', e);
+    }
   },
 
   async copyDebugLog() {
@@ -2581,93 +2770,6 @@ window.budgetApp = {
 
   startOnboarding() {
     startOnboarding();
-  },
-
-  updateStorageModeIndicator() {
-    const btn = document.getElementById('storageModeIndicatorBtn');
-    if (!btn) return;
-    const mode = getStorageMode();
-    if (mode === 'local') {
-      btn.style.display = 'inline-flex';
-      btn.title = 'Currently using Standalone Local Storage (IndexedDB). Click to manage storage settings.';
-    } else {
-      btn.style.display = 'none';
-    }
-  },
-
-  openStorageSettings() {
-    this.setPrimarySection('settings');
-    setTimeout(() => {
-      const el = document.getElementById('storageEngineSettingsPanel');
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        el.style.boxShadow = '0 0 0 2px var(--primary, #38bdf8)';
-        setTimeout(() => { el.style.boxShadow = ''; }, 2000);
-      }
-    }, 150);
-  },
-
-  async changeStorageEnginePreference(newMode) {
-    const currentPref = getPersistentStoragePreference();
-    if (currentPref === newMode) return;
-
-    if (newMode === 'local') {
-      const hasExistingData = appState.data && appState.data.years && Object.keys(appState.data.years).length > 0;
-      let shouldCopy = false;
-      if (hasExistingData) {
-        shouldCopy = confirm(
-          "Switch to Standalone Local (IndexedDB) Storage?\n\n" +
-          "Your active budget is currently loaded from Home Assistant. Would you like to copy your active budget into this browser/device's local storage now so your budget stays intact?"
-        );
-      }
-      if (shouldCopy) {
-        await cloneBudgetToLocal(appState.data);
-      }
-    } else if (newMode === 'ha') {
-      const haReachable = await (async () => {
-        try {
-          const r = await fetch(getBaseApiUrl() + 'api/auth/status', { cache: 'no-store' });
-          return r.ok || r.status === 401;
-        } catch (e) { return false; }
-      })();
-      if (!haReachable && (typeof window === 'undefined' || window.__HABIT_SERVER_ENV__ !== 'ha')) {
-        if (!confirm("Home Assistant server could not be confirmed reachable right now. Do you still want to set preference to Home Assistant?")) {
-          return;
-        }
-      }
-    }
-
-    setStorageMode(newMode);
-    console.log('[BudgetApp] Storage preference changed to:', newMode);
-    this.updateStorageModeIndicator();
-
-    const fresh = await fetchBudget(appState.currentYear);
-    if (fresh && typeof fresh === 'object' && Object.keys(fresh).length > 0) {
-      appState.data = fresh;
-    }
-    renderContent();
-  },
-
-  async copyServerDataToLocalPrompt() {
-    if (!appState.data || !appState.data.years) {
-      alert("No active budget data to clone.");
-      return;
-    }
-    const ok = confirm("Clone all current budget data, accounts, settings, and transactions into this device's local offline database (IndexedDB)?");
-    if (ok) {
-      const res = await cloneBudgetToLocal(appState.data);
-      if (res) {
-        alert("Active budget data successfully cloned to device local storage!");
-      } else {
-        alert("Failed to clone data to local storage.");
-      }
-    }
-  },
-
-  async toggleStorageModeOverride() {
-    const current = getStorageMode();
-    const next = current === 'ha' ? 'local' : 'ha';
-    await this.changeStorageEnginePreference(next);
   },
 
   exportFullBudgetBackup() {
@@ -6826,11 +6928,72 @@ window.budgetApp = {
     if (getSettings().onboarding_complete) { await saveBudget(appState.data); }
   },
 
-  async resetAllData() {
-    if (confirm("Are you sure you want to completely RESET all data to default? This cannot be undone!")) {
-      await resetDatabase();
-      window.location.reload();
+  resetAllData() {
+    showModal({
+      title: '⚠️ Confirm Factory Reset',
+      body: `
+        <div style="text-align:center; padding:8px 0 14px 0;">
+          <div style="font-size:42px; margin-bottom:10px; line-height:1;">⚠️</div>
+          <h4 style="margin:0 0 6px 0; font-size:16px; color:var(--red, #ef4444); font-weight:700;">
+            Are you absolutely sure?
+          </h4>
+          <p style="margin:0 0 12px 0; font-size:13px; color:var(--text-main); line-height:1.5;">
+            This action will <strong style="color:var(--red, #ef4444);">permanently erase</strong> all budgets, transactions, custom categories, accounts, and personal settings from disk and memory.
+          </p>
+        </div>
+
+        <div style="background:rgba(239, 68, 68, 0.08); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px 14px; font-size:12px; color:var(--text-muted); line-height:1.45; margin-bottom:6px;">
+          <div style="font-weight:600; color:var(--red, #ef4444); margin-bottom:4px;">What happens next:</div>
+          <ul style="margin:0; padding-left:18px;">
+            <li>All multi-year actuals, budgets, and Open Banking link records will be wiped.</li>
+            <li>Browser storage (cache, tile preferences, theme) will be cleared.</li>
+            <li>The page will reload and launch the <strong>5-step Onboarding Setup Wizard</strong>.</li>
+            <li>Any exported backup archives in your backup folder will be safely kept.</li>
+          </ul>
+        </div>
+      `,
+      actions: `
+        <button type="button" class="btn secondary" onclick="window.budgetApp.closeModal()">Cancel</button>
+        <button type="button" id="btnExecuteFactoryReset" class="btn red" style="font-weight:700;" onclick="window.budgetApp.executeFactoryReset()">
+          ⚠️ Yes, Erase &amp; Reset Everything
+        </button>
+      `,
+      hideCalc: true
+    });
+  },
+
+  async executeFactoryReset() {
+    const btn = document.getElementById('btnExecuteFactoryReset');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerText = 'Resetting application...';
+      btn.style.opacity = '0.7';
     }
+
+    try {
+      const ok = await resetDatabase();
+      if (!ok) {
+        console.warn('[FactoryReset] resetDatabase returned non-ok status, proceeding with client purge.');
+      }
+    } catch (err) {
+      console.error('[FactoryReset] Error invoking resetDatabase:', err);
+    }
+
+    // Thoroughly purge all client storage
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch (storageErr) {
+      console.warn('[FactoryReset] Error clearing browser storage:', storageErr);
+    }
+
+    // Reset runtime app state
+    if (appState) {
+      appState.data = null;
+    }
+
+    // Reload browser to fetch pristine default state and launch Onboarding Wizard
+    window.location.reload();
   },
 
   async applyRecategorizationFromModal() {

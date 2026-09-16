@@ -5,6 +5,24 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-09-16
+
+### Fixed & Enhanced
+- **Interactive Calculation & Transaction Inspector Modals**:
+  - Clicking any Overview KPI tile (Operating Cash, Fixed Bills Ratio, Daily Burn Rate, Emergency Runway, Net Worth, Credit Runway, Auto-Pay Impact, Savings Portfolio, Savings Rate, Weekly Budget, Sunday Target, Live Daily Variance, Safe-to-Spend, Payday Cycle Velocity) opens an interactive breakdown modal displaying exact mathematical formulas populated with real numbers and itemized constituent tables.
+  - Added dedicated breakdown modals to all 4 weekly runway cards and cashflow architecture breakdown.
+  - Harmonized the Safe-to-Spend modal with live card calculations (`£0.62 / day`).
+- **Financial Calculation Integrity**:
+  - Balanced Current Accounts Cashflow card line items to projected month-end (`0.0000` diff).
+  - Corrected annual recurring bills filter (`isRecurringDueInMonth`) to respect month schedules.
+  - Dynamically synchronized Scheduled Bills table footer with rendered rows.
+- **Robust Factory Reset Implementation**:
+  - Implemented backend `/api/budget/reset` endpoint and `factory_reset_storage()` to purge all per-year budget files and caches while strictly preserving user backup archives and legal disclaimer records.
+  - Replaced browser-native `confirm()` with a styled in-app danger confirmation modal that cannot be suppressed by mobile WebViews or Home Assistant Ingress iframes.
+  - Added thorough client-side `localStorage` and `sessionStorage` wipe and automatic reload into the 5-step Onboarding Setup Wizard.
+- **Legal Protection & Documentation**:
+  - Added root `DISCLAIMER.md` with official Financial Disclaimer & Terms of Use (v1.1.0) and synchronized `README.md`, `DOCS.md`, and project wiki.
+
 ## [0.4.1] - 2026-09-15
 
 ### Fixed

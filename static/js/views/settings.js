@@ -1,5 +1,4 @@
 import { appState, getSettings, getAccountConfig, ALL_AVAILABLE_WIDGETS, isMultiUserEnabled, isPersonSalaryHidden, getPersonSettings, setPersonSalaryPrivacy, getAccountOwner, setAccountOwner, hasPersonPin, isAccountVisibleToActiveUser } from '../state.js';
-import { getStorageMode, getPersistentStoragePreference } from '../api.js';
 
 export function renderSettingsView(container) {
   const cfg = getSettings();
@@ -9,8 +8,6 @@ export function renderSettingsView(container) {
   if (currentTheme === 'dark') currentTheme = 'navy_dark';
   const isMulti = isMultiUserEnabled();
   const activeUser = appState.activeUser || 'Joint';
-  const storageMode = typeof getStorageMode === 'function' ? getStorageMode() : 'ha';
-  const storagePref = typeof getPersistentStoragePreference === 'function' ? getPersistentStoragePreference() : 'auto';
 
   // Visible accounts and members for current user persona
   const visibleCurrentAccounts = isMulti ? cfg.current_accounts.filter(a => isAccountVisibleToActiveUser('current', a)) : cfg.current_accounts;
@@ -835,61 +832,6 @@ export function renderSettingsView(container) {
           </div>
         </div>
 
-        <!-- APPLICATION RUNTIME & UNIVERSAL STORAGE ADAPTER -->
-        <div id="storageEngineSettingsPanel" class="panel" style="margin-top:20px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom:12px;">
-            <div>
-              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
-                <span>📱</span> Application Runtime &amp; Storage Engine
-              </h3>
-              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
-                Select how HABit stores your financial data. Your selection is strictly persistent across browser reloads.
-              </p>
-            </div>
-            <div style="display:flex; gap:6px; align-items:center;">
-              <span class="badge" style="background:${storageMode === 'ha' ? 'rgba(16,185,129,0.2)' : 'rgba(56,189,248,0.2)'}; color:${storageMode === 'ha' ? 'var(--green)' : 'var(--primary)'}; border:1px solid ${storageMode === 'ha' ? 'rgba(16,185,129,0.4)' : 'rgba(56,189,248,0.4)'}; padding:4px 10px; font-size:11px; font-weight:bold;">
-                Active: ${storageMode === 'ha' ? '🏠 Home Assistant Server' : '📱 Standalone Local Device'}
-              </span>
-            </div>
-          </div>
-
-          <div style="background:rgba(0,0,0,0.12); border:1px solid var(--border); border-radius:var(--radius-card); padding:14px; margin-bottom:12px;">
-            <div style="font-size:12px; font-weight:700; color:var(--heading); margin-bottom:8px;">
-              Storage Engine Preference (Saved in Browser):
-            </div>
-            <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px;">
-              <button type="button" class="btn ${storagePref === 'auto' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('auto')">
-                🔄 Auto-Detect ${storagePref === 'auto' ? '✓' : ''}
-              </button>
-              <button type="button" class="btn ${storagePref === 'ha' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('ha')">
-                🏠 Force Home Assistant (/data) ${storagePref === 'ha' ? '✓' : ''}
-              </button>
-              <button type="button" class="btn ${storagePref === 'local' ? 'primary' : 'secondary'}" style="font-size:11.5px; padding:6px 12px; font-weight:600;" onclick="window.budgetApp.changeStorageEnginePreference('local')">
-                📱 Force Standalone Local (IndexedDB) ${storagePref === 'local' ? '✓' : ''}
-              </button>
-            </div>
-            <div style="font-size:11px; color:var(--text-muted); line-height:1.45;">
-              ${storageMode === 'ha' 
-                ? '🏠 <strong>Home Assistant Mode:</strong> Data is saved directly to your Home Assistant host disk (<code>/data</code>) with live sensor entity broadcasting. Offline changes are not kept here.' 
-                : '📱 <strong>Standalone Local Mode:</strong> Data is isolated entirely within this device\'s in-browser IndexedDB storage. It does not sync to Home Assistant sensors or other devices.'}
-            </div>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; padding-top:4px;">
-            <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.copyServerDataToLocalPrompt()" title="Clone active server budget into browser IndexedDB for offline safety">
-                📋 Clone Server Data &rarr; Local Storage
-              </button>
-              <button type="button" class="btn secondary" style="font-size:11px; padding:5px 12px;" onclick="window.budgetApp.exportFullBudgetBackup()" title="Download complete multi-year archive">
-                💾 Export Full Backup
-              </button>
-            </div>
-            <div style="font-size:11px; color:var(--text-muted);">
-              Preference: <code style="color:var(--primary); font-weight:bold;">${storagePref}</code>
-            </div>
-          </div>
-        </div>
-
         <!-- AUTOMATED BACKUP & CLOUD SYNC PANEL -->
         <div class="panel" style="margin-top:20px; border:1px solid rgba(56, 189, 248, 0.3); background:rgba(56, 189, 248, 0.03);">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:12px;">
@@ -1015,6 +957,31 @@ export function renderSettingsView(container) {
           </div>
         </div>
 
+        <!-- LEGAL & FINANCIAL DISCLAIMER PANEL -->
+        <div class="panel" style="margin-top:20px; border:1px solid rgba(148, 163, 184, 0.25); background:rgba(148, 163, 184, 0.03);">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:8px;">
+            <div>
+              <h3 style="margin:0; font-size:15px; color:var(--heading); display:flex; align-items:center; gap:8px;">
+                <span>⚖️</span> Legal &amp; Financial Disclaimer
+              </h3>
+              <p style="margin:4px 0 0 0; font-size:11.5px; color:var(--text-muted);">
+                Terms of use, financial advice disclaimers, algorithmic calculation boundaries, and limitation of liability.
+              </p>
+            </div>
+            <span id="termsSettingsBadge" class="badge" style="font-size:11px; padding:3px 10px; background:rgba(16, 185, 129, 0.15); border:1px solid rgba(16, 185, 129, 0.4); color:var(--green, #10b981); font-weight:700;">
+              Checking status...
+            </span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; background:rgba(0,0,0,0.12); padding:10px 14px; border-radius:6px; border:1px solid var(--border); margin-top:8px;">
+            <div style="font-size:11.5px; color:var(--text-muted); line-height:1.4; max-width:580px;">
+              <span>HABit is an independent personal estimation utility. All projections, safe-to-spend allowances, and cashflow schedules are mathematical models. Acceptance is logged per version to ensure compliance.</span>
+            </div>
+            <button type="button" class="btn secondary" style="font-size:11.5px; padding:5px 12px; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;" onclick="window.budgetApp.openTermsModal(true)">
+              <span>📜</span> View Full Terms &amp; Conditions
+            </button>
+          </div>
+        </div>
+
         <!-- DANGER ZONE / FACTORY RESET PANEL -->
         <div class="panel" style="margin-top:20px; border:1px solid rgba(239, 68, 68, 0.4); background:rgba(239, 68, 68, 0.04);">
           <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:10px;">
@@ -1037,7 +1004,7 @@ export function renderSettingsView(container) {
       </div>
 
       <div style="margin-top:28px; border-top:1px solid var(--border); padding-top:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-        <button type="button" class="btn secondary" style="font-size:11.5px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openDisclaimerModal()">
+        <button type="button" class="btn secondary" style="font-size:11.5px; padding:6px 12px; display:inline-flex; align-items:center; gap:6px;" onclick="window.budgetApp.openTermsModal(true)">
           <span>⚖️</span> Financial Disclaimer &amp; Terms
         </button>
         <button class="btn green" onclick="window.budgetApp.saveSettingsForm()">Save Settings</button>

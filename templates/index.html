@@ -4,13 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Household Budget Planner</title>
-  <meta name="description" content="A private payday-to-payday household budget and cashflow manager">
-  <meta name="theme-color" content="#0f172a">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="HABit">
-  <link rel="manifest" href="static/manifest.json">
-  <link rel="apple-touch-icon" href="static/img/logo.png">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
@@ -694,6 +687,168 @@
         font-size: 28px !important;
       }
     }
+
+    /* MANDATORY FINANCIAL DISCLAIMER & TERMS GATEKEEPER */
+    .terms-gate-overlay {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 100000 !important;
+      background: rgba(10, 15, 29, 0.94) !important;
+      backdrop-filter: blur(12px) !important;
+      -webkit-backdrop-filter: blur(12px) !important;
+      display: none !important;
+      align-items: center !important;
+      justify-content: center !important;
+      padding: 16px !important;
+      box-sizing: border-box !important;
+    }
+    .terms-gate-overlay.active {
+      display: flex !important;
+    }
+    .terms-gate-card {
+      background: var(--bg-card, #1e293b) !important;
+      border: 1px solid rgba(255, 255, 255, 0.14) !important;
+      border-radius: 16px !important;
+      width: 100% !important;
+      max-width: 680px !important;
+      max-height: 90vh !important;
+      display: flex !important;
+      flex-direction: column !important;
+      box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6) !important;
+      overflow: hidden !important;
+      animation: termsModalFadeIn 0.25s ease-out !important;
+    }
+    @keyframes termsModalFadeIn {
+      from { opacity: 0; transform: scale(0.96) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .terms-gate-header {
+      padding: 20px 24px 16px !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+      flex-shrink: 0 !important;
+    }
+    .terms-gate-badge-row {
+      display: flex !important;
+      align-items: center !important;
+      gap: 8px !important;
+      margin-bottom: 8px !important;
+    }
+    .terms-gate-badge {
+      font-size: 11px !important;
+      font-weight: 700 !important;
+      text-transform: uppercase !important;
+      letter-spacing: 0.5px !important;
+      color: var(--amber, #f59e0b) !important;
+      background: rgba(245, 158, 11, 0.15) !important;
+      padding: 3px 8px !important;
+      border-radius: 6px !important;
+    }
+    .terms-gate-version-chip {
+      font-size: 11px !important;
+      font-weight: 600 !important;
+      color: var(--text-muted, #94a3b8) !important;
+      background: rgba(255, 255, 255, 0.06) !important;
+      padding: 3px 7px !important;
+      border-radius: 6px !important;
+    }
+    .terms-gate-title {
+      font-size: 20px !important;
+      font-weight: 800 !important;
+      color: var(--heading, #f8fafc) !important;
+      margin: 0 0 6px 0 !important;
+      letter-spacing: -0.3px !important;
+    }
+    .terms-gate-subtitle {
+      font-size: 12.5px !important;
+      color: var(--text-muted, #94a3b8) !important;
+      margin: 0 !important;
+      line-height: 1.4 !important;
+    }
+    .terms-gate-scrollable {
+      padding: 18px 24px !important;
+      overflow-y: auto !important;
+      flex: 1 1 auto !important;
+      font-size: 13px !important;
+      line-height: 1.6 !important;
+      color: var(--text, #cbd5e1) !important;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+    }
+    .terms-section {
+      margin-bottom: 18px !important;
+    }
+    .terms-section:last-child {
+      margin-bottom: 0 !important;
+    }
+    .terms-section h3 {
+      font-size: 13.5px !important;
+      font-weight: 700 !important;
+      color: var(--heading, #f8fafc) !important;
+      margin: 0 0 6px 0 !important;
+      display: flex !important;
+      align-items: center !important;
+      gap: 6px !important;
+    }
+    .terms-section p {
+      margin: 0 0 8px 0 !important;
+    }
+    .terms-section ul {
+      margin: 4px 0 8px 18px !important;
+      padding: 0 !important;
+    }
+    .terms-section li {
+      margin-bottom: 4px !important;
+    }
+    .terms-gate-footer {
+      padding: 16px 24px 20px !important;
+      background: rgba(0, 0, 0, 0.15) !important;
+      flex-shrink: 0 !important;
+    }
+    .terms-gate-checkboxes {
+      display: flex !important;
+      flex-direction: column !important;
+      gap: 8px !important;
+      margin-bottom: 14px !important;
+    }
+    .terms-checkbox-label {
+      display: flex !important;
+      align-items: flex-start !important;
+      gap: 10px !important;
+      font-size: 12px !important;
+      line-height: 1.4 !important;
+      color: var(--text, #cbd5e1) !important;
+      cursor: pointer !important;
+      user-select: none !important;
+    }
+    .terms-checkbox-label input[type="checkbox"] {
+      margin-top: 2px !important;
+      width: 16px !important;
+      height: 16px !important;
+      accent-color: var(--primary, #3b82f6) !important;
+      cursor: pointer !important;
+      flex-shrink: 0 !important;
+    }
+    .terms-gate-actions {
+      display: flex !important;
+      align-items: center !important;
+      justify-content: flex-end !important;
+      gap: 10px !important;
+    }
+    .terms-accept-btn {
+      padding: 10px 20px !important;
+      font-size: 13px !important;
+      font-weight: 700 !important;
+      border-radius: 8px !important;
+    }
+    .terms-accept-btn:disabled {
+      opacity: 0.45 !important;
+      cursor: not-allowed !important;
+    }
+    .terms-gate-error {
+      color: var(--red, #ef4444) !important;
+      font-size: 12px !important;
+      font-weight: 600 !important;
+      margin-right: auto !important;
+    }
   </style>
 
   <!-- Global Error Handler to guarantee zero blank screens -->
@@ -845,10 +1000,6 @@
             </div>
 
             <div class="top-nav-right">
-              <!-- STORAGE ENGINE MODE BADGE (Shown when in standalone local mode) -->
-              <button id="storageModeIndicatorBtn" class="btn" style="display:none; background:rgba(56,189,248,0.16); color:var(--primary, #38bdf8); border:1px solid rgba(56,189,248,0.4); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.openStorageSettings()" title="Currently in Standalone Local Storage mode. Click to manage storage settings.">
-                <span class="btn-icon">📱</span><span class="btn-text"> Local Storage</span>
-              </button>
               <!-- OPEN BANKING SYNC ERROR INDICATOR -->
               <button id="openBankingSyncErrorBtn" class="btn" style="display:none; background:rgba(239,68,68,0.18); color:var(--red, #ef4444); border:1px solid rgba(239,68,68,0.45); font-size:11.5px; font-weight:700; padding:4px 10px;" onclick="window.budgetApp.handleOpenBankingSyncErrorClick()" title="Open Banking Sync Error. Click to view Settings & Logs.">
                 <span class="btn-icon">⚠️</span><span class="btn-text"> Sync Error</span>
@@ -1516,6 +1667,136 @@
     </div>
   </div>
 
+  <!-- MANDATORY FINANCIAL DISCLAIMER & TERMS OF USE GATEKEEPER -->
+  <div id="termsGateOverlay" class="terms-gate-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="termsGateTitle">
+    <div class="terms-gate-card">
+      <div class="terms-gate-header">
+        <div class="terms-gate-badge-row">
+          <span class="terms-gate-badge">⚖️ Legal & Financial Disclaimer</span>
+          <span id="termsGateVersionBadge" class="terms-gate-version-chip">v1.1.0</span>
+        </div>
+        <h1 id="termsGateTitle" class="terms-gate-title">Financial Disclaimer & Terms of Use</h1>
+        <p class="terms-gate-subtitle">
+          Please review and accept our financial disclaimer and terms of use to access HABit.
+        </p>
+      </div>
+
+      <div class="terms-gate-scrollable" id="termsGateScrollable">
+        <div class="terms-section" style="background:rgba(239, 68, 68, 0.08); border-left:3px solid #ef4444; padding:10px 14px; border-radius:4px; margin-bottom:14px;">
+          <h3 style="color:#ef4444; margin-top:0;">⚠️ Warning: Software May Contain Calculation Bugs &amp; Errors</h3>
+          <p style="margin:0; font-size:11.5px; line-height:1.45;">
+            <strong>This software is provided "as is" and "with all faults".</strong> Calculations, pacing algorithms, Safe-to-Spend allowances, cashflow projections, and bank balances may contain mathematical errors, programming bugs, rounding anomalies, or logic defects. <strong>Never make spending, transfer, or payment decisions based on figures shown in this app without independently verifying them in your official bank account.</strong>
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>1. Personal Budgeting &amp; Forecasting Utility Only — No Regulated Advice</h3>
+          <p>
+            HABit is an independent, self-hosted personal budgeting, forecasting, and cashflow tracking utility for Home Assistant. It is provided strictly for personal organizational and estimation reference. <strong>HABit does not provide regulated financial, investment, banking, credit, tax, or legal advice.</strong> Neither the authors nor contributors are registered financial advisers, chartered accountants, certified planners, or regulated financial entities.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>2. No Guarantee of Mathematical Accuracy — Potential Bugs &amp; Flaws</h3>
+          <p>
+            All financial metrics generated by this application—including Safe-to-Spend allowances, daily burn rates, Sunday closing targets, payday cycle calculations, bank holiday shift schedules, credit card auto-pay projections, sinking fund distributions, and net worth trajectories—are algorithmic approximations based on historical data, user inputs, and third-party feeds.
+          </p>
+          <p>
+            <strong>The author makes NO WARRANTY OR GUARANTEE that any calculation, projection, or figure is accurate, complete, reliable, timely, or fit for any purpose.</strong> Calculations do not guarantee future cash availability, solvency, or actual account balances. Software bugs, logic flaws, edge cases, formula errors, and third-party feed discrepancies may cause projected figures to differ materially from reality.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>3. Sole User Responsibility &amp; Independent Bank Verification</h3>
+          <p>
+            You acknowledge and agree that you remain exclusively and solely responsible for:
+          </p>
+          <ul>
+            <li>Independently verifying all actual account balances, cleared funds, and credit card limits directly with your official financial institutions before committing to purchases or transfers.</li>
+            <li>Ensuring sufficient cleared funds are available in your accounts prior to the processing dates of scheduled direct debits, standing orders, recurring subscriptions, and bill commitments.</li>
+            <li>Independently tracking credit card statement due dates, minimum payment requirements, and interest charges.</li>
+            <li>Preventing unarranged overdraft fees, returned payment charges, late payment penalties, and interest charges.</li>
+          </ul>
+        </div>
+
+        <div class="terms-section">
+          <h3>4. Disclaimer of All Warranties ("As-Is" Provision)</h3>
+          <p>
+            To the maximum extent permitted by applicable law, this software is provided strictly on an <strong>"as is"</strong> and <strong>"as available"</strong> basis without warranties of any kind, whether express, implied, statutory, or otherwise, including but not limited to the implied warranties of merchantability, fitness for a particular purpose, non-infringement, quiet enjoyment, or system accuracy.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>5. Full Exclusion of Liability &amp; Hold Harmless (Ironclad Waiver)</h3>
+          <p>
+            <strong>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL THE AUTHOR, DEVELOPERS, MAINTAINERS, OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES WHATSOEVER</strong>, INCLUDING WITHOUT LIMITATION:
+          </p>
+          <ul>
+            <li>Unarranged overdraft fees, returned payment charges, unpaid direct debit penalties, or banking penalty fees.</li>
+            <li>Late payment penalties, default notices, damaged credit ratings, or reduced credit scores.</li>
+            <li>Credit card interest charges, penalty APRs, or financing charges.</li>
+            <li>Loss of funds, lost savings, loss of profits, financial distress, or business interruption.</li>
+            <li>Any loss, cost, fee, or damage arising directly or indirectly out of the use of, or inability to use, this application, or any reliance placed upon any calculation, figure, notification, or forecast provided by this software, <strong>EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES, AND EVEN IF CAUSED DIRECTLY OR INDIRECTLY BY A PROVABLE SOFTWARE BUG, CALCULATION FLAW, LOGIC ERROR, OR CODING MISTAKE IN THE APPLICATION.</strong></li>
+          </ul>
+          <p>
+            By using HABit, you expressly agree to <strong>defend, indemnify, and hold completely harmless</strong> the author, developers, and contributors from and against any and all claims, liabilities, losses, damages, costs, or expenses (including legal fees) arising out of or in connection with your use of this software.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>6. Data Loss, Corruption, Local Storage &amp; Backup Responsibility</h3>
+          <p>
+            HABit operates locally within your Home Assistant environment. The author accepts zero responsibility for any loss of data, corrupted databases, accidental factory resets, failed automated backups, or cloud synchronization interruptions (including Microsoft OneDrive or Google Drive). You are solely responsible for routinely exporting, testing, and securing offline backups of your financial data.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>7. Open Banking &amp; Third-Party Services</h3>
+          <p>
+            Open Banking connectivity (via GoCardless, Nordigen, or other aggregators) and bank statement parsers are third-party services provided solely for user convenience. The author bears no responsibility for third-party API availability, data accuracy, expired consent tokens, missing transactions, duplicate records, or network transmission errors. All credentials and access tokens stored on your Home Assistant instance remain your sole responsibility to secure.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>8. Entirely at Your Own Risk &amp; Sole Remedy</h3>
+          <p>
+            Your use of this application is completely voluntary and <strong>entirely at your own risk</strong>. If you do not agree unconditionally with every term, warranty disclaimer, and liability exclusion set forth herein, <strong>your sole and exclusive remedy is to immediately discontinue using and delete the application</strong>.
+          </p>
+        </div>
+
+        <div class="terms-section">
+          <h3>9. Future Revisions &amp; Re-Acceptance</h3>
+          <p>
+            As calculation methodologies, features, and regulations evolve, these terms may be updated. When updated, re-acceptance of the revised terms will be required to maintain access to the application.
+          </p>
+        </div>
+      </div>
+
+      <div class="terms-gate-footer">
+        <div id="termsGateCheckboxes" class="terms-gate-checkboxes">
+          <label class="terms-checkbox-label">
+            <input type="checkbox" id="termsCheckAdvice" onchange="window.budgetApp.onTermsCheckboxChange()">
+            <span>I understand that HABit may contain calculation errors or software bugs, does not guarantee accuracy, and is not financial advice.</span>
+          </label>
+          <label class="terms-checkbox-label">
+            <input type="checkbox" id="termsCheckLiability" onchange="window.budgetApp.onTermsCheckboxChange()">
+            <span>I use HABit ENTIRELY AT MY OWN RISK, accept sole responsibility for all financial decisions and data backups, and agree to hold the developers completely harmless from any liability or loss.</span>
+          </label>
+        </div>
+
+        <div class="terms-gate-actions">
+          <div id="termsGateError" class="terms-gate-error" style="display:none;"></div>
+          <button id="termsAcceptBtn" class="btn primary terms-accept-btn" disabled onclick="window.budgetApp.handleAcceptTermsClick()">
+            Accept Terms & Continue to HABit &rarr;
+          </button>
+          <button id="termsCloseReadOnlyBtn" class="btn secondary" style="display:none;" onclick="window.budgetApp.closeTermsModal()">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- USER PROFILE SELECTION SCREEN -->
   <div id="profileSelectionOverlay" class="profile-selection-overlay" style="display:none;">
     <div class="profile-selection-content">
@@ -1536,15 +1817,9 @@
     </div>
   </div>
 
-  <script src="static/js/bundle.js?v={{ BUILD_ID }}"></script>
   <script>
-    if ('serviceWorker' in navigator && (window.location.protocol === 'https:' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('static/sw.js').catch(function(err) {
-          console.warn('[PWA] ServiceWorker registration notice:', err);
-        });
-      });
-    }
+    window.HABIT_TERMS_VERSION = "{{ terms_version }}";
   </script>
+  <script src="static/js/bundle.js?v={{ BUILD_ID }}"></script>
 </body>
 </html>

@@ -83,4 +83,4 @@ As calculation methodologies, features, and regulations evolve, these terms may 
 
 ---
 
-*This Financial Disclaimer & Terms of Use supplements the [GNU Affero General Public License v3.0 (AGPLv3)](https://www.gnu.org/licenses/agpl-3.0.html).*
+*This Financial Disclaimer & Terms of Use supplements the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).*

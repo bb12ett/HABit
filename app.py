@@ -56,6 +56,21 @@ def add_no_cache_headers(response):
 DATA_DIR = "/data" if os.path.exists("/data") else os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 DATA_FILE = os.path.join(DATA_DIR, "budget.json")
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+TERMS_VERSION = "1.1.0"
+TERMS_FILE = os.path.join(DATA_DIR, "terms_accepted.json")
+
+def is_terms_accepted():
+    if not os.path.exists(TERMS_FILE):
+        return False, None, None
+    try:
+        with open(TERMS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            v = data.get("version")
+            acc_at = data.get("accepted_at")
+            return (v == TERMS_VERSION), v, acc_at
+    except Exception as e:
+        print(f"Notice: Error reading terms_accepted.json: {e}")
+        return False, None, None
 
 import base64
 import hashlib
@@ -495,6 +510,89 @@ def delete_year_data(year: int):
     except Exception as e:
         print(f"[Storage] Error deleting budget_{year}.json: {e}")
         return False
+
+def factory_reset_storage():
+    """Completely resets all budgets, actuals, transactions, and settings to factory defaults.
+    Preserves backups/ archive folder and terms_accepted.json.
+    """
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        # 1. Delete all modular per-year budget files (budget_*.json, .tmp, .bak)
+        for fname in os.listdir(DATA_DIR):
+            if fname.startswith("budget_") and (fname.endswith(".json") or ".json." in fname):
+                p = os.path.join(DATA_DIR, fname)
+                try:
+                    if os.path.isfile(p):
+                        os.remove(p)
+                        print(f"[FactoryReset] Deleted {fname}")
+                except Exception as e:
+                    print(f"[FactoryReset] Error deleting {fname}: {e}")
+
+        # 2. Delete legacy budget candidates in DATA_DIR and root
+        legacy_files = [
+            os.path.join(DATA_DIR, "budget.json"),
+            os.path.join(DATA_DIR, "budget.json.bak"),
+            os.path.join(DATA_DIR, "budget.json.tmp"),
+            os.path.join(DATA_DIR, "budget_data.json"),
+            os.path.join(DATA_DIR, "budget_data.json.bak"),
+            "budget_data.json",
+            "budget.json"
+        ]
+        for lf in legacy_files:
+            try:
+                if os.path.exists(lf) and os.path.isfile(lf):
+                    os.remove(lf)
+                    print(f"[FactoryReset] Deleted legacy file {lf}")
+            except Exception as e:
+                print(f"[FactoryReset] Error deleting legacy file {lf}: {e}")
+
+        # 3. Clear category cache and suggested merchants / debug log
+        cat_cache = os.path.join(DATA_DIR, "categories_cache")
+        try:
+            if os.path.exists(cat_cache) and os.path.isdir(cat_cache):
+                shutil.rmtree(cat_cache, ignore_errors=True)
+                print("[FactoryReset] Cleared categories cache directory")
+        except Exception as e:
+            print(f"[FactoryReset] Error clearing categories cache: {e}")
+
+        for extra_f in ["suggested_merchants.json", "open_banking_debug.txt"]:
+            p = os.path.join(DATA_DIR, extra_f)
+            try:
+                if os.path.exists(p) and os.path.isfile(p):
+                    os.remove(p)
+                    print(f"[FactoryReset] Deleted {extra_f}")
+            except Exception as e:
+                print(f"[FactoryReset] Error deleting {extra_f}: {e}")
+
+        if os.path.exists("open_banking_debug.txt") and os.path.isfile("open_banking_debug.txt"):
+            try:
+                os.remove("open_banking_debug.txt")
+            except Exception:
+                pass
+
+        # 4. Overwrite settings.json with pristine DEFAULT_SETTINGS
+        # Ensure onboarding_complete is explicitly False
+        clean_settings = copy.deepcopy(DEFAULT_SETTINGS)
+        clean_settings["onboarding_complete"] = False
+        settings_path = os.path.join(DATA_DIR, "settings.json")
+        tmp_settings = settings_path + ".tmp"
+        with open(tmp_settings, "w", encoding="utf-8") as f:
+            json.dump(clean_settings, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_settings, settings_path)
+        print("[FactoryReset] Reset settings.json to factory defaults (onboarding_complete=False)")
+
+        # 5. Sync reset state to HA sensors
+        try:
+            reset_data = load_data()
+            sync_ha_sensors(reset_data)
+        except Exception as se:
+            print(f"[FactoryReset] HA sensor sync notice: {se}")
+
+        return True
+    except Exception as e:
+        print(f"[FactoryReset] Fatal error during factory reset: {e}")
+        return False
+
 
 def load_data(year=None):
     migrate_legacy_storage()
@@ -1136,42 +1234,6 @@ def build_bundle():
         f.write("\n".join(bundle_parts))
     print("App bundle generated successfully.")
 
-    # Build static www distribution for Capacitor / PWA / Standalone execution
-    try:
-        www_dir = "www"
-        os.makedirs(os.path.join(www_dir, "static", "js"), exist_ok=True)
-        os.makedirs(os.path.join(www_dir, "static", "css"), exist_ok=True)
-        os.makedirs(os.path.join(www_dir, "static", "img"), exist_ok=True)
-
-        # Copy bundle & styles
-        shutil.copy("static/js/bundle.js", os.path.join(www_dir, "static", "js", "bundle.js"))
-        if os.path.exists("static/css/styles.css"):
-            shutil.copy("static/css/styles.css", os.path.join(www_dir, "static", "css", "styles.css"))
-        if os.path.exists("static/manifest.json"):
-            shutil.copy("static/manifest.json", os.path.join(www_dir, "static", "manifest.json"))
-        if os.path.exists("static/sw.js"):
-            shutil.copy("static/sw.js", os.path.join(www_dir, "static", "sw.js"))
-        if os.path.exists("icon.png"):
-            shutil.copy("icon.png", os.path.join(www_dir, "icon.png"))
-
-        # Copy images
-        if os.path.exists("static/img"):
-            for img_file in os.listdir("static/img"):
-                s_path = os.path.join("static/img", img_file)
-                if os.path.isfile(s_path):
-                    shutil.copy(s_path, os.path.join(www_dir, "static", "img", img_file))
-
-        # Render static www/index.html
-        if os.path.exists("templates/index.html"):
-            with open("templates/index.html", "r", encoding="utf-8") as tf:
-                tmpl = tf.read()
-            rendered_html = tmpl.replace("{{ BUILD_ID }}", BUILD_ID).replace("{{ app_version }}", APP_VERSION)
-            with open(os.path.join(www_dir, "index.html"), "w", encoding="utf-8") as wf:
-                wf.write(rendered_html)
-            print("Static www distribution compiled successfully.")
-    except Exception as www_err:
-        print(f"Notice: Failed to compile static www distribution: {www_err}")
-
 try:
     build_bundle()
 except Exception as e:
@@ -1344,6 +1406,48 @@ def suggest_category_merchant_api():
 @app.route("/api/version", methods=["GET"])
 def version_api():
     return jsonify({"build_id": BUILD_ID, "version": APP_VERSION})
+
+@app.route("/api/terms/status", methods=["GET"])
+def terms_status_api():
+    accepted, accepted_version, accepted_at = is_terms_accepted()
+    file_exists = os.path.exists(TERMS_FILE)
+    return jsonify({
+        "file_exists": file_exists,
+        "accepted": accepted,
+        "accepted_version": accepted_version,
+        "latest_version": TERMS_VERSION,
+        "accepted_at": accepted_at,
+        "needs_acceptance": not accepted
+    })
+
+@app.route("/api/terms/accept", methods=["POST"])
+def terms_accept_api():
+    req_data = request.get_json(force=True, silent=True) or {}
+    version = req_data.get("version")
+    if str(version).strip() != str(TERMS_VERSION).strip():
+        return jsonify({
+            "error": "version_mismatch",
+            "message": f"Submitted terms version '{version}' does not match latest '{TERMS_VERSION}'",
+            "latest_version": TERMS_VERSION
+        }), 400
+    
+    os.makedirs(DATA_DIR, exist_ok=True)
+    record = {
+        "version": TERMS_VERSION,
+        "accepted_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "user_agent": request.headers.get("User-Agent", ""),
+        "remote_addr": request.remote_addr or ""
+    }
+    try:
+        with open(TERMS_FILE, "w", encoding="utf-8") as f:
+            json.dump(record, f, indent=2)
+        return jsonify({
+            "success": True,
+            "message": f"Terms version {TERMS_VERSION} accepted successfully.",
+            "record": record
+        })
+    except Exception as e:
+        return jsonify({"error": "write_failed", "message": str(e)}), 500
 
 @app.route("/api/auth/status", methods=["GET"])
 def auth_status_api():
@@ -3821,10 +3925,30 @@ def openbanking_unlink():
     return jsonify({"success": True, "remaining_linked": len(ob_cfg.get("linked_accounts", []))})
 
 
+@app.route("/api/budget/reset", methods=["POST"])
+def budget_reset_api():
+    success = factory_reset_storage()
+    if success:
+        return jsonify({"status": "reset_complete", "message": "All budget data and settings have been reset to default."})
+    return jsonify({"error": "reset_failed", "message": "An error occurred while resetting storage."}), 500
+
 @app.route("/api/budget", methods=["GET", "POST"])
 def budget_api():
+    accepted, _, _ = is_terms_accepted()
+    if not accepted:
+        return jsonify({
+            "error": "terms_not_accepted",
+            "message": "Financial disclaimer and terms of use must be accepted before accessing budget data.",
+            "latest_version": TERMS_VERSION
+        }), 403
+
     if request.method == "POST":
-        req_data = request.get_json(force=True) or {}
+        req_data = request.get_json(force=True, silent=True) or {}
+        if req_data.get("action") == "reset" or request.args.get("action") == "reset":
+            success = factory_reset_storage()
+            if success:
+                return jsonify({"status": "reset_complete", "message": "All budget data and settings have been reset to default."})
+            return jsonify({"error": "reset_failed", "message": "An error occurred while resetting storage."}), 500
         target_year = request.args.get("year") or req_data.get("current_year")
         save_data(req_data, year=target_year)
         return jsonify({"status": "saved"})
@@ -3836,6 +3960,14 @@ def budget_api():
 
 @app.route("/api/budget/years", methods=["GET"])
 def budget_years_api():
+    accepted, _, _ = is_terms_accepted()
+    if not accepted:
+        return jsonify({
+            "error": "terms_not_accepted",
+            "message": "Financial disclaimer and terms of use must be accepted before accessing budget data.",
+            "latest_version": TERMS_VERSION
+        }), 403
+
     migrate_legacy_storage()
     avail = get_available_years()
     settings = load_settings()
@@ -4971,11 +5103,21 @@ def catch_all(path):
             "sensors": sensors
         })
 
-    if path.endswith("api/budget"):
-        if request.method == "POST":
-            save_data(request.get_json(force=True))
-            return jsonify({"status": "saved"})
-        return jsonify(load_data())
+    clean_path = (path or "").strip("/")
+    if clean_path.endswith("api/terms/status"):
+        return terms_status_api()
+
+    if clean_path.endswith("api/terms/accept"):
+        return terms_accept_api()
+
+    if clean_path.endswith("api/budget/reset"):
+        return budget_reset_api()
+
+    if clean_path.endswith("api/budget/years"):
+        return budget_years_api()
+
+    if clean_path.endswith("api/budget"):
+        return budget_api()
 
     if path.endswith("api/openbanking/debug/log"):
         return openbanking_get_debug_log()
@@ -5039,7 +5181,7 @@ def catch_all(path):
         resp.headers.pop("Last-Modified", None)
         return resp
         
-    resp = make_response(render_template("index.html", BUILD_ID=BUILD_ID, v=BUILD_ID, app_version=APP_VERSION))
+    resp = make_response(render_template("index.html", BUILD_ID=BUILD_ID, v=BUILD_ID, app_version=APP_VERSION, terms_version=TERMS_VERSION))
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     resp.headers["Pragma"] = "no-cache"
     resp.headers["Expires"] = "0"

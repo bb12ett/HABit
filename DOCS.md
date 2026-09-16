@@ -156,8 +156,18 @@ Switch themes anytime via the **Settings (☰)** side drawer or in the Setup Wiz
 
 ---
 
+## ⚖️ Financial Disclaimer & Terms of Use
+
+HABit is an informational personal budgeting and forecasting tool provided strictly on an **"as is" and "with all faults"** basis. It does not provide regulated financial, investment, banking, or legal advice. Calculations, safe-to-spend estimates, and cashflow projections are mathematical approximations that may contain bugs or discrepancies. **Always verify all balances and bill due dates directly with your official financial institutions.**
+
+📄 **Full Legal Terms & Liability Exclusion:** [DISCLAIMER.md](DISCLAIMER.md)
+
+---
+
 ## Support & Contributing
 
 - **Issues & Bug Reports**: Submit tickets on [GitHub Issues](https://github.com/bb12ett/HABit/issues).
 - **Feature Suggestions**: Open an idea in [GitHub Discussions](https://github.com/bb12ett/HABit/discussions).
-- **License**: Released under the [GNU Affero General Public License v3.0 (AGPLv3)](https://www.gnu.org/licenses/agpl-3.0.html).
+- **License**: Released under the [GNU Affero General Public License v3.0 (AGPLv3)](LICENSE).
+- **Legal Disclaimer**: [Financial Disclaimer & Terms of Use](DISCLAIMER.md).
+

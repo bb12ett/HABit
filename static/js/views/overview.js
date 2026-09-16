@@ -100,12 +100,43 @@ export function renderOverviewView(container) {
   const allRecurringIncomes = getYearData(currentYear)?.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => totalDD += (Number(yb.amount) || 0));
-  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
-  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, activeTab, currentYear)).forEach(yb => {
+    const acc = yb.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(yb.amount) || 0);
+    }
+  });
+  budgetBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
+  birthdayBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
 
   let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, activeTab, currentYear)).forEach(yi => {
+    const acc = yi.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalMonthPaymentsIn += (Number(yi.amount) || 0);
+    }
+  });
+  allRecurringIncomes.forEach(ri => {
+    schedule.weeks.forEach(wObj => {
+      const occs = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek([ri], wObj, schedule, currentYear) : [];
+      occs.forEach(occ => {
+        const acc = occ.account || ri.account || (cfg.current_accounts && cfg.current_accounts[0]);
+        if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+          totalMonthPaymentsIn += (Number(occ.amount) || 0);
+        }
+      });
+    });
+  });
   
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -514,6 +545,7 @@ export function renderOverviewView(container) {
         <div class="summary-breakdown-list">
           <div class="summary-breakdown-row"><span>Opening Balances:</span><strong>${curr}${totalCurrentOpening.toFixed(2)}</strong></div>
           <div class="summary-breakdown-row" style="color:var(--green);"><span>Salary / Deductions Inflow:</span><strong>+${curr}${totalCurrentInflow.toFixed(2)}</strong></div>
+          ${totalMonthPaymentsIn > 0 ? `<div class="summary-breakdown-row" style="color:var(--green);"><span>Scheduled Inflows:</span><strong>+${curr}${totalMonthPaymentsIn.toFixed(2)}</strong></div>` : ''}
           <div class="summary-breakdown-row" style="color:var(--red);"><span>Direct Debits:</span><strong>-${curr}${totalDD.toFixed(2)}</strong></div>
           ${totalAutoPayMonth > 0 ? `<div class="summary-breakdown-row" style="color:var(--amber);"><span>Credit Auto-Pay Transfers:</span><strong>-${curr}${totalAutoPayMonth.toFixed(2)}</strong></div>` : ''}
           <div class="summary-breakdown-row"><span>Weekly Current Expenses:</span><strong>-${curr}${totalWeeklyCurrentSpend.toFixed(2)}</strong></div>
@@ -1345,16 +1377,18 @@ export function renderOverviewView(container) {
               </tr>
             </thead>
             <tbody>
-              ${getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
-                if (b.frequency === 'monthly') return true;
-                if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income') {
-                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
-                }
-                if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
-                  return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
-                }
-                return true;
-              }).map((b) => {
+              ${(() => {
+                const displayedScheduledItems = getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
+                  if (b.frequency === 'monthly') return true;
+                  if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income' || b.month) {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                  }
+                  if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
+                  }
+                  return true;
+                });
+                return displayedScheduledItems.map((b) => {
                 const isInc = !!b.is_income;
                 let cadenceBadge = '';
                 if (b.frequency === 'monthly') cadenceBadge = `<span class="badge" style="background:#0284c7; color:#fff; font-size:10.5px; padding:2px 7px;">${isInc ? '💰 Monthly In' : '📅 Monthly DD'}</span>`;
@@ -1425,18 +1459,36 @@ export function renderOverviewView(container) {
                     ` : ''}
                   </tr>
                 `;
-              }).join('')}
+              }).join('');
+              })()}
             </tbody>
             <tfoot>
-              <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
-                <td colspan="3"><strong style="color:var(--heading);">Total Scheduled Outgoings:</strong></td>
-                <td class="text-right" style="color:var(--red); font-size:13px; font-weight:700;">-${curr}${totalDD.toFixed(2)}</td>
-                <td colspan="${globalEditMode ? 4 : 3}">
-                  <span style="font-size:11px; color:var(--text-muted);">
-                    Scheduled Inflows: <strong style="color:var(--green);">+${curr}${totalMonthPaymentsIn.toFixed(2)}</strong> | Net: <strong style="color:${(totalMonthPaymentsIn - totalDD) >= 0 ? 'var(--green)' : 'var(--red)'};">${(totalMonthPaymentsIn - totalDD) >= 0 ? '+' : ''}${curr}${(totalMonthPaymentsIn - totalDD).toFixed(2)}</strong>
-                  </span>
-                </td>
-              </tr>
+              ${(() => {
+                const displayedScheduledItems = getAllScheduledItems(activeTab, appState.currentYear).filter(b => {
+                  if (b.frequency === 'monthly') return true;
+                  if (b.frequency === 'yearly' || b.source_type === 'yearly_recurring' || b.source_type === 'yearly_income' || b.month) {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : (b.month === activeTab);
+                  }
+                  if (b.source_type === 'recurring_payment' || b.source_type === 'recurring_income') {
+                    return (typeof isRecurringDueInMonth === 'function') ? isRecurringDueInMonth(b, activeTab, appState.currentYear) : true;
+                  }
+                  return true;
+                });
+                const tableScheduledOutgoings = displayedScheduledItems.filter(b => !b.is_income).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+                const tableScheduledInflows = displayedScheduledItems.filter(b => b.is_income).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+                const tableNet = tableScheduledInflows - tableScheduledOutgoings;
+                return `
+                  <tr style="border-top:2px solid var(--border); font-weight:bold; background:rgba(255,255,255,0.02);">
+                    <td colspan="3"><strong style="color:var(--heading);">Total Scheduled Outgoings:</strong></td>
+                    <td class="text-right" style="color:var(--red); font-size:13px; font-weight:700;">-${curr}${tableScheduledOutgoings.toFixed(2)}</td>
+                    <td colspan="${globalEditMode ? 4 : 3}">
+                      <span style="font-size:11px; color:var(--text-muted);">
+                        Scheduled Inflows: <strong style="color:var(--green);">+${curr}${tableScheduledInflows.toFixed(2)}</strong> | Net: <strong style="color:${tableNet >= 0 ? 'var(--green)' : 'var(--red)'};">${tableNet >= 0 ? '+' : ''}${curr}${tableNet.toFixed(2)}</strong>
+                      </span>
+                    </td>
+                  </tr>
+                `;
+              })()}
             </tfoot>
           </table>
         </div>

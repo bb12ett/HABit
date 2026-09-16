@@ -704,7 +704,6 @@ export function calculateLiveDailyPacing(wObj, p, actuals = {}, cfg = {}) {
 
 export function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   if (!r) return false;
-  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
   const mIdx = months.indexOf(mName);
   if (mIdx === -1) return false;
   const sched = calculateMonthSchedule(year, mIdx);
@@ -713,7 +712,18 @@ export function isRecurringDueInMonth(r, mName, year = appState.currentYear) {
   const startMs = sched.startDate.getTime();
   const endMs = sched.endDate.getTime();
 
-  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income') {
+  if (r.start_date) {
+    const sDate = new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00');
+    if (endMs < sDate.getTime()) return false;
+  }
+  if (r.end_date) {
+    const eDate = new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59');
+    if (startMs > eDate.getTime()) return false;
+  }
+
+  if (r.frequency === 'monthly' || r.source_type === 'direct_debit' || r.source_type === 'monthly_payment_in') return true;
+
+  if (r.frequency === 'yearly' || r.source_type === 'yearly_recurring' || r.source_type === 'yearly_income' || (r.month && (!r.frequency || r.frequency === 'yearly'))) {
     let targetMIdx = r.month ? months.indexOf(r.month) : (r.start_date ? new Date(r.start_date).getMonth() : 0);
     if (targetMIdx === -1) {
       targetMIdx = months.findIndex(m => m.toLowerCase().startsWith(String(r.month || '').toLowerCase().substring(0, 3)));
@@ -760,7 +770,7 @@ export function getNextOccurrenceDate(r, fromDate = new Date(), year = appState.
   const start = r.start_date ? new Date(r.start_date.includes('T') ? r.start_date : r.start_date + 'T00:00:00') : new Date(year, 0, 1);
   const end = r.end_date ? new Date(r.end_date.includes('T') ? r.end_date : r.end_date + 'T23:59:59') : null;
 
-  const freq = r.frequency || 'monthly';
+  const freq = r.frequency || (r.month ? 'yearly' : 'monthly');
   const intervalN = Math.max(1, parseInt(r.interval_n || 1, 10));
   const fromDateZero = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate(), 0, 0, 0);
   const holidayRule = r.holiday_rule || (r.is_income ? 'previous' : 'following');
@@ -974,6 +984,9 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     return false;
   });
 
+  const activeYearlyDescs = new Set(allYearlyBills.map(b => (b.desc || b.name || '').trim().toLowerCase()));
+  const activeYearlyIncomeDescs = new Set(allYearlyIncome.map(i => (i.desc || i.name || '').trim().toLowerCase()));
+
   const birthdaysThisMonth = (typeof getBirthdayItemsForMonth === 'function') ? getBirthdayItemsForMonth(mName, mIdx, year) : [];
 
   const allRecurring = yData.recurring_payments || cfg.recurring_payments || [];
@@ -1010,10 +1023,10 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
           });
         }
       });
-      (md.direct_debits || []).forEach(dd => {
+      (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
         if (dd.account === acc || (!dd.account && acc === cfg.current_accounts[0])) bal -= Number(dd.amount) || 0;
       });
-      monthlyPaymentsInThisMonth.forEach(pi => {
+      monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
         if (pi.account === acc || (!pi.account && acc === cfg.current_accounts[0])) bal += Number(pi.amount) || 0;
       });
       yearlyBillsThisMonth.forEach(yb => {
@@ -1041,7 +1054,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
         const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.current_accounts[0];
-          const isCurrent = it.account_type === 'current' || (it.desc && it.desc.toLowerCase().includes('cash'));
+          const isCurrent = it.account_type === 'current' || (!it.account_type && it.desc && it.desc.toLowerCase().includes('cash'));
           if (isCurrent && targetAcct === acc) {
             const amt = Number(it.amount) || 0;
             bal = it.is_income ? bal + amt : bal - amt;
@@ -1061,10 +1074,10 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
       closingCredit[c.name] = parseFloat(actSpent) || 0;
     } else {
       let spent = (md.credit_data && md.credit_data[c.name]) ? (Number(md.credit_data[c.name].opening_spent) || 0) : 0;
-      (md.direct_debits || []).forEach(dd => {
+      (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
         if (dd.account === c.name) spent += Number(dd.amount) || 0;
       });
-      monthlyPaymentsInThisMonth.forEach(pi => {
+      monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
         if (pi.account === c.name) spent -= Number(pi.amount) || 0;
       });
       yearlyBillsThisMonth.forEach(yb => {
@@ -1090,7 +1103,7 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
         const items = (md.weekly_items && md.weekly_items[wObj.name]) || [];
         items.forEach(it => {
           const targetAcct = it.account_name || cfg.credit_accounts[0]?.name;
-          const isCredit = it.account_type === 'credit' || (!it.desc || !it.desc.toLowerCase().includes('cash'));
+          const isCredit = it.account_type === 'credit' || (!it.account_type && (!it.desc || !it.desc.toLowerCase().includes('cash')));
           if (isCredit && targetAcct === c.name) {
             const amt = Number(it.amount) || 0;
             spent = it.is_income ? spent - amt : spent + amt;
@@ -1105,11 +1118,11 @@ export function computeMonthClosing(mName, mIdx, year = appState.currentYear) {
     const s = (md.savings_data && md.savings_data[acc]) ? md.savings_data[acc] : { opening: 0 };
     const autoInflow = (savingsInflowFromSalary[acc] || 0) + (savingsInflowFromDD[acc] || 0);
     let directDebitOutflow = 0;
-    (md.direct_debits || []).forEach(dd => {
+    (md.direct_debits || []).filter(dd => !activeYearlyDescs.has((dd.desc || dd.name || '').trim().toLowerCase())).forEach(dd => {
       if (dd.account === acc) directDebitOutflow += Number(dd.amount) || 0;
     });
     let paymentsInInflow = 0;
-    monthlyPaymentsInThisMonth.forEach(pi => {
+    monthlyPaymentsInThisMonth.filter(pi => !activeYearlyIncomeDescs.has((pi.desc || pi.name || '').trim().toLowerCase())).forEach(pi => {
       if (pi.account === acc) paymentsInInflow += Number(pi.amount) || 0;
     });
     let yearlyBillOutflow = 0;
@@ -1345,11 +1358,13 @@ export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.curren
     const strategy = b.deduction_strategy || 'none';
 
     // 1. Dated transactions strictly falling in this month's payday date range
+    let thisMonthSpent = 0;
     (b.transactions || []).forEach((t, tIdx) => {
       if (t.date) {
         const tDate = new Date(t.date.includes('T') ? t.date : t.date + 'T12:00:00');
         const tMs = tDate.getTime();
         if (tMs >= startMs && tMs <= endMs) {
+          thisMonthSpent += (Number(t.amount) || 0);
           const occDateStr = t.date || '';
           items.push({
             desc: `🎯 ${b.name}${t.desc ? ': ' + t.desc : ''}`,
@@ -1397,27 +1412,30 @@ export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.curren
       if (thisMonthTotalM >= curTotalM && thisMonthTotalM <= targetTotalM) {
         const totalRemainingMonths = Math.max(1, targetTotalM - curTotalM + 1);
         const spreadAmt = remaining / totalRemainingMonths;
-        const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
-        items.push({
-          desc: `🎯 ${b.name} (Monthly Spread)`,
-          rawDesc: `🎯 ${b.name} (Monthly Spread)`,
-          due_day: schedule.startDate.getDate(),
-          exact_date: exactDate,
-          actualPaymentDate: exactDate,
-          amount: spreadAmt,
-          account: b.account,
-          is_budget_item: true,
-          status: b.status || 'due',
-          auto_cleared: Boolean(b.auto_cleared),
-          manually_cleared: Boolean(b.manually_cleared),
-          cleared_dates: b.cleared_dates || [],
-          matched_txn_id: b.matched_txn_id,
-          matched_date: b.matched_date,
-          matched_payee: b.matched_payee,
-          source_type: 'budget_bill',
-          budget_idx: bIdx,
-          raw_target: b
-        });
+        const netSpreadAmt = Math.max(0, spreadAmt - thisMonthSpent);
+        if (netSpreadAmt > 0) {
+          const exactDate = `${schedule.startDate.getFullYear()}-${String(schedule.startDate.getMonth() + 1).padStart(2, '0')}-${String(schedule.startDate.getDate()).padStart(2, '0')}`;
+          items.push({
+            desc: `🎯 ${b.name} (Monthly Spread)`,
+            rawDesc: `🎯 ${b.name} (Monthly Spread)`,
+            due_day: schedule.startDate.getDate(),
+            exact_date: exactDate,
+            actualPaymentDate: exactDate,
+            amount: netSpreadAmt,
+            account: b.account,
+            is_budget_item: true,
+            status: b.status || 'due',
+            auto_cleared: Boolean(b.auto_cleared),
+            manually_cleared: Boolean(b.manually_cleared),
+            cleared_dates: b.cleared_dates || [],
+            matched_txn_id: b.matched_txn_id,
+            matched_date: b.matched_date,
+            matched_payee: b.matched_payee,
+            source_type: 'budget_bill',
+            budget_idx: bIdx,
+            raw_target: b
+          });
+        }
       }
     } else if (strategy === 'target_date' && remaining > 0 && b.end_date) {
       const endDateObj = new Date(b.end_date.includes('T') ? b.end_date : b.end_date + 'T12:00:00');
@@ -2656,12 +2674,43 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
   const allRecurringIncomes = yData.recurring_incomes || cfg.recurring_incomes || [];
 
   let totalDD = (mData.direct_debits || []).filter(d => !activeYearlyDescs.has((d.desc || d.name || '').trim().toLowerCase())).reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
-  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => totalDD += (Number(yb.amount) || 0));
-  budgetBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
-  birthdayBillsThisMonth.forEach(b => totalDD += (Number(b.amount) || 0));
+  allYearlyBills.filter(yb => isRecurringDueInMonth(yb, targetMonth, year)).forEach(yb => {
+    const acc = yb.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(yb.amount) || 0);
+    }
+  });
+  budgetBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
+  birthdayBillsThisMonth.forEach(b => {
+    const acc = b.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalDD += (Number(b.amount) || 0);
+    }
+  });
 
   let totalMonthPaymentsIn = (mData.payments_in || []).filter(p => !activeYearlyIncomeDescs.has((p.desc || p.name || '').trim().toLowerCase())).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => totalMonthPaymentsIn += (Number(yi.amount) || 0));
+  allYearlyIncome.filter(yi => isRecurringDueInMonth(yi, targetMonth, year)).forEach(yi => {
+    const acc = yi.account || (cfg.current_accounts && cfg.current_accounts[0]);
+    if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+      totalMonthPaymentsIn += (Number(yi.amount) || 0);
+    }
+  });
+  allRecurringIncomes.forEach(ri => {
+    schedule.weeks.forEach(wObj => {
+      const occs = (typeof getRecurringForWeek === 'function') ? getRecurringForWeek([ri], wObj, schedule, year) : [];
+      occs.forEach(occ => {
+        const acc = occ.account || ri.account || (cfg.current_accounts && cfg.current_accounts[0]);
+        if (!acc || (cfg.current_accounts && cfg.current_accounts.includes(acc))) {
+          totalMonthPaymentsIn += (Number(occ.amount) || 0);
+        }
+      });
+    });
+  });
 
   let totalWeeklySpend = 0, totalWeeklyCurrentSpend = 0, totalWeeklyIncome = 0;
   schedule.weeks.forEach(wObj => {
@@ -2959,6 +3008,12 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
     return sum;
   }, 0);
 
+  const autoSavingsFromDDTotal = Object.values(autoSavingsFromDD || {}).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const totalSavingsTransfers = totalSalarySavingsIn + autoSavingsFromDDTotal;
+  const birthdayBillsTotal = birthdayBillsThisMonth.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+  const budgetBillsTotal = budgetBillsThisMonth.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+  const contractualFixedBills = Math.max(0, totalDD - autoSavingsFromDDTotal - birthdayBillsTotal - budgetBillsTotal);
+
   let latestVariance = null;
   for (let i = weeklyPredictions.length - 1; i >= 0; i--) {
     if (weeklyPredictions[i].variance !== null) {
@@ -3023,6 +3078,11 @@ export function calculateMonthForecast(monthName = appState.activeTab, year = ap
     totalOutgoings,
     weeklyAvg,
     totalAutoPayMonth,
+    autoSavingsFromDDTotal,
+    totalSavingsTransfers,
+    birthdayBillsTotal,
+    budgetBillsTotal,
+    contractualFixedBills,
     latestVariance,
     isCurrentMonth,
     activeWeekIndex,

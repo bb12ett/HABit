@@ -97,7 +97,7 @@ HABit is licensed under the **[GNU Affero General Public License v3.0 (AGPLv3)](
 
 **HABit is an informational personal cashflow estimation tool, not a certified financial planner, accountant, or banking service.**
 
-- All calculations, projections, safe-to-spend allowances, and holiday bill schedules are mathematical approximations.
-- Users are solely responsible for independently verifying all account balances, credit limits, and scheduled bill dates directly with their official financial institutions.
-- To the fullest extent permitted by law, the authors and contributors disclaim all liability for any financial losses, overdraft charges, bank fees, or penalties arising from the use of this software.
-- Read the full [Financial Disclaimer & Terms](Financial-Disclaimer).
+- **Provided "As-Is" & With All Faults**: Software calculations, Safe-to-Spend pacing, projections, and holiday bill schedules may contain mathematical errors, programming bugs, or logic defects.
+- **Sole User Responsibility**: Users are solely responsible for independently verifying all account balances, credit limits, and scheduled bill dates directly with their official financial institutions before committing to purchases or transfers.
+- **Full Liability Waiver**: To the fullest extent permitted by law, the authors, maintainers, and contributors disclaim all liability for any financial losses, overdraft charges, bank fees, credit score impacts, or penalties arising from the use of this software, even if caused by a provable software bug or calculation flaw.
+- 📄 **Read the full legally binding document:** [Financial Disclaimer & Terms of Use (v1.1.0)](Financial-Disclaimer).
