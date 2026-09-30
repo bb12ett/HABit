@@ -1,5 +1,5 @@
 import { appState, getSettings, getYearData, getMonthData, getWeekItems, getAccountConfig, months, isMultiUserEnabled, getAccountOwner, getPersonPin, hasPersonPin, setPersonPin, unlockUser, isUserUnlocked, setActiveUser, isAccountVisibleToActiveUser, getCurrentPeriodMonthAndYear, isYearEmptyOrPhantom } from '../state.js';
-import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek, getOccasionDate, getOccasionIcon } from '../calculations.js';
+import { calculateMonthSchedule, calculateAndSyncRollovers, detectCurrentMonthAndWeek, getOccasionDate, getOccasionIcon, formatLocalDateToISO, RETAIL_STOP_MERCHANTS, BILL_DOMAIN_ALIASES } from '../calculations.js';
 import { saveBudget } from '../api.js';
 
 export function showModal(opts) {
@@ -2542,7 +2542,7 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
           </div>
           <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
             Status: <strong style="color:${isCleared ? 'var(--green)' : 'var(--amber)'};">${isCleared ? '✓ Cleared / Paid' : '⚠️ Due'}</strong>
-            ${(isCleared && item?.matched_payee) ? ` • Matched with <em>${item.matched_payee}</em> (${targetDateStr || item.matched_date || ''})` : ''}
+            ${(isCleared && item?.matched_payee) ? ` • Matched with <em>${item.matched_payee}</em> (${item.matched_date || targetDateStr || ''})` : ''}
           </div>
         </div>
         <div style="display:flex; gap:6px;">
@@ -2564,13 +2564,52 @@ export function openManualBillMatchModal(sourceType, sourceIdx, monthName, billD
             <div style="font-size:11px; color:var(--text-muted); text-align:center; padding:16px;">No matching Open Banking transactions available. Run a Sync in Settings first.</div>
           ` : sortedTxns.map(t => {
             const tAmt = Math.abs(Number(t.amount) || 0);
-            const isAmtMatch = Math.abs(tAmt - amt) <= 0.05;
+            const isAmtMatch = Math.round(Math.abs(tAmt - amt) * 100) / 100 <= 0.05;
             const tPayee = t.payee_name || t.merchant_name || 'Debit Transaction';
-            const isNameMatch = cleanDesc && tPayee.toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc);
-            const isRecMatch = isAmtMatch || isNameMatch;
+            const pClean = tPayee.toLowerCase();
+            const bClean = (desc || '').toLowerCase().replace(/^[🎯🎁📥]\s*/, '').trim();
+
+            let isRetail = false;
+            RETAIL_STOP_MERCHANTS.forEach(m => {
+              if (pClean.includes(m)) isRetail = true;
+            });
+
+            const tAlnum = pClean.replace(/[^a-z0-9]/g, '');
+            const bAlnum = bClean.replace(/[^a-z0-9]/g, '');
+            let isNameMatch = Boolean(bAlnum && tAlnum && (tAlnum.includes(bAlnum) || bAlnum.includes(tAlnum)));
+
+            if (!isNameMatch) {
+              const stopWords = new Set(["direct", "debit", "dd", "payment", "pymt", "transfer", "standing", "order", "so", "faster", "fps", "card", "purchase", "pos", "the", "ltd", "limited", "uk", "plc", "co", "bill", "auth", "recurring"]);
+              const bTokens = bClean.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
+              const tTokens = pClean.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w));
+              if (bTokens.some(tok => tTokens.includes(tok) || (tok.length >= 3 && pClean.includes(tok)))) {
+                isNameMatch = true;
+              } else {
+                bTokens.forEach(tok => {
+                  if (BILL_DOMAIN_ALIASES[tok] && BILL_DOMAIN_ALIASES[tok].some(alias => pClean.includes(alias))) {
+                    isNameMatch = true;
+                  }
+                });
+              }
+            }
+
+            let isDateClose = true;
+            if (targetDateStr && t.booking_date) {
+              const targetTime = new Date(targetDateStr).getTime();
+              const tTime = new Date(t.booking_date).getTime();
+              const dayDiff = Math.abs(tTime - targetTime) / (1000 * 60 * 60 * 24);
+              isDateClose = dayDiff <= 15;
+            }
+
             const isCurrentMatch = (isRecurring || Boolean(targetDateStr))
-              ? Boolean(targetDateStr && t.booking_date && t.booking_date.startsWith(targetDateStr) && (t.matched_bill_id === desc || item?.matched_txn_id === t.transaction_id))
+              ? Boolean(targetDateStr && t.booking_date && t.booking_date.startsWith(targetDateStr) && (t.matched_bill_id === desc || (cleanDesc && (t.matched_bill_id || '').toLowerCase().replace(/[^a-z0-9]/g, '').includes(cleanDesc)) || item?.matched_txn_id === t.transaction_id || (t.matched_bill_source_idx !== undefined && sourceIdx !== undefined && t.matched_bill_source_idx === sourceIdx)))
               : (item?.matched_txn_id === t.transaction_id);
+
+            const isRecMatch = !isCurrentMatch && (
+              (isNameMatch && isAmtMatch) ||
+              (isNameMatch && isDateClose) ||
+              (isAmtMatch && isDateClose && !isRetail)
+            );
 
             return `
               <div class="bill-match-row" data-search="${tPayee.toLowerCase()} ${t.account_name || ''} ${tAmt}" style="display:flex; justify-content:space-between; align-items:center; gap:8px; padding:6px 8px; border-radius:4px; background:${isCurrentMatch ? 'rgba(16,185,129,0.18)' : (isRecMatch ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.03)')}; border:1px solid ${isCurrentMatch ? 'var(--green)' : (isRecMatch ? 'rgba(56,189,248,0.3)' : 'transparent')};">

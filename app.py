@@ -795,6 +795,162 @@ def calculate_month_schedule_py(year: int, month_idx: int, settings: dict, month
         'month_name': MONTH_NAMES[month_idx]
     }
 
+def get_recurring_for_week_py(recurring_items: list, week_obj: dict, settings: dict, year: int) -> list:
+    w_start = week_obj['start_date']
+    w_end = week_obj['end_date']
+    country = settings.get('bank_holiday_country', 'uk_ew')
+    hols = get_bank_holidays_py(year, country) + get_bank_holidays_py(year - 1, country) + get_bank_holidays_py(year + 1, country)
+    occurrences = []
+
+    for r_idx, r in enumerate(recurring_items or []):
+        try:
+            amt = float(r.get("amount") or 0.0)
+        except Exception:
+            amt = 0.0
+        if amt <= 0:
+            continue
+
+        start_str = r.get("start_date")
+        if start_str:
+            try:
+                start_date = datetime.date.fromisoformat(start_str[:10])
+            except Exception:
+                start_date = datetime.date(year, 1, 1)
+        else:
+            start_date = datetime.date(year, 1, 1)
+
+        end_str = r.get("end_date")
+        end_date = None
+        if end_str:
+            try:
+                end_date = datetime.date.fromisoformat(end_str[:10])
+            except Exception:
+                end_date = None
+
+        if w_start < start_date and w_end < start_date:
+            continue
+        if end_date and w_start > end_date:
+            continue
+
+        freq = r.get("frequency") or "monthly"
+        try:
+            interval_n = max(1, int(r.get("interval_n") or 1))
+        except Exception:
+            interval_n = 1
+        is_income = bool(r.get("is_income"))
+        holiday_rule = r.get("holiday_rule") or ("previous" if is_income else "following")
+
+        if freq in ["weekly", "biweekly", "four_weekly", "custom_weeks"]:
+            step_weeks = 1 if freq == "weekly" else (2 if freq == "biweekly" else (4 if freq == "four_weekly" else interval_n))
+            diff_days = (w_start - start_date).days
+            diff_weeks = round(diff_days / 7)
+            if diff_weeks >= 0 and diff_weeks % step_weeks == 0:
+                occ_date = w_start
+                occ_iso = occ_date.isoformat()
+                occurrences.append({
+                    **r,
+                    "is_recurring": True,
+                    "is_income": is_income,
+                    "source_type": r.get("source_type") or ("recurring_income" if is_income else "recurring_payment"),
+                    "source_idx": r_idx,
+                    "desc": r.get("desc") or r.get("name") or "",
+                    "amount": amt,
+                    "actual_payment_date": occ_date,
+                    "actual_date_iso": occ_iso,
+                    "due_day": occ_date.day,
+                    "raw_target": r,
+                    "is_recurring_occ": True
+                })
+        elif freq in ["monthly", "quarterly", "custom_months"]:
+            step_months = 1 if freq == "monthly" else (3 if freq == "quarterly" else interval_n)
+            try:
+                due_day = int(r.get("day_of_month") or start_date.day or 1)
+            except Exception:
+                due_day = 1
+
+            test_candidates = [
+                (w_start.year, w_start.month),
+                (w_end.year, w_end.month)
+            ]
+            seen_ym = set()
+            for cand_y, cand_m in test_candidates:
+                if (cand_y, cand_m) in seen_ym:
+                    continue
+                seen_ym.add((cand_y, cand_m))
+
+                if cand_m in [1, 3, 5, 7, 8, 10, 12]:
+                    m_days = 31
+                elif cand_m in [4, 6, 9, 11]:
+                    m_days = 30
+                else:
+                    m_days = 29 if (cand_y % 4 == 0 and (cand_y % 100 != 0 or cand_y % 400 == 0)) else 28
+
+                test_date = datetime.date(cand_y, cand_m, min(due_day, m_days))
+                actual_pay_date = get_adjusted_working_day_py(test_date, holiday_rule, hols)
+
+                if w_start <= actual_pay_date <= w_end:
+                    diff_months = (cand_y - start_date.year) * 12 + (cand_m - start_date.month)
+                    if diff_months >= 0 and diff_months % step_months == 0:
+                        occ_iso = actual_pay_date.isoformat()
+                        occurrences.append({
+                            **r,
+                            "is_recurring": True,
+                            "is_income": is_income,
+                            "source_type": r.get("source_type") or ("recurring_income" if is_income else "recurring_payment"),
+                            "source_idx": r_idx,
+                            "desc": r.get("desc") or r.get("name") or "",
+                            "amount": amt,
+                            "actual_payment_date": actual_pay_date,
+                            "actual_date_iso": occ_iso,
+                            "due_day": actual_pay_date.day,
+                            "raw_target": r,
+                            "is_recurring_occ": True
+                        })
+        elif freq == "yearly":
+            due_month_str = r.get("month")
+            due_month = 1
+            if due_month_str:
+                for idx_m, mn in enumerate(MONTH_NAMES):
+                    if mn.lower().startswith(str(due_month_str).lower()[:3]):
+                        due_month = idx_m + 1
+                        break
+            else:
+                due_month = start_date.month
+
+            try:
+                due_day = int(r.get("day_of_month") or r.get("due_day") or start_date.day or 1)
+            except Exception:
+                due_day = 1
+
+            for cand_y in {year, w_start.year, w_end.year}:
+                if due_month in [1, 3, 5, 7, 8, 10, 12]:
+                    m_days = 31
+                elif due_month in [4, 6, 9, 11]:
+                    m_days = 30
+                else:
+                    m_days = 29 if (cand_y % 4 == 0 and (cand_y % 100 != 0 or cand_y % 400 == 0)) else 28
+
+                test_date = datetime.date(cand_y, due_month, min(due_day, m_days))
+                actual_pay_date = get_adjusted_working_day_py(test_date, holiday_rule, hols)
+                if w_start <= actual_pay_date <= w_end:
+                    occ_iso = actual_pay_date.isoformat()
+                    occurrences.append({
+                        **r,
+                        "is_recurring": True,
+                        "is_income": is_income,
+                        "source_type": r.get("source_type") or ("recurring_income" if is_income else "recurring_payment"),
+                        "source_idx": r_idx,
+                        "desc": r.get("desc") or r.get("name") or "",
+                        "amount": amt,
+                        "actual_payment_date": actual_pay_date,
+                        "actual_date_iso": occ_iso,
+                        "due_day": actual_pay_date.day,
+                        "raw_target": r,
+                        "is_recurring_occ": True
+                    })
+
+    return occurrences
+
 def detect_current_month_and_week_py(data: dict, today: datetime.date = None) -> tuple:
     if today is None:
         today = datetime.date.today()
@@ -2662,6 +2818,16 @@ def reconcile_transactions_and_bills(data):
     """Retroactively reconciles all open banking and imported transactions with scheduled bills & direct debits."""
     all_txns = data.get("open_banking_transactions", [])
     if not all_txns:
+        cur_y = str(data.get("current_year", datetime.date.today().year))
+        all_txns = data.get("years", {}).get(cur_y, {}).get("open_banking_transactions", [])
+        if not all_txns:
+            for y_obj in data.get("years", {}).values():
+                if isinstance(y_obj, dict) and y_obj.get("open_banking_transactions"):
+                    all_txns = y_obj.get("open_banking_transactions")
+                    break
+        if all_txns:
+            data["open_banking_transactions"] = all_txns
+    if not all_txns:
         return 0
 
     month_names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -2678,30 +2844,50 @@ def reconcile_transactions_and_bills(data):
     # Reset auto_cleared status for non-manually-cleared items so reconciliation evaluates cleanly
     for y_key, y_val in data.get("years", {}).items():
         if isinstance(y_val, dict):
-            for r in (y_val.get("recurring_payments", []) + y_val.get("recurring_incomes", []) + y_val.get("yearly_recurring", []) + y_val.get("yearly_income", [])):
+            # Yearly items
+            for r in (y_val.get("yearly_recurring", []) + y_val.get("yearly_income", [])):
                 if not r.get("manually_cleared"):
-                    if r.get("auto_cleared"):
+                    if r.get("auto_cleared") or r.get("matched_txn_id") or r.get("matched_date") or r.get("matched_amount"):
                         r["status"] = "due"
                         r["auto_cleared"] = False
                         r["matched_txn_id"] = None
                         r["matched_date"] = None
+                        r["matched_amount"] = None
                         r["matched_payee"] = None
-                        r["cleared_dates"] = []
+
+            # Recurring items: preserve manually cleared / manually linked dates, clear auto-cleared dates
+            rec_list = y_val.get("recurring_payments", []) + y_val.get("recurring_incomes", [])
+            for r_idx, r in enumerate(rec_list):
+                preserved_dates = set(r.get("manually_cleared_dates", []))
+                for t in all_txns:
+                    if t.get("manually_linked") and (t.get("matched_bill_id") == r.get("desc") or t.get("matched_bill_id") == r.get("name") or t.get("matched_bill_source_idx") == r_idx):
+                        if t.get("booking_date"):
+                            preserved_dates.add(t.get("booking_date")[:10])
+                r["auto_cleared"] = False
+                r["matched_txn_id"] = None
+                r["matched_date"] = None
+                r["matched_amount"] = None
+                r["matched_payee"] = None
+                r["cleared_dates"] = list(preserved_dates)
+
             for m_key, m_val in y_val.get("months", {}).items():
-                if isinstance(m_val, dict):
+                if isinstance(m_val, dict) and m_key != "Bills":
                     for d in (m_val.get("direct_debits", []) + m_val.get("payments_in", []) + m_val.get("scheduled_items", [])):
                         if not d.get("manually_cleared"):
-                            if d.get("auto_cleared"):
+                            if d.get("auto_cleared") or d.get("matched_txn_id") or d.get("matched_date") or d.get("matched_amount"):
                                 d["status"] = "due"
                                 d["auto_cleared"] = False
                                 d["matched_txn_id"] = None
                                 d["matched_date"] = None
+                                d["matched_amount"] = None
                                 d["matched_payee"] = None
                                 d["cleared_dates"] = []
 
     for t in all_txns:
         if t.get("auto_cleared") and not t.get("manually_linked"):
             t["matched_bill_id"] = None
+            t["matched_bill_type"] = None
+            t["matched_budget_category"] = None
             t["auto_cleared"] = False
 
     settings = data.get("settings", {})
@@ -2736,7 +2922,15 @@ def reconcile_transactions_and_bills(data):
     }
 
     def is_valid_bill_match(b_name, b_amt, b_due_day, t_payee, t_amt, t_day, is_same_month):
-        if abs(t_amt - b_amt) > 0.05:
+        if not is_same_month:
+            return False
+
+        if round(abs(t_amt - b_amt), 2) > 0.05:
+            return False
+
+        # Due day proximity: direct debits / scheduled bills must fall within +/- 7 days of due day
+        day_diff = min(abs(t_day - b_due_day), abs(t_day - (b_due_day + 30)), abs((t_day + 30) - b_due_day))
+        if day_diff > 7:
             return False
 
         p_clean = t_payee.lower()
@@ -2766,14 +2960,16 @@ def reconcile_transactions_and_bills(data):
         if is_retail:
             return False
 
-        # Non-name match only for distinct, non-round amounts matching due date in same budget month
-        is_round_small = (t_amt <= 50.0 and (t_amt % 5 == 0 or (t_amt % 1 == 0 and t_amt <= 25.0)))
-        if not is_round_small and is_same_month:
-            day_diff = abs(t_day - (b_due_day or 1))
-            if day_diff <= 4 or day_diff >= 27:
-                return True
-
         return False
+
+    # Pre-populate matched bill keys for manually linked transactions
+    for t in all_txns:
+        if t.get("manually_linked") and t.get("booking_date"):
+            occ_iso = t.get("booking_date")[:10]
+            b_type = t.get("matched_bill_type")
+            if b_type in ["recurring_payment", "recurring_income"]:
+                s_idx = t.get("matched_bill_source_idx") if t.get("matched_bill_source_idx") is not None else t.get("matched_bill_id")
+                matched_bill_keys.add(f"rec_{b_type}_{s_idx}_{occ_iso}")
 
     # Sort transactions chronologically so historical months match sequentially
     sorted_txns = sorted(
@@ -2783,6 +2979,9 @@ def reconcile_transactions_and_bills(data):
     )
 
     for t in sorted_txns:
+        if t.get("manually_linked"):
+            continue
+
         raw_amt = float(t.get("amount", 0.0))
         t_amt = abs(raw_amt)
         if t_amt < 0.01:
@@ -2791,37 +2990,51 @@ def reconcile_transactions_and_bills(data):
 
         t_payee = f"{t.get('payee_name') or ''} {t.get('raw_info') or ''} {t.get('merchant_name') or ''} {t.get('description') or ''}".strip()
         t_date_str = t.get("booking_date", "")
+        if not t_date_str:
+            continue
 
         target_m_name = None
         target_year_str = current_year_str
         t_day = 15
-        if t_date_str:
-            try:
-                dt = datetime.date.fromisoformat(t_date_str[:10])
-                target_year_str = str(dt.year)
-                t_day = dt.day
-                target_m_name, _ = detect_current_month_and_week_py(data, dt)
-            except Exception:
-                pass
+        dt = None
+        try:
+            dt = datetime.date.fromisoformat(t_date_str[:10])
+            target_year_str = str(dt.year)
+            t_day = dt.day
+            target_m_name, _ = detect_current_month_and_week_py(data, dt)
+        except Exception:
+            continue
 
         year_data = data.get("years", {}).get(target_year_str, {})
         if not year_data:
             year_data = data.get("years", {}).get(current_year_str, {})
+        if not year_data:
+            continue
         months_map = year_data.get("months", {})
 
-        # Order search months prioritizing target_m_name
-        search_months = []
-        if target_m_name and target_m_name in months_map:
-            search_months.append(target_m_name)
-        else:
-            search_months = list(months_map.keys())
+        # STRICT: Only search the exact budget month this transaction belongs to!
+        # NEVER search future months, NEVER search 'Bills' template tab!
+        if not target_m_name or target_m_name == "Bills" or target_m_name not in months_map:
+            continue
 
+        search_months = [target_m_name]
         matched_this_txn = False
 
         for m_name in search_months:
             if matched_this_txn:
                 break
             m_data = months_map.get(m_name, {})
+
+            recurring_payment_occurrences = []
+            recurring_income_occurrences = []
+            if m_name in MONTH_NAMES:
+                target_m_idx = MONTH_NAMES.index(m_name)
+                sched = calculate_month_schedule_py(int(target_year_str), target_m_idx, settings, m_data)
+                for w in sched.get("weeks", []):
+                    p_occs = get_recurring_for_week_py(year_data.get("recurring_payments", []) or data.get("settings", {}).get("recurring_payments", []), w, settings, int(target_year_str))
+                    recurring_payment_occurrences.extend(p_occs)
+                    i_occs = get_recurring_for_week_py(year_data.get("recurring_incomes", []) or data.get("settings", {}).get("recurring_incomes", []), w, settings, int(target_year_str))
+                    recurring_income_occurrences.extend(i_occs)
 
             budget_items = []
             for b_idx, b_obj in enumerate(year_data.get("yearly_budgets", [])):
@@ -2864,8 +3077,8 @@ def reconcile_transactions_and_bills(data):
                 ("scheduled_item", False, m_data.get("scheduled_items", [])),
                 ("yearly_recurring", False, [b for b in year_data.get("yearly_recurring", []) if not b.get("month") or b.get("month") == m_name]),
                 ("yearly_income", True, [b for b in year_data.get("yearly_income", []) if not b.get("month") or b.get("month") == m_name]),
-                ("recurring_payment", False, year_data.get("recurring_payments", [])),
-                ("recurring_income", True, year_data.get("recurring_incomes", [])),
+                ("recurring_payment", False, recurring_payment_occurrences),
+                ("recurring_income", True, recurring_income_occurrences),
                 ("budget_bill", False, budget_items),
                 ("birthday", False, birthday_items)
             ]
@@ -2877,23 +3090,21 @@ def reconcile_transactions_and_bills(data):
                 if t_is_income != is_inc_coll:
                     continue
 
-                is_recurring_type = (b_type in ["recurring_payment", "recurring_income"])
+                is_recurring_occ = bool(b_type in ["recurring_payment", "recurring_income"])
                 occ_iso = t_date_str[:10] if t_date_str else ""
 
                 for idx, b in enumerate(b_list or []):
                     b_name = b.get("desc") or b.get("name") or ""
-                    if is_recurring_type:
-                        b_key = f"rec_{b.get('id') or b_name}_{m_name}_{occ_iso}"
+                    this_occ_iso = b.get("actual_date_iso") if is_recurring_occ else occ_iso
+                    if is_recurring_occ:
+                        b_key = f"rec_{b_type}_{b.get('source_idx', idx)}_{this_occ_iso}"
                     else:
                         b_key = b.get("id") or f"{target_year_str}_{m_name}_{b_type}_{idx}"
 
                     if b_key in matched_bill_keys:
                         continue
 
-                    if is_recurring_type and occ_iso and (occ_iso in b.get("cleared_dates", [])):
-                        matched_bill_keys.add(b_key)
-                        continue
-                    elif not is_recurring_type and b.get("manually_cleared"):
+                    if not is_recurring_occ and b.get("manually_cleared"):
                         matched_bill_keys.add(b_key)
                         continue
 
@@ -2901,11 +3112,36 @@ def reconcile_transactions_and_bills(data):
                     b_due_day = int(b.get("due_day") or b.get("day_of_month") or 1)
                     is_same_month = (target_m_name == m_name)
 
+                    if is_recurring_occ:
+                        occ_date = b.get("actual_payment_date")
+                        if isinstance(occ_date, str):
+                            try:
+                                occ_date = datetime.date.fromisoformat(occ_date[:10])
+                            except Exception:
+                                occ_date = None
+                        if occ_date and dt:
+                            diff_days = abs((dt - occ_date).days)
+                            if diff_days > 4:
+                                continue
+                    else:
+                        day_diff = min(abs(t_day - b_due_day), abs(t_day - (b_due_day + 30)), abs((t_day + 30) - b_due_day))
+                        if day_diff > 7:
+                            continue
+
                     if is_valid_bill_match(b_name, b_amt, b_due_day, t_payee, t_amt, t_day, is_same_month):
-                        if is_recurring_type:
-                            b_cleared_dates = b.setdefault("cleared_dates", [])
-                            if occ_iso and occ_iso not in b_cleared_dates:
-                                b_cleared_dates.append(occ_iso)
+                        if is_recurring_occ:
+                            raw_target = b.get("raw_target")
+                            if raw_target is not None:
+                                raw_cleared = raw_target.setdefault("cleared_dates", [])
+                                if this_occ_iso and this_occ_iso not in raw_cleared:
+                                    raw_cleared.append(this_occ_iso)
+                                raw_target["matched_txn_id"] = t.get("transaction_id")
+                                raw_target["matched_date"] = t_date_str
+                                raw_target["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
+                                raw_target["status"] = "paid"
+                                raw_target["auto_cleared"] = True
+                            b["status"] = "paid"
+                            b["auto_cleared"] = True
                             b["matched_txn_id"] = t.get("transaction_id")
                             b["matched_date"] = t_date_str
                             b["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
@@ -2916,27 +3152,28 @@ def reconcile_transactions_and_bills(data):
                             b["matched_date"] = t_date_str
                             b["matched_amount"] = t_amt
                             b["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
-                            if occ_iso:
+                            if this_occ_iso:
                                 b_cleared_dates = b.setdefault("cleared_dates", [])
-                                if occ_iso not in b_cleared_dates:
-                                    b_cleared_dates.append(occ_iso)
+                                if this_occ_iso not in b_cleared_dates:
+                                    b_cleared_dates.append(this_occ_iso)
 
-                        # Also sync to underlying raw_target if this was a budget/birthday transaction
-                        raw_target = b.get("raw_target")
-                        if raw_target is not None:
+                        if b.get("raw_target") and not is_recurring_occ:
+                            raw_target = b.get("raw_target")
                             raw_target["status"] = "paid"
                             raw_target["auto_cleared"] = True
                             raw_target["matched_txn_id"] = t.get("transaction_id")
                             raw_target["matched_date"] = t_date_str
                             raw_target["matched_amount"] = t_amt
                             raw_target["matched_payee"] = t.get("payee_name") or t.get("merchant_name")
-                            if occ_iso:
+                            if this_occ_iso:
                                 raw_cleared = raw_target.setdefault("cleared_dates", [])
-                                if occ_iso not in raw_cleared:
-                                    raw_cleared.append(occ_iso)
+                                if this_occ_iso not in raw_cleared:
+                                    raw_cleared.append(this_occ_iso)
 
                         t["matched_bill_id"] = b_name
                         t["matched_bill_type"] = b_type
+                        t["matched_bill_source_idx"] = b.get("source_idx")
+                        t["matched_bill_date"] = this_occ_iso
                         if b.get("budget_category"):
                             t["matched_budget_category"] = b["budget_category"]
                         t["auto_cleared"] = True

@@ -5,6 +5,20 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-09-30
+
+### Fixed & Enhanced
+- **Open Banking Transaction Matching & Reconciliation Overhaul**:
+  - **Occurrence Expansion by Week & Date**: Reconciles recurring direct debits and recurring incomes against actual calendar occurrences generated per budget week (`getRecurringForWeek` in frontend JS and `get_recurring_for_week_py` in Python backend) rather than evaluating static unexpanded master lists.
+  - **Unique Occurrence Collision Keys**: Keyed recurring occurrences with distinct stream indices and ISO occurrence dates (`rec_${type}_${source_idx}_${occ_iso}`), preventing match collision and cross-stream stealing when multiple items share descriptions (e.g. multiple 4-weekly Child Benefit streams).
+  - **True Calendar-Day Proximity**: Switched recurring proximity comparison to true calendar day differences (`Math.abs(dt - occDate) <= 4 days`), eliminating cross-week drift previously caused by day-of-month comparisons.
+  - **Independent Manual & Auto-Cleared Resets**: Reconcile reset cycle cleanly clears auto-cleared occurrences while strictly preserving `manually_cleared_dates` and manual transaction links.
+  - **Root & Year Storage Fallback**: Reconcile engines in both JS and Python now seamlessly discover `open_banking_transactions` whether stored at root or nested under `years[year]`.
+- **Bill Match Modal & UI Stability**:
+  - Fixed `ReferenceError: isRecMatch is not defined` when opening the Manual Bill Match modal by restoring and refining suggested match heuristics (`isRecMatch`) with domain aliases, retail exclusions, and date proximity.
+  - Enhanced `isCurrentMatch` to verify `source_idx` and target occurrence dates.
+  - Fixed local date string formatting in Overview scheduled items with `formatLocalDateToISO`.
+
 ## [0.4.2] - 2026-09-16
 
 ### Fixed & Enhanced

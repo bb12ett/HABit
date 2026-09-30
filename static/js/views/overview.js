@@ -13,7 +13,7 @@ function formatCheckInTimestamp(isoStr) {
 }
 
 import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, isAccountTrackedWeekly, isAccountIncludedInNet, getAllScheduledBills, getAllScheduledIncomes, getAllScheduledItems, months, isMultiUserEnabled, isPersonSalaryHidden, getAccountOwner, isUserUnlocked, hasPersonPin, getActiveUser, isAccountVisibleToActiveUser } from '../state.js';
-import { calculateMonthSchedule, calculateLiveDailyPacing, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek, getDeductionSalaryForMonth, getPaydaysForSchedule } from '../calculations.js';
+import { calculateMonthSchedule, calculateLiveDailyPacing, getDDsForWeek, getIncomesForWeek, getYearlyBudgetItemsForMonth, getBirthdayItemsForMonth, getBirthdaysForWeek, getBirthdayOccasionsForWeek, getRecurringForWeek, isRecurringDueInMonth, formatScheduledBillDue, detectCurrentMonthAndWeek, getDeductionSalaryForMonth, getPaydaysForSchedule, formatLocalDateToISO } from '../calculations.js';
 
 export function renderOverviewView(container) {
   const cfg = getSettings();
@@ -787,7 +787,7 @@ export function renderOverviewView(container) {
                               <div style="font-size:10px; font-weight:bold; color:var(--curr-border); text-transform:uppercase; margin-bottom:3px;">📅 Scheduled Items:</div>
                               ${colIncomes.map((i, iIdx) => {
                                 const holidayBadge = i.holiday_rule === 'previous' ? '<span title="Previous working day (e.g. Friday)" style="font-size:9px; opacity:0.8;">⬅️</span>' : (i.holiday_rule === 'following' ? '<span title="Following working day (e.g. Monday)" style="font-size:9px; opacity:0.8;">➡️</span>' : '<span title="Exact date" style="font-size:9px; opacity:0.8;">⏸️</span>');
-                                const occDateStr = i.actualPaymentDate ? new Date(i.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const occDateStr = formatLocalDateToISO(i.actualPaymentDate);
                                 const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income' || i.source_type === 'recurring_payment');
                                 const isCleared = isRecurring ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)) : Boolean(i.auto_cleared || i.status === 'paid' || (i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr)));
                                 const pDate = i.actualPaymentDate ? new Date(i.actualPaymentDate) : null;
@@ -807,7 +807,7 @@ export function renderOverviewView(container) {
                                 }
                               }).join('')}
                               ${colDDs.map((d, dIdx) => {
-                                const occDateStr = d.actualPaymentDate ? new Date(d.actualPaymentDate).toISOString().slice(0, 10) : '';
+                                const occDateStr = formatLocalDateToISO(d.actualPaymentDate);
                                 const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_income' || d.source_type === 'recurring_payment');
                                 const isCleared = isRecurring ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)) : Boolean(d.auto_cleared || d.status === 'paid' || (d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr)));
                                 const pDate = d.actualPaymentDate ? new Date(d.actualPaymentDate) : null;

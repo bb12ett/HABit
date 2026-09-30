@@ -1,5 +1,24 @@
 import { appState, getSettings, getYearData, getMonthData, getWeekItems, getWeekActuals, getAccountConfig, months, isAccountTrackedWeekly, isAccountIncludedInNet, getCurrentPeriodMonthAndYear, getMasterYearlyBudgets } from './state.js';
 
+export function formatLocalDateToISO(d) {
+  if (!d) return '';
+  if (typeof d === 'string') {
+    if (/^\d{4}-\d{2}-\d{2}/.test(d)) {
+      return d.slice(0, 10);
+    }
+    d = new Date(d);
+  }
+  if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+if (typeof window !== 'undefined') {
+  window.formatLocalDateToISO = formatLocalDateToISO;
+}
+
 export function getEaster(year) {
   const f = Math.floor,
         G = year % 19,
@@ -1469,11 +1488,23 @@ export function getYearlyBudgetItemsForMonth(mName, mIdx, year = appState.curren
 }
 
 
-export function detectCurrentMonthAndWeek(year = null) {
-  const now = new Date();
-  const realCurrentYear = now.getFullYear();
-  const y = (year !== null && year !== undefined) ? parseInt(year, 10) : realCurrentYear;
-  const nowMs = now.getTime();
+export function detectCurrentMonthAndWeek(targetDateOrYear = null, optYear = null) {
+  let targetDate = new Date();
+  let targetYear = null;
+
+  if (targetDateOrYear instanceof Date) {
+    targetDate = targetDateOrYear;
+    targetYear = optYear || targetDate.getFullYear();
+  } else if (typeof targetDateOrYear === 'string' && (targetDateOrYear.includes('-') || targetDateOrYear.includes('/'))) {
+    targetDate = new Date(targetDateOrYear.includes('T') ? targetDateOrYear : targetDateOrYear + 'T12:00:00');
+    targetYear = optYear || targetDate.getFullYear();
+  } else if (targetDateOrYear !== null && targetDateOrYear !== undefined) {
+    targetYear = parseInt(targetDateOrYear, 10);
+  }
+
+  const realCurrentYear = targetDate.getFullYear();
+  const y = (targetYear !== null && targetYear !== undefined) ? parseInt(targetYear, 10) : realCurrentYear;
+  const targetMs = targetDate.getTime();
   const cfg = getSettings();
   const pDay = cfg.payday_day || 26;
   const country = cfg.bank_holiday_country || 'uk_ew';
@@ -1483,12 +1514,12 @@ export function detectCurrentMonthAndWeek(year = null) {
     const sTime = new Date(sched.startDate.getFullYear(), sched.startDate.getMonth(), sched.startDate.getDate(), 0, 0, 0).getTime();
     const eTime = new Date(sched.endDate.getFullYear(), sched.endDate.getMonth(), sched.endDate.getDate(), 23, 59, 59).getTime();
 
-    if (nowMs >= sTime && nowMs <= eTime) {
+    if (targetMs >= sTime && targetMs <= eTime) {
       let matchedWeek = sched.weeks[0]?.name || 'Week 1';
       for (let w of sched.weeks) {
         const ws = new Date(w.startDate.getFullYear(), w.startDate.getMonth(), w.startDate.getDate(), 0, 0, 0).getTime();
         const we = new Date(w.endDate.getFullYear(), w.endDate.getMonth(), w.endDate.getDate(), 23, 59, 59).getTime();
-        if (nowMs >= ws && nowMs <= we) {
+        if (targetMs >= ws && targetMs <= we) {
           matchedWeek = w.name;
           break;
         }
@@ -1497,9 +1528,13 @@ export function detectCurrentMonthAndWeek(year = null) {
     }
   }
 
-  const curMonthIdx = now.getMonth();
+  const curMonthIdx = targetDate.getMonth();
   const sched = calculateMonthSchedule(y, curMonthIdx, pDay, country);
   return { month: months[curMonthIdx], monthIdx: curMonthIdx, week: 'Week 1', schedule: sched };
+}
+
+if (typeof window !== 'undefined') {
+  window.detectCurrentMonthAndWeek = detectCurrentMonthAndWeek;
 }
 
 
@@ -1746,7 +1781,7 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
       
       if (diffWeeks >= 0 && diffWeeks % stepWeeks === 0) {
         const occDate = weekObj.startDate;
-        const occIso = occDate.toISOString().slice(0, 10);
+        const occIso = formatLocalDateToISO(occDate);
         const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
         occurrences.push({
           ...r,
@@ -1795,7 +1830,7 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
         if (payTime >= wStartTime && payTime <= wEndTime) {
           const diffMonths = (cand.y - startDate.getFullYear()) * 12 + (cand.m - startDate.getMonth());
           if (diffMonths >= 0 && diffMonths % stepMonths === 0) {
-            const occIso = actualPayDate.toISOString().slice(0, 10);
+            const occIso = formatLocalDateToISO(actualPayDate);
             const isOccCleared = Boolean(r.cleared_dates && r.cleared_dates.includes(occIso));
             occurrences.push({
               ...r,
@@ -1837,7 +1872,7 @@ export function getRecurringForWeek(recurringItems, weekObj, monthSchedule, year
         const payTime = actualPayDate.getTime();
 
         if (payTime >= wStartTime && payTime <= wEndTime) {
-          const occIso = actualPayDate.toISOString().slice(0, 10);
+          const occIso = formatLocalDateToISO(actualPayDate);
           const isOccCleared = Boolean(r.status === 'paid' || r.auto_cleared || (r.cleared_dates && r.cleared_dates.includes(occIso)));
           occurrences.push({
             ...r,
@@ -1892,14 +1927,53 @@ if (typeof window !== 'undefined') {
   window.detectBudgetCategory = detectBudgetCategory;
 }
 
+export const RETAIL_STOP_MERCHANTS = new Set([
+  "schuh", "zara", "primark", "h&m", "hm", "next", "boots", "superdrug", "clarks", "jd sports", "sports direct",
+  "greggs", "costa", "starbucks", "mcdonald", "kfc", "subway", "burger king", "nandos", "pret", "caffe nero",
+  "tesco", "sainsbury", "asda", "morrison", "aldi", "lidl", "co-op", "coop", "waitrose", "iceland", "marks & spencer", "m&s",
+  "b&m", "home bargains", "wilko", "poundland", "savers", "tk maxx", "argos", "currys", "ikea", "b&q", "wickes", "screwfix", "toolstation",
+  "pub", "inn", "bar", "tavern", "arms", "restaurant", "bistro", "bakery", "cafe", "coffee", "cinema", "vue", "odeon", "cineworld",
+  "deliveroo", "just eat", "uber eats", "amazon", "ebay", "etsy", "shein", "temu"
+]);
+
+export const BILL_DOMAIN_ALIASES = {
+  "council": ["council", "district", "borough", "lincolnshire", "yorkshire", "lancashire", "cheshire", "derbyshire", "nottinghamshire", "staffordshire", "warwickshire", "leicestershire", "northamptonshire", "gloucestershire", "somerset", "devon", "cornwall", "dorset", "wiltshire", "hampshire", "surrey", "sussex", "kent", "essex", "hertfordshire", "bedfordshire", "buckinghamshire", "oxfordshire", "berkshire", "norfolk", "suffolk", "cambridgeshire", "city of", "metropolitan", "unitary", "local authority", "civic", "ctax", "c tax"],
+  "tax": ["council", "district", "borough", "lincolnshire", "yorkshire", "hmrc", "revenue", "customs", "dvla"],
+  "tv": ["tv licensing", "tv licence", "tvl", "bbc", "television licence", "tvlicense"],
+  "licence": ["tv licensing", "tv licence", "tvl", "bbc", "dvla"],
+  "energy": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita", "shell energy", "sse", "so energy"],
+  "gas": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita"],
+  "water": ["water", "severn trent", "thames water", "anglian water", "united utilities", "yorkshire water", "southern water", "wessex water", "south west water", "northumbrian water", "welsh water", "hafra drenau"],
+  "broadband": ["bt", "bt group", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "community fibre", "ee"],
+  "phone": ["ee", "o2", "three", "vodafone", "giffgaff", "tesco mobile", "sky mobile", "id mobile", "smarty", "voxi", "lebara", "lyca"],
+  "internet": ["bt", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "ee"],
+  "mortgage": ["nationwide", "santander", "halifax", "barclays", "hsbc", "lloyds", "natwest", "tsb", "yorkshire building", "coventry building", "skipton"],
+  "rent": ["property", "estate", "lettings", "landlord", "housing", "residential", "homes", "tenancy"],
+  "insurance": ["admiral", "aviva", "direct line", "hastings", "churchill", "lv=", "liverpool victoria", "axa", "more than", "sheilas wheels", "esure", "privilege", "aig", "vitality", "bupa", "axa ppp"],
+  "breakdown": ["rac", "the aa", "aa breakdown", "green flag", "autoaid"]
+};
+
 export function reconcileTransactionsWithScheduledBills(data) {
-  if (!data || !data.open_banking_transactions || !Array.isArray(data.open_banking_transactions)) return 0;
-  const txns = data.open_banking_transactions;
-  if (txns.length === 0) return 0;
+  let txns = data && data.open_banking_transactions;
+  if (!txns || !Array.isArray(txns) || txns.length === 0) {
+    if (data && data.years) {
+      const curY = String(data.current_year || new Date().getFullYear());
+      if (data.years[curY] && Array.isArray(data.years[curY].open_banking_transactions) && data.years[curY].open_banking_transactions.length > 0) {
+        txns = data.years[curY].open_banking_transactions;
+      } else {
+        for (const y of Object.values(data.years)) {
+          if (y && Array.isArray(y.open_banking_transactions) && y.open_banking_transactions.length > 0) {
+            txns = y.open_banking_transactions;
+            break;
+          }
+        }
+      }
+    }
+  }
+  if (!txns || !Array.isArray(txns) || txns.length === 0) return 0;
+  if (!data.open_banking_transactions) data.open_banking_transactions = txns;
 
   const cfg = data.settings || {};
-  const pdayDay = parseInt(cfg.payday_day || 26, 10);
-  const payFreq = cfg.pay_frequency || "monthly";
   const stopWords = new Set(["direct", "debit", "dd", "payment", "pymt", "transfer", "standing", "order", "so", "faster", "fps", "card", "purchase", "pos", "the", "ltd", "limited", "uk", "plc", "co", "bill", "auth", "recurring"]);
 
   function tokenize(str) {
@@ -1908,45 +1982,107 @@ export function reconcileTransactionsWithScheduledBills(data) {
     return new Set(clean.split(/\s+/).filter(w => w.length >= 2 && !stopWords.has(w)));
   }
 
-  const RETAIL_STOP_MERCHANTS = new Set([
-    "schuh", "zara", "primark", "h&m", "hm", "next", "boots", "superdrug", "clarks", "jd sports", "sports direct",
-    "greggs", "costa", "starbucks", "mcdonald", "kfc", "subway", "burger king", "nandos", "pret", "caffe nero",
-    "tesco", "sainsbury", "asda", "morrison", "aldi", "lidl", "co-op", "coop", "waitrose", "iceland", "marks & spencer", "m&s",
-    "b&m", "home bargains", "wilko", "poundland", "savers", "tk maxx", "argos", "currys", "ikea", "b&q", "wickes", "screwfix", "toolstation",
-    "pub", "inn", "bar", "tavern", "arms", "restaurant", "bistro", "bakery", "cafe", "coffee", "cinema", "vue", "odeon", "cineworld",
-    "deliveroo", "just eat", "uber eats", "amazon", "ebay", "etsy", "shein", "temu"
-  ]);
+  // Reset auto_cleared status for non-manually-cleared items so reconciliation evaluates cleanly
+  if (data.years && typeof data.years === 'object') {
+    Object.entries(data.years).forEach(([yKey, yVal]) => {
+      if (yVal && typeof yVal === 'object') {
+        // Yearly items
+        const yearly = [
+          ...(yVal.yearly_recurring || []),
+          ...(yVal.yearly_income || [])
+        ];
+        yearly.forEach(r => {
+          if (!r.manually_cleared) {
+            if (r.auto_cleared || r.matched_txn_id || r.matched_date || r.matched_amount) {
+              r.status = 'due';
+              r.auto_cleared = false;
+              r.matched_txn_id = null;
+              r.matched_date = null;
+              r.matched_amount = null;
+              r.matched_payee = null;
+            }
+          }
+        });
 
-  const BILL_DOMAIN_ALIASES = {
-    "council": ["council", "district", "borough", "lincolnshire", "yorkshire", "lancashire", "cheshire", "derbyshire", "nottinghamshire", "staffordshire", "warwickshire", "leicestershire", "northamptonshire", "gloucestershire", "somerset", "devon", "cornwall", "dorset", "wiltshire", "hampshire", "surrey", "sussex", "kent", "essex", "hertfordshire", "bedfordshire", "buckinghamshire", "oxfordshire", "berkshire", "norfolk", "suffolk", "cambridgeshire", "city of", "metropolitan", "unitary", "local authority", "civic", "ctax", "c tax"],
-    "tax": ["council", "district", "borough", "lincolnshire", "yorkshire", "hmrc", "revenue", "customs", "dvla"],
-    "tv": ["tv licensing", "tv licence", "tvl", "bbc", "television licence", "tvlicense"],
-    "licence": ["tv licensing", "tv licence", "tvl", "bbc", "dvla"],
-    "energy": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita", "shell energy", "sse", "so energy"],
-    "gas": ["british gas", "bg energy", "scottish power", "e.on", "eon", "octopus", "ovo", "edf", "bulb", "utilita"],
-    "water": ["water", "severn trent", "thames water", "anglian water", "united utilities", "yorkshire water", "southern water", "wessex water", "south west water", "northumbrian water", "welsh water", "hafra drenau"],
-    "broadband": ["bt", "bt group", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "community fibre", "ee"],
-    "phone": ["ee", "o2", "three", "vodafone", "giffgaff", "tesco mobile", "sky mobile", "id mobile", "smarty", "voxi", "lebara", "lyca"],
-    "internet": ["bt", "virgin media", "virginmedia", "sky", "talktalk", "plusnet", "vodafone", "hyperoptic", "ee"],
-    "mortgage": ["nationwide", "santander", "halifax", "barclays", "hsbc", "lloyds", "natwest", "tsb", "yorkshire building", "coventry building", "skipton"],
-    "rent": ["property", "estate", "lettings", "landlord", "housing", "residential", "homes", "tenancy"],
-    "insurance": ["admiral", "aviva", "direct line", "hastings", "churchill", "lv=", "liverpool victoria", "axa", "more than", "sheilas wheels", "esure", "privilege", "aig", "vitality", "bupa", "axa ppp"],
-    "breakdown": ["rac", "the aa", "aa breakdown", "green flag", "autoaid"]
-  };
+        // Recurring items: preserve manually cleared / manually linked dates, clear auto-cleared dates
+        const recList = [
+          ...(yVal.recurring_payments || []),
+          ...(yVal.recurring_incomes || [])
+        ];
+        recList.forEach((r, rIdx) => {
+          const preservedDates = new Set(r.manually_cleared_dates || []);
+          txns.forEach(t => {
+            if (t.manually_linked && (t.matched_bill_id === r.desc || t.matched_bill_id === r.name || t.matched_bill_source_idx === rIdx)) {
+              if (t.booking_date) preservedDates.add(t.booking_date.slice(0, 10));
+            }
+          });
+          r.auto_cleared = false;
+          r.matched_txn_id = null;
+          r.matched_date = null;
+          r.matched_amount = null;
+          r.matched_payee = null;
+          r.cleared_dates = Array.from(preservedDates);
+        });
+
+        if (yVal.months && typeof yVal.months === 'object') {
+          Object.entries(yVal.months).forEach(([mKey, mVal]) => {
+            if (mVal && typeof mVal === 'object' && mKey !== 'Bills') {
+              const bills = [
+                ...(mVal.direct_debits || []),
+                ...(mVal.payments_in || []),
+                ...(mVal.scheduled_items || [])
+              ];
+              bills.forEach(d => {
+                if (!d.manually_cleared) {
+                  if (d.auto_cleared || d.matched_txn_id || d.matched_date || d.matched_amount) {
+                    d.status = 'due';
+                    d.auto_cleared = false;
+                    d.matched_txn_id = null;
+                    d.matched_date = null;
+                    d.matched_amount = null;
+                    d.matched_payee = null;
+                    d.cleared_dates = [];
+                  }
+                }
+              });
+            }
+          });
+        }
+      }
+    });
+  }
+
+  txns.forEach(t => {
+    if (t.auto_cleared && !t.manually_linked) {
+      t.matched_bill_id = null;
+      t.matched_bill_type = null;
+      t.matched_budget_category = null;
+      t.auto_cleared = false;
+    }
+  });
 
   function isValidBillMatch(bName, bAmt, bDueDay, tPayee, tAmt, tDay, isSameMonth) {
-    if (Math.abs(tAmt - bAmt) > 0.05) return false;
+    if (!isSameMonth) return false;
+    if (Math.round(Math.abs(tAmt - bAmt) * 100) / 100 > 0.05) return false;
+
+    // Due day proximity: direct debits / scheduled bills must fall within +/- 7 days of due day
+    const dayDiff = Math.min(
+      Math.abs(tDay - bDueDay),
+      Math.abs(tDay - (bDueDay + 30)),
+      Math.abs((tDay + 30) - bDueDay)
+    );
+    if (dayDiff > 7) return false;
 
     const pClean = tPayee.toLowerCase();
-    const bClean = bName.toLowerCase();
-    
+    const bClean = bName.toLowerCase().replace(/🎯|🎁|📥/g, '').trim();
+
     let isRetail = false;
     RETAIL_STOP_MERCHANTS.forEach(m => {
       if (pClean.includes(m)) isRetail = true;
     });
 
     const tTokens = tokenize(tPayee);
-    const bTokens = tokenize(bName);
+    const bTokens = tokenize(bClean);
     let nameOverlap = false;
     bTokens.forEach(tok => { if (tTokens.has(tok)) nameOverlap = true; });
 
@@ -1976,69 +2112,116 @@ export function reconcileTransactionsWithScheduledBills(data) {
     // Retail shopping without explicit name overlap must never match bills
     if (isRetail) return false;
 
-    // Strict non-name fallback for non-round/distinct amounts aligned with expected due date
-    const isRoundSmall = (tAmt <= 50.0 && (tAmt % 5 === 0 || (tAmt % 1 === 0 && tAmt <= 25.0)));
-    if (!isRoundSmall && isSameMonth) {
-      const dayDiff = Math.abs(tDay - (bDueDay || 1));
-      if (dayDiff <= 4 || dayDiff >= 27) return true;
-    }
-
     return false;
   }
 
   const matchedBillKeys = new Set();
   let matchCount = 0;
+
+  txns.forEach(t => {
+    if (t.manually_linked && t.booking_date) {
+      const occIso = t.booking_date.slice(0, 10);
+      if (t.matched_bill_type && (t.matched_bill_type === 'recurring_payment' || t.matched_bill_type === 'recurring_income')) {
+        const sIdx = (t.matched_bill_source_idx !== undefined) ? t.matched_bill_source_idx : t.matched_bill_id;
+        matchedBillKeys.add(`rec_${t.matched_bill_type}_${sIdx}_${occIso}`);
+      }
+    }
+  });
+
   const sortedTxns = [...txns].sort((a, b) => (a.booking_date || '').localeCompare(b.booking_date || ''));
 
   sortedTxns.forEach(t => {
+    if (t.manually_linked) return;
+
     const rawAmt = Number(t.amount || 0);
     const tAmt = Math.abs(rawAmt);
     if (tAmt < 0.01) return;
     const tIsIncome = (rawAmt > 0);
 
-    const tPayee = `${t.payee_name || ''} ${t.raw_info || ''} ${t.merchant_name || ''}`.trim();
+    const tPayee = `${t.payee_name || ''} ${t.raw_info || ''} ${t.merchant_name || ''} ${t.description || ''}`.trim();
     const tDateStr = t.booking_date || '';
+    if (!tDateStr) return;
 
     let targetMName = null;
     let targetYearStr = String(new Date().getFullYear());
     let tDay = 15;
+    let dt = null;
 
-    if (tDateStr) {
-      try {
-        const dt = new Date(tDateStr.includes('T') ? tDateStr : tDateStr + 'T12:00:00');
-        targetYearStr = String(dt.getFullYear());
-        tDay = dt.getDate();
-        if (payFreq === "monthly" && pdayDay >= 20 && tDay >= (pdayDay - 4)) {
-          let budgetMIdx = dt.getMonth() + 1;
-          if (budgetMIdx > 11) {
-            budgetMIdx = 0;
-            targetYearStr = String(dt.getFullYear() + 1);
-          }
-          targetMName = months[budgetMIdx];
-        } else {
-          targetMName = months[dt.getMonth()];
-        }
-      } catch (e) {}
+    try {
+      dt = new Date(tDateStr.includes('T') ? tDateStr : tDateStr + 'T12:00:00');
+      targetYearStr = String(dt.getFullYear());
+      tDay = dt.getDate();
+      const detected = detectCurrentMonthAndWeek(dt, dt.getFullYear());
+      if (detected && detected.month) {
+        targetMName = detected.month;
+      } else {
+        targetMName = months[dt.getMonth()];
+      }
+    } catch (e) {
+      return;
     }
 
     const yearData = (data.years && data.years[targetYearStr]) || (data.years && data.years[String(new Date().getFullYear())]) || {};
     const monthsMap = yearData.months || {};
 
-    const searchMonths = [];
-    if (targetMName && monthsMap[targetMName]) {
-      searchMonths.push(targetMName);
-      const mIdx = months.indexOf(targetMName);
-      if (mIdx > 0 && monthsMap[months[mIdx - 1]]) searchMonths.push(months[mIdx - 1]);
-      if (mIdx < 11 && monthsMap[months[mIdx + 1]]) searchMonths.push(months[mIdx + 1]);
-    } else {
-      searchMonths.push(...Object.keys(monthsMap));
+    // STRICT: Only search the exact budget month this transaction belongs to!
+    // NEVER search future months, NEVER search 'Bills' template tab!
+    if (!targetMName || targetMName === 'Bills' || !monthsMap[targetMName]) {
+      return;
     }
 
+    const searchMonths = [targetMName];
     let matchedThisTxn = false;
 
     for (const mName of searchMonths) {
       if (matchedThisTxn) break;
       const mData = monthsMap[mName] || {};
+      const targetMIdx = months.indexOf(mName);
+
+      // Expand recurring items for targetMName using schedule
+      const recurringPaymentOccurrences = [];
+      const recurringIncomeOccurrences = [];
+      if (targetMIdx !== -1) {
+        const sched = calculateMonthSchedule(targetYearStr, targetMIdx);
+        (sched.weeks || []).forEach(w => {
+          const pOccs = getRecurringForWeek(yearData.recurring_payments || cfg.recurring_payments || [], w, sched, targetYearStr);
+          pOccs.forEach(occ => {
+            const occDt = occ.actualPaymentDate ? new Date(occ.actualPaymentDate) : new Date(w.startDate);
+            const occIso = formatLocalDateToISO(occ.actualPaymentDate || w.startDate);
+            const rawTarget = (yearData.recurring_payments || cfg.recurring_payments || [])[occ.source_idx];
+            recurringPaymentOccurrences.push({
+              ...occ,
+              name: (occ.rawDesc || occ.desc || '').replace(/^[🔄📥]\s*/, '').trim(),
+              desc: (occ.rawDesc || occ.desc || '').replace(/^[🔄📥]\s*/, '').trim(),
+              amount: occ.amount,
+              due_day: occDt.getDate(),
+              actual_date_iso: occIso,
+              source_idx: occ.source_idx,
+              source_type: 'recurring_payment',
+              raw_target: rawTarget,
+              is_recurring_occ: true
+            });
+          });
+          const iOccs = getRecurringForWeek(yearData.recurring_incomes || cfg.recurring_incomes || [], w, sched, targetYearStr);
+          iOccs.forEach(occ => {
+            const occDt = occ.actualPaymentDate ? new Date(occ.actualPaymentDate) : new Date(w.startDate);
+            const occIso = formatLocalDateToISO(occ.actualPaymentDate || w.startDate);
+            const rawTarget = (yearData.recurring_incomes || cfg.recurring_incomes || [])[occ.source_idx];
+            recurringIncomeOccurrences.push({
+              ...occ,
+              name: (occ.rawDesc || occ.desc || '').replace(/^[🔄📥]\s*/, '').trim(),
+              desc: (occ.rawDesc || occ.desc || '').replace(/^[🔄📥]\s*/, '').trim(),
+              amount: occ.amount,
+              due_day: occDt.getDate(),
+              actual_date_iso: occIso,
+              source_idx: occ.source_idx,
+              source_type: 'recurring_income',
+              raw_target: rawTarget,
+              is_recurring_occ: true
+            });
+          });
+        });
+      }
 
       const budgetItems = [];
       (yearData.yearly_budgets || []).forEach((bObj, bIdx) => {
@@ -2085,8 +2268,8 @@ export function reconcileTransactionsWithScheduledBills(data) {
         { type: 'scheduled_item', isIncome: false, list: mData.scheduled_items || [] },
         { type: 'yearly_recurring', isIncome: false, list: (yearData.yearly_recurring || []).filter(b => !b.month || b.month === mName) },
         { type: 'yearly_income', isIncome: true, list: (yearData.yearly_income || []).filter(b => !b.month || b.month === mName) },
-        { type: 'recurring_payment', isIncome: false, list: yearData.recurring_payments || cfg.recurring_payments || [] },
-        { type: 'recurring_income', isIncome: true, list: yearData.recurring_incomes || cfg.recurring_incomes || [] },
+        { type: 'recurring_payment', isIncome: false, list: recurringPaymentOccurrences },
+        { type: 'recurring_income', isIncome: true, list: recurringIncomeOccurrences },
         { type: 'budget_bill', isIncome: false, list: budgetItems },
         { type: 'birthday', isIncome: false, list: birthdayItems }
       ];
@@ -2095,54 +2278,96 @@ export function reconcileTransactionsWithScheduledBills(data) {
         if (matchedThisTxn) break;
         if (tIsIncome !== coll.isIncome) continue;
 
+        const isRecurringOcc = (coll.type === 'recurring_payment' || coll.type === 'recurring_income');
+        const occIso = isRecurringOcc ? '' : (tDateStr ? tDateStr.slice(0, 10) : '');
+
         for (let idx = 0; idx < coll.list.length; idx++) {
           const b = coll.list[idx];
-          const bId = b.id || `${targetYearStr}_${mName}_${coll.type}_${idx}`;
-          if (matchedBillKeys.has(bId)) continue;
-          if (b.manually_cleared) {
-            matchedBillKeys.add(bId);
+          const bName = b.desc || b.name || '';
+          const thisOccIso = isRecurringOcc ? b.actual_date_iso : occIso;
+          const bKey = isRecurringOcc
+            ? `rec_${coll.type}_${b.source_idx !== undefined ? b.source_idx : idx}_${thisOccIso}`
+            : (b.id || `${targetYearStr}_${mName}_${coll.type}_${idx}`);
+
+          if (matchedBillKeys.has(bKey)) continue;
+
+          if (!isRecurringOcc && b.manually_cleared) {
+            matchedBillKeys.add(bKey);
             continue;
           }
 
           const bAmt = Math.abs(Number(b.amount || 0));
-          const bName = b.desc || b.name || '';
           const bDueDay = parseInt(b.due_day || b.day_of_month || 1, 10);
           const isSameMonth = (targetMName === mName);
 
+          let dayDiff = 0;
+          if (isRecurringOcc) {
+            const occDateObj = new Date(b.actualPaymentDate || (b.actual_date_iso + 'T12:00:00'));
+            dayDiff = Math.round(Math.abs(dt.getTime() - occDateObj.getTime()) / (1000 * 60 * 60 * 24));
+            if (dayDiff > 4) continue;
+          } else {
+            dayDiff = Math.min(
+              Math.abs(tDay - bDueDay),
+              Math.abs(tDay - (bDueDay + 30)),
+              Math.abs((tDay + 30) - bDueDay)
+            );
+            if (dayDiff > 7) continue;
+          }
+
           if (isValidBillMatch(bName, bAmt, bDueDay, tPayee, tAmt, tDay, isSameMonth)) {
-            b.status = 'paid';
-            b.auto_cleared = true;
-            b.matched_txn_id = t.transaction_id;
-            b.matched_date = tDateStr;
-            b.matched_amount = tAmt;
-            b.matched_payee = t.payee_name || t.merchant_name;
-            if (tDateStr) {
-              const occIso = tDateStr.slice(0, 10);
-              b.cleared_dates = b.cleared_dates || [];
-              if (!b.cleared_dates.includes(occIso)) b.cleared_dates.push(occIso);
+            if (isRecurringOcc) {
+              const targetItem = b.raw_target;
+              if (targetItem) {
+                targetItem.cleared_dates = targetItem.cleared_dates || [];
+                if (thisOccIso && !targetItem.cleared_dates.includes(thisOccIso)) {
+                  targetItem.cleared_dates.push(thisOccIso);
+                }
+                targetItem.matched_txn_id = t.transaction_id;
+                targetItem.matched_date = tDateStr;
+                targetItem.matched_payee = t.payee_name || t.merchant_name;
+                targetItem.status = 'paid';
+                targetItem.auto_cleared = true;
+              }
+              b.status = 'paid';
+              b.auto_cleared = true;
+              b.matched_txn_id = t.transaction_id;
+              b.matched_date = tDateStr;
+              b.matched_payee = t.payee_name || t.merchant_name;
+            } else {
+              b.status = 'paid';
+              b.auto_cleared = true;
+              b.matched_txn_id = t.transaction_id;
+              b.matched_date = tDateStr;
+              b.matched_amount = tAmt;
+              b.matched_payee = t.payee_name || t.merchant_name;
+              if (thisOccIso) {
+                b.cleared_dates = b.cleared_dates || [];
+                if (!b.cleared_dates.includes(thisOccIso)) b.cleared_dates.push(thisOccIso);
+              }
             }
 
-            if (b.raw_target) {
+            if (b.raw_target && !isRecurringOcc) {
               b.raw_target.status = 'paid';
               b.raw_target.auto_cleared = true;
               b.raw_target.matched_txn_id = t.transaction_id;
               b.raw_target.matched_date = tDateStr;
               b.raw_target.matched_amount = tAmt;
               b.raw_target.matched_payee = t.payee_name || t.merchant_name;
-              if (tDateStr) {
-                const occIso = tDateStr.slice(0, 10);
+              if (thisOccIso) {
                 b.raw_target.cleared_dates = b.raw_target.cleared_dates || [];
-                if (!b.raw_target.cleared_dates.includes(occIso)) b.raw_target.cleared_dates.push(occIso);
+                if (!b.raw_target.cleared_dates.includes(thisOccIso)) b.raw_target.cleared_dates.push(thisOccIso);
               }
             }
 
             t.matched_bill_id = bName;
             t.matched_bill_type = coll.type;
+            t.matched_bill_source_idx = b.source_idx;
+            t.matched_bill_date = thisOccIso;
             if (b.budget_category) {
               t.matched_budget_category = b.budget_category;
             }
             t.auto_cleared = true;
-            matchedBillKeys.add(bId);
+            matchedBillKeys.add(bKey);
             matchedThisTxn = true;
             matchCount++;
             break;

@@ -73,7 +73,8 @@ import {
   detectCurrentMonthAndWeek,
   setDynamicCategories,
   getOccasionDate,
-  getOccasionIcon
+  getOccasionIcon,
+  formatLocalDateToISO
 } from './calculations.js';
 
 import {
@@ -2556,7 +2557,7 @@ window.budgetApp = {
     }
 
     const isRecurring = Boolean(item?.isRecurring || sourceType === 'recurring_income' || sourceType === 'recurring_payment');
-    const occDateStr = dateStr || (item.actualPaymentDate ? new Date(item.actualPaymentDate).toISOString().slice(0, 10) : (item.matched_date || new Date().toISOString().slice(0, 10)));
+    const occDateStr = dateStr || (item.actualPaymentDate ? formatLocalDateToISO(item.actualPaymentDate) : (item.matched_date || formatLocalDateToISO(new Date())));
     const isCleared = isRecurring
       ? Boolean(occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr))
       : Boolean(item.auto_cleared || item.status === 'paid' || (occDateStr && item.cleared_dates && item.cleared_dates.includes(occDateStr)));
@@ -2565,6 +2566,9 @@ window.budgetApp = {
       if (isRecurring) {
         if (occDateStr && item.cleared_dates) {
           item.cleared_dates = item.cleared_dates.filter(d => d !== occDateStr);
+        }
+        if (occDateStr && item.manually_cleared_dates) {
+          item.manually_cleared_dates = item.manually_cleared_dates.filter(d => d !== occDateStr);
         }
       } else {
         item.status = 'due';
@@ -2581,7 +2585,11 @@ window.budgetApp = {
       allTxns.forEach(t => {
         if (t.matched_bill_id === (item.desc || billDesc) && (!occDateStr || !t.booking_date || t.booking_date.startsWith(occDateStr))) {
           t.matched_bill_id = null;
+          t.matched_bill_type = null;
+          t.matched_bill_source_idx = null;
+          t.matched_bill_date = null;
           t.auto_cleared = false;
+          t.manually_linked = false;
         }
       });
     } else {
@@ -2589,6 +2597,8 @@ window.budgetApp = {
         if (occDateStr) {
           item.cleared_dates = item.cleared_dates || [];
           if (!item.cleared_dates.includes(occDateStr)) item.cleared_dates.push(occDateStr);
+          item.manually_cleared_dates = item.manually_cleared_dates || [];
+          if (!item.manually_cleared_dates.includes(occDateStr)) item.manually_cleared_dates.push(occDateStr);
         }
         item.manually_cleared = true;
       } else {
@@ -2632,8 +2642,15 @@ window.budgetApp = {
       if (targetDate) {
         item.cleared_dates = item.cleared_dates || [];
         if (!item.cleared_dates.includes(targetDate)) item.cleared_dates.push(targetDate);
+        if (isRecurring) {
+          item.manually_cleared_dates = item.manually_cleared_dates || [];
+          if (!item.manually_cleared_dates.includes(targetDate)) item.manually_cleared_dates.push(targetDate);
+        }
       }
       txn.matched_bill_id = item.desc || billDesc;
+      txn.matched_bill_type = sourceType;
+      txn.matched_bill_source_idx = sourceIdx;
+      txn.matched_bill_date = targetDate;
       txn.auto_cleared = true;
       txn.manually_linked = true;
     }
