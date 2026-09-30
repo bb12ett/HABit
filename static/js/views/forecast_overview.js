@@ -74,13 +74,26 @@ export const FORECAST_OVERVIEW_TILES = [
     defaultVisible: true
   },
   {
+    id: 'spendable_cash_remaining',
+    type: 'kpi',
+    title: 'Spendable Cash Remaining',
+    category: 'Pacing & Allowance',
+    icon: '💳',
+    desc: 'Spendable cash left this week after reserving funds for remaining bills',
+    explanation: 'Calculates whether you are already overspent or still have cash left to spend before Sunday. It compares your live bank balance today to your Sunday closing target, after accounting for unpaid bills.',
+    formula: '(Live Balance Today - Sunday Target) - Remaining Unpaid Bills + Remaining Inflows',
+    tip: 'Switch between "Holding Today\'s Bills" (safest if today\'s direct debits haven\'t left your bank) and "Future Bills Only" (if your bank already deducted today\'s bills).',
+    target: 'active_week',
+    defaultVisible: true
+  },
+  {
     id: 'actual_variance',
     type: 'kpi',
-    title: 'Sunday Target',
+    title: 'Sunday Target (Raw)',
     category: 'Variances & Health',
     icon: '🎯',
-    desc: 'Live net balance vs closing target for Sunday from your account check-in',
-    explanation: 'Measures your current cash position against your Sunday closing target. A positive number indicates you have cash cushion remaining before the week ends; a negative number indicates a shortfall against your closing goal.',
+    desc: 'Live net balance vs closing target for Sunday (before unpaid bills)',
+    explanation: 'Measures your current raw cash position against your Sunday closing target without deducting unpaid mid-week bills. For your true spendable cash after holding unpaid bills, see Spendable Cash Remaining.',
     formula: 'Actual Net Balance Today - Sunday Closing Target',
     tip: 'Review your Sunday Target to ensure you have enough funds to cover remaining weekend spending.',
     target: 'active_week',
@@ -196,10 +209,10 @@ export const FORECAST_OVERVIEW_TILES = [
     title: 'Active Week Spotlight',
     category: 'Detailed Breakdown',
     icon: '🔦',
-    desc: 'Deep-dive into active week spend, bills clearing, and closing net',
-    explanation: 'Detailed panel showing the active week budget, list of clearing direct debits, expected income, and closing balance.',
-    formula: 'Active week forecast calculation',
-    tip: 'Review clearing bills at the start of each week so there are no surprises.',
+    desc: 'Deep-dive into active week spend, planned bills, remaining bills, and closing net',
+    explanation: 'Detailed panel showing the active week budget, total scheduled bills, remaining bills yet to clear, expected income, and closing balance.',
+    formula: 'Remaining Bills = Total Scheduled Bills - Cleared Bills',
+    tip: 'Monitor Remaining Bills throughout the week to see exactly how much cash is still committed to upcoming bills before Sunday.',
     target: 'active_week',
     defaultVisible: true
   },
@@ -277,7 +290,9 @@ export function getOverviewTileConfig() {
     allOrder = [...allTileIds];
   } else {
     const missing = allTileIds.filter(id => !allOrder.includes(id));
-    allOrder = [...allOrder, ...missing];
+    if (missing.length > 0) {
+      allOrder = [...allOrder, ...missing];
+    }
   }
 
   let visibleTiles = cfg.overview_tiles;
@@ -288,8 +303,18 @@ export function getOverviewTileConfig() {
     } catch (e) {}
   }
 
+  const missing = allTileIds.filter(id => !allOrder.includes(id));
   if (!visibleTiles || !Array.isArray(visibleTiles) || visibleTiles.length === 0) {
     visibleTiles = FORECAST_OVERVIEW_TILES.filter(t => t.defaultVisible).map(t => t.id);
+  } else {
+    // If a brand-new tile with defaultVisible: true was added to FORECAST_OVERVIEW_TILES, include it
+    const newDefaultVis = allTileIds.filter(id => {
+      const def = FORECAST_OVERVIEW_TILES.find(t => t.id === id);
+      return def && def.defaultVisible && !visibleTiles.includes(id) && missing.includes(id);
+    });
+    if (newDefaultVis.length > 0) {
+      visibleTiles = [...visibleTiles, ...newDefaultVis];
+    }
   }
 
   let expandedTiles = cfg.expanded_overview_tiles;
@@ -338,8 +363,31 @@ let touchGhostEl = null;
 let touchLastTargetTileId = null;
 
 // =========================================================
-// 3. MAIN RENDER FUNCTION
+// 3. MAIN RENDER FUNCTION & HELPERS
 // =========================================================
+
+export function resolveOccDateStr(item, monthName = '', year = 0) {
+  if (item.actualPaymentDate) {
+    if (typeof item.actualPaymentDate === 'string') return item.actualPaymentDate.slice(0, 10);
+    if (item.actualPaymentDate instanceof Date && !isNaN(item.actualPaymentDate)) {
+      const y = item.actualPaymentDate.getFullYear();
+      const m = String(item.actualPaymentDate.getMonth() + 1).padStart(2, '0');
+      const d = String(item.actualPaymentDate.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  if (item.exact_date) return String(item.exact_date).slice(0, 10);
+  if (item.due_day && monthName) {
+    const mIdx = months.indexOf(monthName);
+    if (mIdx >= 0) {
+      const y = year || new Date().getFullYear();
+      const m = String(mIdx + 1).padStart(2, '0');
+      const d = String(item.due_day).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    }
+  }
+  return '';
+}
 
 export function renderForecastOverviewView(container) {
   const cfg = getSettings();
@@ -410,34 +458,10 @@ export function renderForecastOverviewView(container) {
     livePacing = calculateLiveDailyPacing(activeWeekObj, activeWeekPred, activeWeekActuals, cfg);
   }
 
-  // Active week transactions and cleared status resolution
-  const resolveOccDateStr = (item) => {
-    if (item.actualPaymentDate) {
-      if (typeof item.actualPaymentDate === 'string') return item.actualPaymentDate.slice(0, 10);
-      if (item.actualPaymentDate instanceof Date && !isNaN(item.actualPaymentDate)) {
-        const y = item.actualPaymentDate.getFullYear();
-        const m = String(item.actualPaymentDate.getMonth() + 1).padStart(2, '0');
-        const d = String(item.actualPaymentDate.getDate()).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-      }
-    }
-    if (item.exact_date) return String(item.exact_date).slice(0, 10);
-    if (item.due_day && currentMonthName) {
-      const mIdx = months.indexOf(currentMonthName);
-      if (mIdx >= 0) {
-        const y = currentYear || new Date().getFullYear();
-        const m = String(mIdx + 1).padStart(2, '0');
-        const d = String(item.due_day).padStart(2, '0');
-        return `${y}-${m}-${d}`;
-      }
-    }
-    return '';
-  };
-
   const todayEndMs = new Date().setHours(23, 59, 59, 999);
 
   const activeWeekDDs = (activeWeekPred.wDDs || []).map(d => {
-    const occDateStr = resolveOccDateStr(d);
+    const occDateStr = resolveOccDateStr(d, currentMonthName, currentYear);
     const isRecurring = Boolean(d.isRecurring || d.source_type === 'recurring_payment');
     const isCleared = isRecurring
       ? Boolean(d.cleared_dates && occDateStr && d.cleared_dates.includes(occDateStr))
@@ -457,7 +481,7 @@ export function renderForecastOverviewView(container) {
   });
 
   const activeWeekIncomes = (activeWeekPred.wIncomes || []).map(i => {
-    const occDateStr = resolveOccDateStr(i);
+    const occDateStr = resolveOccDateStr(i, currentMonthName, currentYear);
     const isRecurring = Boolean(i.isRecurring || i.source_type === 'recurring_income');
     const isCleared = isRecurring
       ? Boolean(i.cleared_dates && occDateStr && i.cleared_dates.includes(occDateStr))
@@ -478,8 +502,15 @@ export function renderForecastOverviewView(container) {
 
   const clearedBillsCount = activeWeekDDs.filter(d => d.isCleared).length;
   const clearedBillsTotal = activeWeekDDs.filter(d => d.isCleared).reduce((s, d) => s + (Number(d.amount) || 0), 0);
+  const remainingBills = activeWeekDDs.filter(d => !d.isCleared);
+  const remainingBillsCount = remainingBills.length;
+  const remainingBillsTotal = remainingBills.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+
   const clearedIncomesCount = activeWeekIncomes.filter(i => i.isCleared).length;
   const clearedIncomesTotal = activeWeekIncomes.filter(i => i.isCleared).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const remainingIncomes = activeWeekIncomes.filter(i => !i.isCleared);
+  const remainingIncomesCount = remainingIncomes.length;
+  const remainingIncomesTotal = remainingIncomes.reduce((s, i) => s + (Number(i.amount) || 0), 0);
 
   const activeWeekAllTransactions = [...activeWeekDDs, ...activeWeekIncomes];
   activeWeekAllTransactions.sort((a, b) => {
@@ -488,6 +519,35 @@ export function renderForecastOverviewView(container) {
     return tA - tB;
   });
   const totalClearedTransactionsCount = activeWeekAllTransactions.filter(t => t.isCleared).length;
+
+  // Split uncleared bills by due date (today/past vs future)
+  const unclearedPastAndTodayBills = activeWeekDDs.filter(d => !d.isCleared && d.isPastDate);
+  const unclearedPastAndTodayBillsTotal = unclearedPastAndTodayBills.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+
+  const unclearedFutureBills = activeWeekDDs.filter(d => !d.isCleared && !d.isPastDate);
+  const unclearedFutureBillsTotal = unclearedFutureBills.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+
+  // Split uncleared incomes by due date (today/past vs future)
+  const unclearedPastAndTodayIncomes = activeWeekIncomes.filter(i => !i.isCleared && i.isPastDate);
+  const unclearedPastAndTodayIncomesTotal = unclearedPastAndTodayIncomes.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  const unclearedFutureIncomes = activeWeekIncomes.filter(i => !i.isCleared && !i.isPastDate);
+  const unclearedFutureIncomesTotal = unclearedFutureIncomes.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+  const hasActual = (activeWeekPred && activeWeekPred.actualNet !== null && activeWeekPred.actualNet !== undefined);
+  const rawSurplusAboveTarget = hasActual ? (activeWeekPred.actualNet - activeWeekPred.predictedNet) : 0;
+
+  // Dual calculations for spendable cash remaining:
+  // 1. Holding Today's Bills (Safest): Deducts all uncleared bills
+  // 2. Future Bills Only (Bank Live): Deducts strictly future bills (assumes bank already processed today's direct debits)
+  const spendableSafeFloor = hasActual ? (rawSurplusAboveTarget - remainingBillsTotal + remainingIncomesTotal) : 0;
+  const spendableBankAdjusted = hasActual ? (rawSurplusAboveTarget - unclearedFutureBillsTotal + unclearedFutureIncomesTotal) : 0;
+
+  let spendableMode = 'all_bills';
+  try {
+    const savedMode = localStorage.getItem('habit_spendable_cash_mode');
+    if (savedMode === 'future_only' || savedMode === 'all_bills') spendableMode = savedMode;
+  } catch (e) {}
   
   // Calculate total money in vs money out for monthly cashflow
   const totalInflows = totalCurrentInflow + (forecast.totalMonthPaymentsIn || 0);
@@ -534,8 +594,6 @@ export function renderForecastOverviewView(container) {
   }
 
   // 2. Calculate Safe-to-Spend based on real available cash above target
-  const hasActual = (activeWeekPred && activeWeekPred.actualNet !== null && activeWeekPred.actualNet !== undefined);
-
   if (hasActual) {
     // True discretionary money remaining before Sunday without missing target:
     // (Actual Balance - Sunday Target) - Upcoming Bills + Upcoming Inflows
@@ -677,6 +735,75 @@ export function renderForecastOverviewView(container) {
       valClass: safeDailySpend >= 20 ? 'val-teal' : (safeDailySpend > 0 ? 'val-amber' : 'val-red'),
       cardClass: safeDailySpend >= 20 ? 'accent-teal' : (safeDailySpend > 0 ? 'accent-amber' : 'accent-red')
     },
+    spendable_cash_remaining: (() => {
+      if (!hasActual) {
+        return {
+          val: 'Pending',
+          sub: 'Enter account check-in or sync Open Banking to calculate remaining cash',
+          tag: 'SPENDABLE CASH',
+          valClass: 'val-teal',
+          cardClass: 'accent-teal'
+        };
+      }
+
+      const activeSpendable = spendableMode === 'future_only' ? spendableBankAdjusted : spendableSafeFloor;
+      const isPositive = activeSpendable >= 0;
+      const otherSpendable = spendableMode === 'future_only' ? spendableSafeFloor : spendableBankAdjusted;
+      const hasSplitBills = unclearedPastAndTodayBillsTotal > 0;
+
+      let subText = '';
+      if (spendableMode === 'all_bills') {
+        if (hasSplitBills) {
+          subText = isPositive
+            ? `🛡️ Holding all unpaid bills • ${otherSpendable >= 0 ? '+' : '-'}${curr}${Math.abs(otherSpendable).toFixed(2)} if today's bills already left bank`
+            : `⚠️ Overspent by ${curr}${Math.abs(activeSpendable).toFixed(2)} • (${otherSpendable >= 0 ? '+' : '-'}${curr}${Math.abs(otherSpendable).toFixed(2)} if today's bills already left bank)`;
+        } else {
+          subText = isPositive
+            ? `🛡️ Holding all bills • ${curr}${activeSpendable.toFixed(2)} left before Sunday target (${curr}${activeWeekPred.predictedNet.toFixed(2)})`
+            : `⚠️ Overspent by ${curr}${Math.abs(activeSpendable).toFixed(2)} against Sunday closing target`;
+        }
+      } else {
+        if (hasSplitBills) {
+          subText = isPositive
+            ? `⚡ Future bills only • ${otherSpendable >= 0 ? '+' : '-'}${curr}${Math.abs(otherSpendable).toFixed(2)} if holding today's bills`
+            : `⚠️ Overspent by ${curr}${Math.abs(activeSpendable).toFixed(2)} • (${otherSpendable >= 0 ? '+' : '-'}${curr}${Math.abs(otherSpendable).toFixed(2)} if holding today's bills)`;
+        } else {
+          subText = isPositive
+            ? `⚡ Future bills only • ${curr}${activeSpendable.toFixed(2)} left before Sunday target (${curr}${activeWeekPred.predictedNet.toFixed(2)})`
+            : `⚠️ Overspent by ${curr}${Math.abs(activeSpendable).toFixed(2)} against Sunday closing target`;
+        }
+      }
+
+      const pillHtml = hasSplitBills ? `
+        <div style="margin-top:6px; display:inline-flex; align-items:center; gap:2px; font-size:9.5px; background:rgba(0,0,0,0.22); padding:2px; border-radius:10px; width:fit-content;" onclick="event.stopPropagation();">
+          <button type="button" 
+            onclick="event.stopPropagation(); window.budgetApp.setSpendableCashMode('all_bills');" 
+            style="border:none; cursor:pointer; padding:2px 7px; border-radius:8px; font-weight:700; font-size:9px; transition:all 0.15s ease; ${spendableMode === 'all_bills' ? 'background:var(--primary); color:#fff;' : 'background:transparent; color:var(--text-muted);'}" 
+            title="Safest: Deducts all unpaid bills (including today's)">
+            🛡️ Holding Today's Bills
+          </button>
+          <button type="button" 
+            onclick="event.stopPropagation(); window.budgetApp.setSpendableCashMode('future_only');" 
+            style="border:none; cursor:pointer; padding:2px 7px; border-radius:8px; font-weight:700; font-size:9px; transition:all 0.15s ease; ${spendableMode === 'future_only' ? 'background:var(--primary); color:#fff;' : 'background:transparent; color:var(--text-muted);'}" 
+            title="Bank Live: Deducts future bills only (if bank already processed today's direct debits)">
+            ⚡ Future Bills Only
+          </button>
+        </div>
+      ` : `
+        <div style="margin-top:4px; font-size:9.5px; color:var(--text-muted);">
+          ✓ All bills up to today cleared
+        </div>
+      `;
+
+      return {
+        val: `${isPositive ? '+' : '-'}${curr}${Math.abs(activeSpendable).toFixed(2)}`,
+        sub: subText,
+        tag: 'SPENDABLE CASH',
+        valClass: isPositive ? 'val-green' : 'val-red',
+        cardClass: isPositive ? 'accent-green' : 'accent-red',
+        extraHtml: pillHtml
+      };
+    })(),
     actual_variance: (() => {
       const actVar = (activeWeekPred && activeWeekPred.variance !== null) ? activeWeekPred.variance : latestVariance;
       const hasActVar = (actVar !== null && actVar !== undefined);
@@ -685,10 +812,10 @@ export function renderForecastOverviewView(container) {
         val: hasActVar ? `${isSurplus ? '+' : '-'}${curr}${Math.abs(actVar).toFixed(2)}` : 'Pending',
         sub: hasActVar
           ? (isSurplus
-              ? `✨ +${curr}${Math.abs(actVar).toFixed(2)} above Sunday closing target`
-              : `⚠️ -${curr}${Math.abs(actVar).toFixed(2)} below Sunday closing target`)
+              ? `✨ +${curr}${Math.abs(actVar).toFixed(2)} above Sunday closing target (raw)`
+              : `⚠️ -${curr}${Math.abs(actVar).toFixed(2)} below Sunday closing target (raw)`)
           : 'Enter check-in to calculate Sunday target position',
-        tag: 'SUNDAY TARGET',
+        tag: 'SUNDAY TARGET (RAW)',
         valClass: hasActVar ? (isSurplus ? 'val-green' : 'val-red') : 'val-teal',
         cardClass: hasActVar ? (isSurplus ? 'accent-green' : 'accent-red') : 'accent-teal'
       };
@@ -994,42 +1121,69 @@ export function renderForecastOverviewView(container) {
                 </div>
                 <div style="display:flex; align-items:center; gap:6px;">
                   <span class="due-pill due-today">${activeWeekObj?.label || ''}</span>
+                  <button class="tile-info-chip" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" title="View calculation formula & live breakdown">🧮</button>
                   <button class="tile-info-chip" onclick="window.budgetApp.flipForecastTile('week_spotlight')" title="What is this section?">ⓘ</button>
                 </div>
               </div>
 
               <div class="forecast-card-body">
                 <div class="forecast-week-spotlight-metrics">
-                  <div class="forecast-spotlight-item">
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer;" title="Click to view weekly budget calculation">
                     <span class="forecast-spotlight-label">Discretionary Budget</span>
                     <span class="forecast-spotlight-value">${curr}${(activeWeekPred.wSpend || 0).toFixed(2)}</span>
                     <span class="forecast-spotlight-sub">Planned allowance</span>
                   </div>
 
-                  <div class="forecast-spotlight-item">
-                    <span class="forecast-spotlight-label">Bills Clearing</span>
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer;" title="Click to view closing target calculation">
+                    <span class="forecast-spotlight-label">Closing Net Position</span>
+                    <span class="forecast-spotlight-value ${activeWeekPred.predictedNet >= 0 ? 'text-green' : 'text-red'}">${curr}${(activeWeekPred.predictedNet || 0).toFixed(2)}</span>
+                    <span class="forecast-spotlight-sub">End of week target</span>
+                  </div>
+
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer;" title="Click to view scheduled bills breakdown">
+                    <span class="forecast-spotlight-label">Total Bills Planned</span>
                     <span class="forecast-spotlight-value text-red">-${curr}${(activeWeekPred.wDDTotal || 0).toFixed(2)}</span>
                     <span class="forecast-spotlight-sub">${clearedBillsCount > 0 ? `<strong style="color:var(--green);">${clearedBillsCount}</strong> of ${activeWeekDDs.length} cleared (${curr}${clearedBillsTotal.toFixed(0)})` : `${activeWeekDDs.length} direct debits`}</span>
                   </div>
 
-                  <div class="forecast-spotlight-item">
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer; ${remainingBillsTotal > 0 ? 'border-color:rgba(245,158,11,0.35); background:rgba(245,158,11,0.04);' : 'border-color:rgba(16,185,129,0.3); background:rgba(16,185,129,0.04);'}" title="Click to view remaining unpaid bills">
+                    <span class="forecast-spotlight-label" style="display:flex; justify-content:space-between; align-items:center;">
+                      <span>Remaining Bills</span>
+                      ${remainingBillsTotal > 0 ? '<span style="font-size:9px; background:rgba(245,158,11,0.2); color:var(--amber); padding:1px 5px; border-radius:8px; font-weight:700;">DUE</span>' : '<span style="font-size:9px; background:rgba(16,185,129,0.2); color:var(--green); padding:1px 5px; border-radius:8px; font-weight:700;">PAID</span>'}
+                    </span>
+                    <span class="forecast-spotlight-value ${remainingBillsTotal > 0 ? 'text-amber' : 'text-green'}">
+                      ${remainingBillsTotal > 0 ? `-${curr}${remainingBillsTotal.toFixed(2)}` : `✓ ${curr}0.00`}
+                    </span>
+                    <span class="forecast-spotlight-sub">
+                      ${remainingBillsCount > 0 ? `<strong style="color:var(--amber);">${remainingBillsCount}</strong> not cleared (${curr}${clearedBillsTotal.toFixed(0)} cleared)` : '<strong style="color:var(--green);">All bills cleared this week</strong>'}
+                    </span>
+                  </div>
+
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer;" title="Click to view expected income breakdown">
                     <span class="forecast-spotlight-label">Expected Inflow</span>
                     <span class="forecast-spotlight-value text-green">+${curr}${(activeWeekPred.wIncomeTotal || 0).toFixed(2)}</span>
                     <span class="forecast-spotlight-sub">${clearedIncomesCount > 0 ? `<strong style="color:var(--green);">${clearedIncomesCount}</strong> of ${activeWeekIncomes.length} cleared (${curr}${clearedIncomesTotal.toFixed(0)})` : `${activeWeekIncomes.length} salary / incomes`}</span>
                   </div>
 
-                  <div class="forecast-spotlight-item">
-                    <span class="forecast-spotlight-label">Closing Net Position</span>
-                    <span class="forecast-spotlight-value ${activeWeekPred.predictedNet >= 0 ? 'text-green' : 'text-red'}">${curr}${(activeWeekPred.predictedNet || 0).toFixed(2)}</span>
-                    <span class="forecast-spotlight-sub">End of week target</span>
+                  <div class="forecast-spotlight-item" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})" style="cursor:pointer;" title="Click to view remaining expected inflow">
+                    <span class="forecast-spotlight-label">Remaining Inflow</span>
+                    <span class="forecast-spotlight-value ${remainingIncomesTotal > 0 ? 'text-green' : ''}">
+                      ${remainingIncomesTotal > 0 ? `+${curr}${remainingIncomesTotal.toFixed(2)}` : `${curr}0.00`}
+                    </span>
+                    <span class="forecast-spotlight-sub">
+                      ${remainingIncomesCount > 0 ? `<strong style="color:var(--green);">${remainingIncomesCount}</strong> of ${activeWeekIncomes.length} pending` : (activeWeekIncomes.length > 0 ? '<strong style="color:var(--green);">All income received</strong>' : 'None scheduled')}
+                    </span>
                   </div>
                 </div>
 
                 <!-- Transactions clearing this week -->
                 <div style="margin-top:14px;">
-                  <h4 style="font-size:12.5px; font-weight:600; color:var(--heading); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                  <h4 style="font-size:12.5px; font-weight:600; color:var(--heading); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:6px;">
                     <span>${activeWeekIncomes.length > 0 ? 'Transactions' : 'Bills'} Clearing in ${activeWeekObj?.name || 'Active Week'}</span>
-                    <span style="font-size:11px; color:var(--text-muted);">${totalClearedTransactionsCount > 0 ? `<strong style="color:var(--green);">${totalClearedTransactionsCount}</strong> of ` : ''}${activeWeekAllTransactions.length} items${totalClearedTransactionsCount > 0 ? ' cleared' : ''}</span>
+                    <div style="display:flex; align-items:center; gap:6px;">
+                      ${remainingBillsTotal > 0 ? `<span class="badge" style="font-size:10px; background:rgba(245,158,11,0.18); color:var(--amber); border:1px solid rgba(245,158,11,0.35); padding:2px 6px;">-${curr}${remainingBillsTotal.toFixed(2)} remaining</span>` : ''}
+                      <span style="font-size:11px; color:var(--text-muted);">${totalClearedTransactionsCount > 0 ? `<strong style="color:var(--green);">${totalClearedTransactionsCount}</strong> of ` : ''}${activeWeekAllTransactions.length} items${totalClearedTransactionsCount > 0 ? ' cleared' : ''}</span>
+                    </div>
                   </h4>
 
                   <div class="forecast-chips-scroll">
@@ -1113,7 +1267,10 @@ export function renderForecastOverviewView(container) {
                   </div>
                 </div>
 
-                <div style="margin-top:14px; display:flex; justify-content:flex-end;">
+                <div style="margin-top:14px; display:flex; justify-content:flex-end; gap:8px; flex-wrap:wrap;">
+                  <button class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.openWeekCalculationModal(${currentWeekIdx})">
+                    🧮 View Calculation Formula &rarr;
+                  </button>
                   <button class="btn secondary" style="font-size:11.5px; padding:5px 12px;" onclick="window.budgetApp.setTab('${currentMonthName}')">
                     Inspect ${activeWeekObj?.name || 'Week'} Details &rarr;
                   </button>
@@ -1965,11 +2122,237 @@ export function openTileCalculationModal(tileId, target = 'month') {
         ${(weekItems || []).filter(i => !i.is_income).map(it => renderRow(it.desc || 'General', `${curr}${Number(it.amount || 0).toFixed(2)}`, 'var(--text)', `Account: ${it.account_name || 'Credit Card'}`)).join('') || '<div style="color:var(--text-muted); font-size:12px;">No budget items.</div>'}
       </div>
     `;
+  } else if (tileId === 'spendable_cash_remaining') {
+    const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
+    const activeW = schedule.weeks[activeWIdx] || schedule.weeks[0];
+    const activeWPred = forecast.weeklyPredictions[activeWIdx] || {};
+    const hasActual = (activeWPred.actualNet !== null && activeWPred.actualNet !== undefined);
+
+    let spendableMode = 'all_bills';
+    try {
+      const savedMode = localStorage.getItem('habit_spendable_cash_mode');
+      if (savedMode === 'future_only' || savedMode === 'all_bills') spendableMode = savedMode;
+    } catch (e) {}
+
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+    const todayEndMs = todayEnd.getTime();
+
+    const weekDDsWithCleared = (activeWPred.wDDs || []).map(b => {
+      const occDateStr = resolveOccDateStr(b, currentMonthName, currentYear);
+      const isRecurring = Boolean(b.isRecurring || b.source_type === 'recurring_payment');
+      const isCleared = isRecurring
+        ? Boolean(b.cleared_dates && occDateStr && b.cleared_dates.includes(occDateStr))
+        : Boolean(b.auto_cleared || b.status === 'paid' || (b.cleared_dates && occDateStr && b.cleared_dates.includes(occDateStr)));
+      let pDate = null;
+      if (b.actualPaymentDate) pDate = new Date(b.actualPaymentDate);
+      else if (b.exact_date) pDate = new Date(b.exact_date);
+      else if (b.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), b.due_day);
+      const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+      return { ...b, occDateStr, isCleared, isPastDate, pDate };
+    });
+
+    const weekIncomesWithCleared = (activeWPred.wIncomes || []).map(inc => {
+      const occDateStr = resolveOccDateStr(inc, currentMonthName, currentYear);
+      const isRecurring = Boolean(inc.isRecurring || inc.source_type === 'recurring_income');
+      const isCleared = isRecurring
+        ? Boolean(inc.cleared_dates && occDateStr && inc.cleared_dates.includes(occDateStr))
+        : Boolean(inc.auto_cleared || inc.status === 'paid' || (inc.cleared_dates && occDateStr && inc.cleared_dates.includes(occDateStr)));
+      let pDate = null;
+      if (inc.actualPaymentDate) pDate = new Date(inc.actualPaymentDate);
+      else if (inc.exact_date) pDate = new Date(inc.exact_date);
+      else if (inc.due_day && currentMonthName) pDate = new Date(currentYear, months.indexOf(currentMonthName), inc.due_day);
+      const isPastDate = pDate ? (pDate.getTime() <= todayEndMs) : false;
+      return { ...inc, occDateStr, isCleared, isPastDate, pDate };
+    });
+
+    const unclearedPastAndTodayBills = weekDDsWithCleared.filter(b => !b.isCleared && b.isPastDate);
+    const unclearedPastAndTodayBillsTotal = unclearedPastAndTodayBills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+
+    const unclearedFutureBills = weekDDsWithCleared.filter(b => !b.isCleared && !b.isPastDate);
+    const unclearedFutureBillsTotal = unclearedFutureBills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+
+    const clearedBills = weekDDsWithCleared.filter(b => b.isCleared);
+    const clearedBillsTotal = clearedBills.reduce((s, b) => s + (Number(b.amount) || 0), 0);
+
+    const unclearedPastAndTodayIncomes = weekIncomesWithCleared.filter(i => !i.isCleared && i.isPastDate);
+    const unclearedPastAndTodayIncomesTotal = unclearedPastAndTodayIncomes.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+    const unclearedFutureIncomes = weekIncomesWithCleared.filter(i => !i.isCleared && !i.isPastDate);
+    const unclearedFutureIncomesTotal = unclearedFutureIncomes.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
+    const allUnclearedBillsTotal = unclearedPastAndTodayBillsTotal + unclearedFutureBillsTotal;
+    const allUnclearedIncomesTotal = unclearedPastAndTodayIncomesTotal + unclearedFutureIncomesTotal;
+
+    const rawSurplus = hasActual ? (activeWPred.actualNet - activeWPred.predictedNet) : 0;
+    const spendableSafeFloor = hasActual
+      ? (rawSurplus - allUnclearedBillsTotal + allUnclearedIncomesTotal)
+      : 0;
+    const spendableBankAdjusted = hasActual
+      ? (rawSurplus - unclearedFutureBillsTotal + unclearedFutureIncomesTotal)
+      : 0;
+
+    const activeSpendable = spendableMode === 'future_only' ? spendableBankAdjusted : spendableSafeFloor;
+    const isSurplus = activeSpendable >= 0;
+
+    modalTitle = `💳 Spendable Cash Remaining Breakdown`;
+    liveBadge = hasActual
+      ? `<span style="background:${isSurplus ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${isSurplus ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${isSurplus ? '+' : '-'}${curr}${Math.abs(activeSpendable).toFixed(2)} (${spendableMode === 'future_only' ? 'Future Bills Only' : "Holding Today's Bills"})</span>`
+      : `<span style="background:rgba(20,184,166,0.15); color:#14b8a6; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">Pending Check-in</span>`;
+
+    formulaHtml = `
+      <div style="font-size:12px; line-height:1.6; color:var(--heading);">
+        <!-- Side-by-Side Comparison Cards -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:12px;">
+          <div style="background:rgba(255,255,255,0.03); border:1.5px solid ${spendableMode === 'all_bills' ? 'var(--primary)' : 'var(--border)'}; border-radius:8px; padding:10px 12px; cursor:pointer;" onclick="window.budgetApp.setSpendableCashMode('all_bills'); window.budgetApp.openTileCalculationModal('spendable_cash_remaining');">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <span style="font-size:11px; font-weight:700; color:var(--heading);">🛡️ Holding Today's Bills (Safest)</span>
+              ${spendableMode === 'all_bills' ? '<span class="badge green" style="font-size:8.5px; padding:1px 5px;">ACTIVE</span>' : ''}
+            </div>
+            <div style="font-size:18px; font-weight:700; color:${spendableSafeFloor >= 0 ? 'var(--green)' : 'var(--red)'}; margin-bottom:2px;">
+              ${spendableSafeFloor >= 0 ? '+' : '-'}${curr}${Math.abs(spendableSafeFloor).toFixed(2)}
+            </div>
+            <div style="font-size:10.5px; color:var(--text-muted); line-height:1.35;">
+              Holds money for all unpaid bills. Safe if today's direct debits haven't left your bank yet.
+            </div>
+          </div>
+
+          <div style="background:rgba(255,255,255,0.03); border:1.5px solid ${spendableMode === 'future_only' ? 'var(--primary)' : 'var(--border)'}; border-radius:8px; padding:10px 12px; cursor:pointer;" onclick="window.budgetApp.setSpendableCashMode('future_only'); window.budgetApp.openTileCalculationModal('spendable_cash_remaining');">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <span style="font-size:11px; font-weight:700; color:var(--heading);">⚡ Future Bills Only (Bank Live)</span>
+              ${spendableMode === 'future_only' ? '<span class="badge green" style="font-size:8.5px; padding:1px 5px;">ACTIVE</span>' : ''}
+            </div>
+            <div style="font-size:18px; font-weight:700; color:${spendableBankAdjusted >= 0 ? 'var(--green)' : 'var(--red)'}; margin-bottom:2px;">
+              ${spendableBankAdjusted >= 0 ? '+' : '-'}${curr}${Math.abs(spendableBankAdjusted).toFixed(2)}
+            </div>
+            <div style="font-size:10.5px; color:var(--text-muted); line-height:1.35;">
+              Deducts future bills only. Use if your bank balance already deducted today's bills.
+            </div>
+          </div>
+        </div>
+
+        <!-- Step-by-Step Waterfall Formula -->
+        <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-size:11.5px;">
+          <div style="display:flex; justify-content:space-between; padding:2px 0;">
+            <span>Actual Net Bank Balance Today:</span>
+            <strong>${hasActual ? curr + activeWPred.actualNet.toFixed(2) : 'No check-in'}</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:2px 0; color:var(--text-muted);">
+            <span>- Sunday Closing Target Goal:</span>
+            <strong>-${curr}${activeWPred.predictedNet.toFixed(2)}</strong>
+          </div>
+          <div style="display:flex; justify-content:space-between; padding:3px 0; border-top:1px dashed var(--border); margin-top:2px; color:${rawSurplus >= 0 ? 'var(--green)' : 'var(--red)'}; font-weight:600;">
+            <span>= Raw Cushion Above Sunday Target:</span>
+            <span>${rawSurplus >= 0 ? '+' : '-'}${curr}${Math.abs(rawSurplus).toFixed(2)}</span>
+          </div>
+          ${unclearedPastAndTodayBillsTotal > 0 ? `
+            <div style="display:flex; justify-content:space-between; padding:2px 0; color:var(--amber);">
+              <span>- Bills Due Today or Earlier (Unpaid):</span>
+              <strong>-${curr}${unclearedPastAndTodayBillsTotal.toFixed(2)}</strong>
+            </div>
+          ` : ''}
+          ${unclearedFutureBillsTotal > 0 ? `
+            <div style="display:flex; justify-content:space-between; padding:2px 0; color:var(--red);">
+              <span>- Bills Due Later This Week:</span>
+              <strong>-${curr}${unclearedFutureBillsTotal.toFixed(2)}</strong>
+            </div>
+          ` : ''}
+          ${allUnclearedIncomesTotal > 0 ? `
+            <div style="display:flex; justify-content:space-between; padding:2px 0; color:var(--green);">
+              <span>+ Remaining Incomes Clearing:</span>
+              <strong>+${curr}${allUnclearedIncomesTotal.toFixed(2)}</strong>
+            </div>
+          ` : ''}
+          <div style="display:flex; justify-content:space-between; padding:4px 0 2px 0; border-top:1.5px dashed var(--border); margin-top:4px; font-size:12.5px; font-weight:700; color:${spendableSafeFloor >= 0 ? 'var(--green)' : 'var(--red)'};">
+            <span>= Spendable Cash (Holding Today's Bills):</span>
+            <span>${spendableSafeFloor >= 0 ? '+' : '-'}${curr}${Math.abs(spendableSafeFloor).toFixed(2)}</span>
+          </div>
+          ${unclearedPastAndTodayBillsTotal > 0 ? `
+            <div style="display:flex; justify-content:space-between; padding:2px 0; font-size:12px; font-weight:700; color:${spendableBankAdjusted >= 0 ? 'var(--green)' : 'var(--red)'};">
+              <span>= Spendable Cash (Future Bills Only):</span>
+              <span>${spendableBankAdjusted >= 0 ? '+' : '-'}${curr}${Math.abs(spendableBankAdjusted).toFixed(2)}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+
+    let pastBillsList = '';
+    unclearedPastAndTodayBills.forEach(b => {
+      const cleanDesc = (b.rawDesc || b.desc || b.name || '').replace(/'/g, "\\'");
+      const sType = b.source_type || 'direct_debit';
+      const sIdx = b.source_idx !== undefined ? b.source_idx : 0;
+      const amt = Number(b.amount) || 0;
+      const occStr = b.occDateStr || '';
+      const actionBtn = `
+        <button type="button" class="btn green" style="font-size:9.5px; padding:2px 8px; border-radius:10px; height:auto;"
+          onclick="event.stopPropagation(); window.budgetApp.toggleScheduledBillCleared('${sType}', ${sIdx}, '${currentMonthName}', '${cleanDesc}', ${amt}, '${occStr}'); window.budgetApp.closeModal(); setTimeout(() => window.budgetApp.openTileCalculationModal('spendable_cash_remaining'), 200);">
+          ✓ Mark Cleared
+        </button>
+      `;
+      pastBillsList += `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
+          <div>
+            <div style="font-weight:600; color:var(--heading);">${b.desc || b.name}</div>
+            <div style="font-size:10.5px; color:var(--text-muted);">${b.account || 'Joint Account'} &bull; Due ${b.actualDateStr || ('Day ' + b.due_day)}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <strong style="color:var(--amber);">-${curr}${amt.toFixed(2)}</strong>
+            ${actionBtn}
+          </div>
+        </div>
+      `;
+    });
+
+    let futureBillsList = '';
+    unclearedFutureBills.forEach(b => {
+      futureBillsList += renderRow(
+        (b.desc || b.name),
+        `-${curr}${Number(b.amount || 0).toFixed(2)}`,
+        'var(--red)',
+        `${b.account || 'Joint Account'} &bull; Due ${b.actualDateStr || ('Day ' + b.due_day)}`
+      );
+    });
+
+    let clearedBillsList = '';
+    clearedBills.forEach(b => {
+      clearedBillsList += renderRow(
+        (b.desc || b.name) + ` <span class="badge green" style="font-size:9px; padding:1px 5px; margin-left:4px;">✓ Cleared</span>`,
+        `-${curr}${Number(b.amount || 0).toFixed(2)}`,
+        'var(--green)',
+        `${b.account || 'Joint Account'} &bull; ${b.actualDateStr || ('Day ' + b.due_day)}`
+      );
+    });
+
+    sectionsHtml = `
+      ${unclearedPastAndTodayBillsTotal > 0 ? `
+        ${renderSectionHeader("1. Bills Due Today or Earlier (Unpaid)", `-${curr}${unclearedPastAndTodayBillsTotal.toFixed(2)}`)}
+        <div style="font-size:11px; color:var(--text-muted); background:rgba(245,158,11,0.08); border-left:3px solid var(--amber); padding:6px 8px; border-radius:0 6px 6px 0; margin-bottom:8px; line-height:1.4;">
+          ⚠️ <strong>Difference between calculations:</strong> If these ${unclearedPastAndTodayBills.length} bill${unclearedPastAndTodayBills.length === 1 ? '' : 's'} have already left your bank account, you have <strong>${spendableBankAdjusted >= 0 ? '+' : '-'}${curr}${Math.abs(spendableBankAdjusted).toFixed(2)}</strong> left to spend. Click "Mark Cleared" once they show on your bank statement.
+        </div>
+        <div style="max-height:150px; overflow-y:auto; padding-right:4px; margin-bottom:12px;">
+          ${pastBillsList}
+        </div>
+      ` : ''}
+
+      ${renderSectionHeader(`2. Bills Due Later This Week (${unclearedFutureBills.length})`, `-${curr}${unclearedFutureBillsTotal.toFixed(2)}`)}
+      <div style="max-height:140px; overflow-y:auto; padding-right:4px; margin-bottom:12px;">
+        ${futureBillsList || '<div style="color:var(--text-muted); font-size:12px;">No future bills remaining this week.</div>'}
+      </div>
+
+      ${clearedBills.length > 0 ? `
+        ${renderSectionHeader(`3. Bills Already Cleared (${clearedBills.length})`, `-${curr}${clearedBillsTotal.toFixed(2)}`)}
+        <div style="max-height:130px; overflow-y:auto; padding-right:4px;">
+          ${clearedBillsList}
+        </div>
+      ` : ''}
+    `;
   } else if (tileId === 'actual_variance') {
     const activeWIdx = forecast.activeWeekIndex >= 0 ? forecast.activeWeekIndex : 0;
     const activeWPred = forecast.weeklyPredictions[activeWIdx] || {};
     const hasActual = (activeWPred.actualNet !== null && activeWPred.actualNet !== undefined);
     const variance = hasActual ? (activeWPred.actualNet - activeWPred.predictedNet) : 0;
+    modalTitle = `🎯 Sunday Target (Raw) Breakdown`;
     liveBadge = `<span style="background:${variance >= 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)'}; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'}; padding:4px 10px; border-radius:12px; font-weight:700; font-size:13px;">${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)}</span>`;
 
     formulaHtml = `
@@ -1977,7 +2360,10 @@ export function openTileCalculationModal(tileId, target = 'month') {
         <div><strong>Actual Net Check-in Today:</strong> ${hasActual ? curr + activeWPred.actualNet.toFixed(2) : 'No check-in entered yet'}</div>
         <div><strong>Sunday Closing Target:</strong> ${curr}${activeWPred.predictedNet.toFixed(2)}</div>
         <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${variance >= 0 ? 'var(--green)' : 'var(--red)'};">
-          = Variance vs Target: ${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)} ${variance >= 0 ? '(Surplus / Ahead)' : '(Deficit / Behind)'}
+          = Raw Variance vs Sunday Target: ${variance >= 0 ? '+' : ''}${curr}${variance.toFixed(2)} ${variance >= 0 ? '(Raw Surplus)' : '(Raw Shortfall)'}
+        </div>
+        <div style="font-size:11px; color:var(--text-muted); margin-top:4px;">
+          ℹ️ Note: This is the raw cash comparison directly against Sunday closing. It does not deduct unpaid bills due this week. See Spendable Cash Remaining for true spendable funds.
         </div>
       </div>
     `;
@@ -2145,6 +2531,32 @@ export function openWeekCalculationModal(weekIdx = 0) {
   const spendAmt = wp.wSpend || 0;
   const closeNet = wp.predictedNet || 0;
 
+  const weekDDsWithCleared = (wp.wDDs || []).map(b => {
+    const occDateStr = resolveOccDateStr(b, currentMonthName, currentYear);
+    const isRecurring = Boolean(b.isRecurring || b.source_type === 'recurring_payment');
+    const isCleared = isRecurring
+      ? Boolean(b.cleared_dates && occDateStr && b.cleared_dates.includes(occDateStr))
+      : Boolean(b.auto_cleared || b.status === 'paid' || (b.cleared_dates && occDateStr && b.cleared_dates.includes(occDateStr)));
+    return { ...b, isCleared, occDateStr };
+  });
+
+  const clearedDDTotal = weekDDsWithCleared.filter(b => b.isCleared).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const remainingDDTotal = weekDDsWithCleared.filter(b => !b.isCleared).reduce((s, b) => s + (Number(b.amount) || 0), 0);
+  const clearedDDCount = weekDDsWithCleared.filter(b => b.isCleared).length;
+  const remainingDDCount = weekDDsWithCleared.filter(b => !b.isCleared).length;
+
+  const weekIncomesWithCleared = (wp.wIncomes || []).map(inc => {
+    const occDateStr = resolveOccDateStr(inc, currentMonthName, currentYear);
+    const isRecurring = Boolean(inc.isRecurring || inc.source_type === 'recurring_income');
+    const isCleared = isRecurring
+      ? Boolean(inc.cleared_dates && occDateStr && inc.cleared_dates.includes(occDateStr))
+      : Boolean(inc.auto_cleared || inc.status === 'paid' || (inc.cleared_dates && occDateStr && inc.cleared_dates.includes(occDateStr)));
+    return { ...inc, isCleared, occDateStr };
+  });
+
+  const clearedIncomeTotal = weekIncomesWithCleared.filter(i => i.isCleared).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const remainingIncomeTotal = weekIncomesWithCleared.filter(i => !i.isCleared).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+
   const renderRow = (label, amt, color = 'var(--text)', sub = '') => `
     <div style="display:flex; justify-content:space-between; align-items:flex-start; padding:5px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12px;">
       <div style="padding-right:8px;">
@@ -2167,8 +2579,18 @@ export function openWeekCalculationModal(weekIdx = 0) {
   const formulaHtml = `
     <div style="font-size:12px; line-height:1.6; color:var(--heading);">
       <div><strong>Week Starting Net Position:</strong> ${curr}${startNet.toFixed(2)}</div>
-      <div style="color:var(--green);"><strong>+ Inflows Clearing:</strong> +${curr}${inAmt.toFixed(2)}</div>
-      <div style="color:var(--red);"><strong>- Scheduled Bills Clearing:</strong> -${curr}${ddAmt.toFixed(2)}</div>
+      <div style="color:var(--green);"><strong>+ Inflows Clearing (Total Planned):</strong> +${curr}${inAmt.toFixed(2)}</div>
+      ${inAmt > 0 ? `
+        <div style="font-size:11px; padding:3px 8px; margin:2px 0 4px 12px; background:rgba(255,255,255,0.03); border-left:2.5px solid var(--green); border-radius:0 4px 4px 0; color:var(--text-muted); line-height:1.5;">
+          <span>✓ Received: <strong style="color:var(--green);">+${curr}${clearedIncomeTotal.toFixed(2)}</strong> (${weekIncomesWithCleared.filter(i => i.isCleared).length} items)</span><br>
+          <span>⏳ Pending: <strong style="color:var(--curr-border);">+${curr}${remainingIncomeTotal.toFixed(2)}</strong> (${weekIncomesWithCleared.filter(i => !i.isCleared).length} items)</span>
+        </div>
+      ` : ''}
+      <div style="color:var(--red);"><strong>- Scheduled Bills Clearing (Total Planned):</strong> -${curr}${ddAmt.toFixed(2)}</div>
+      <div style="font-size:11px; padding:3px 8px; margin:2px 0 4px 12px; background:rgba(255,255,255,0.03); border-left:2.5px solid var(--amber); border-radius:0 4px 4px 0; color:var(--text-muted); line-height:1.5;">
+        <span>✓ Already Cleared: <strong style="color:var(--green);">-${curr}${clearedDDTotal.toFixed(2)}</strong> (${clearedDDCount} bills)</span><br>
+        <span>⚠️ Remaining to Clear: <strong style="color:${remainingDDTotal > 0 ? 'var(--amber)' : 'var(--green)'};">-${curr}${remainingDDTotal.toFixed(2)}</strong> (${remainingDDCount} bills)</span>
+      </div>
       <div style="color:var(--red);"><strong>- Weekly Living Budget:</strong> -${curr}${spendAmt.toFixed(2)}</div>
       <div style="border-top:1.5px dashed var(--border); margin-top:6px; padding-top:6px; font-size:13.5px; font-weight:700; color:${closeNet >= 0 ? 'var(--green)' : 'var(--red)'};">
         = Sunday Closing Net Target: ${curr}${closeNet.toFixed(2)}
@@ -2177,13 +2599,21 @@ export function openWeekCalculationModal(weekIdx = 0) {
   `;
 
   let infList = '';
-  (wp.wIncomes || []).forEach(inc => {
-    infList += renderRow(inc.desc || inc.name || inc.rawDesc, `+${curr}${Number(inc.amount || 0).toFixed(2)}`, 'var(--green)', `${inc.account || 'Joint Account'} &bull; ${inc.actualDateStr || ''}`);
+  weekIncomesWithCleared.forEach(inc => {
+    const isClr = Boolean(inc.isCleared);
+    const statusBadge = isClr
+      ? `<span class="badge" style="font-size:9.5px; font-weight:700; background:rgba(16,185,129,0.18); color:var(--green); border:1px solid rgba(16,185,129,0.35); padding:1px 6px; border-radius:10px; margin-left:6px;">✓ Received</span>`
+      : `<span class="badge" style="font-size:9.5px; font-weight:700; background:rgba(56,189,248,0.18); color:var(--curr-border); border:1px solid rgba(56,189,248,0.35); padding:1px 6px; border-radius:10px; margin-left:6px;">⏳ Pending</span>`;
+    infList += renderRow((inc.desc || inc.name || inc.rawDesc) + statusBadge, `+${curr}${Number(inc.amount || 0).toFixed(2)}`, 'var(--green)', `${inc.account || 'Joint Account'} &bull; ${inc.actualDateStr || ''}`);
   });
 
   let ddList = '';
-  (wp.wDDs || []).forEach(b => {
-    ddList += renderRow(b.desc || b.name, `-${curr}${Number(b.amount || 0).toFixed(2)}`, 'var(--red)', `${b.account || 'Joint Account'} &bull; ${b.actualDateStr || ('Day ' + b.due_day)}`);
+  weekDDsWithCleared.forEach(b => {
+    const isClr = Boolean(b.isCleared);
+    const statusBadge = isClr
+      ? `<span class="badge" style="font-size:9.5px; font-weight:700; background:rgba(16,185,129,0.18); color:var(--green); border:1px solid rgba(16,185,129,0.35); padding:1px 6px; border-radius:10px; margin-left:6px;">✓ Cleared</span>`
+      : `<span class="badge" style="font-size:9.5px; font-weight:700; background:rgba(245,158,11,0.18); color:var(--amber); border:1px solid rgba(245,158,11,0.35); padding:1px 6px; border-radius:10px; margin-left:6px;">⚠️ Remaining</span>`;
+    ddList += renderRow((b.desc || b.name) + statusBadge, `-${curr}${Number(b.amount || 0).toFixed(2)}`, isClr ? 'var(--green)' : 'var(--red)', `${b.account || 'Joint Account'} &bull; ${b.actualDateStr || ('Day ' + b.due_day)}`);
   });
 
   let spendList = '';
@@ -2197,10 +2627,20 @@ export function openWeekCalculationModal(weekIdx = 0) {
   const sectionsHtml = `
     ${inAmt > 0 ? `
       ${renderSectionHeader('1. Inflows Clearing This Week', `+${curr}${inAmt.toFixed(2)}`)}
-      ${infList || '<div style="color:var(--text-muted); font-size:12px;">None</div>'}
+      <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:11.5px; flex-wrap:wrap; gap:6px;">
+        <span>✓ Received: <strong style="color:var(--green);">${curr}${clearedIncomeTotal.toFixed(2)}</strong> (${weekIncomesWithCleared.filter(i => i.isCleared).length})</span>
+        <span>⏳ Pending: <strong style="color:var(--curr-border);">${curr}${remainingIncomeTotal.toFixed(2)}</strong> (${weekIncomesWithCleared.filter(i => !i.isCleared).length})</span>
+      </div>
+      <div style="max-height:140px; overflow-y:auto; padding-right:4px;">
+        ${infList || '<div style="color:var(--text-muted); font-size:12px;">None</div>'}
+      </div>
     ` : ''}
 
     ${renderSectionHeader('2. Scheduled Direct Debits & Bills Clearing', `-${curr}${ddAmt.toFixed(2)}`)}
+    <div style="display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:6px; padding:6px 10px; margin-bottom:8px; font-size:11.5px; flex-wrap:wrap; gap:6px;">
+      <span>✓ Cleared: <strong style="color:var(--green);">${curr}${clearedDDTotal.toFixed(2)}</strong> (${clearedDDCount})</span>
+      <span>⚠️ Remaining (Not Cleared): <strong style="color:${remainingDDTotal > 0 ? 'var(--amber)' : 'var(--green)'};">${curr}${remainingDDTotal.toFixed(2)}</strong> (${remainingDDCount})</span>
+    </div>
     <div style="max-height:160px; overflow-y:auto; padding-right:4px;">
       ${ddList || '<div style="color:var(--text-muted); font-size:12px;">No bills clearing this week.</div>'}
     </div>
@@ -2632,6 +3072,14 @@ if (typeof window !== 'undefined' && !window.__habitTouchDragInit) {
   });
 }
 
+export function setSpendableCashMode(mode) {
+  try {
+    localStorage.setItem('habit_spendable_cash_mode', mode);
+  } catch (e) {}
+  const container = document.getElementById('appBody');
+  if (container) renderForecastOverviewView(container);
+}
+
 // Attach to window for easy direct and external access
 if (typeof window !== 'undefined') {
   window.FORECAST_OVERVIEW_TILES = FORECAST_OVERVIEW_TILES;
@@ -2661,4 +3109,9 @@ if (typeof window !== 'undefined') {
   window.filterOverviewTilesModal = filterOverviewTilesModal;
   window.openTileCalculationModal = openTileCalculationModal;
   window.openWeekCalculationModal = openWeekCalculationModal;
+  window.setSpendableCashMode = setSpendableCashMode;
+  if (window.budgetApp) {
+    window.budgetApp.setSpendableCashMode = setSpendableCashMode;
+  }
 }
+

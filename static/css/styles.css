@@ -4963,7 +4963,16 @@ body.global-edit-mode-active #pullToRefreshContainer {
   min-width: 0;
   box-sizing: border-box;
   overflow: hidden;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
+
+.forecast-spotlight-item:hover {
+  border-color: var(--curr-border);
+}
+
+.text-red { color: var(--red) !important; }
+.text-green { color: var(--green) !important; }
+.text-amber { color: var(--amber) !important; }
 
 .forecast-spotlight-label {
   font-size: 11px;

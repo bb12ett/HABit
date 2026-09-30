@@ -5,6 +5,24 @@ All notable changes to the **HABit (Household Budget Planner)** add-on will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-09-30
+
+### Added & Enhanced
+- **Spendable Cash Remaining Dashboard Card**:
+  - Added new default KPI tile `Spendable Cash Remaining` (`spendable_cash_remaining`) answering whether you are already overspent or still have discretionary cash left before Sunday after holding unpaid bills.
+  - **Dual Calculation Architecture (Handling Today's Bank Debits)**:
+    - **`🛡️ Holding Today's Bills (Safest)`**: Conservatively reserves funds for every uncleared bill this week (past-due, today, and future). Safe even if today's direct debits have not left your bank yet.
+    - **`⚡ Future Bills Only (Bank Live)`**: Deducts strictly future bills (tomorrow through Sunday), assuming your live Open Banking balance or pending transactions already deducted today's bills.
+  - **Interactive Front-of-Card Switcher**: Compact two-segment pill switch (`[ 🛡️ Holding Today's Bills ]` / `[ ⚡ Future Bills Only ]`) directly on the card face with persistent state in `localStorage`.
+  - **Dynamic Contextual Subtitle**: Shows the alternate calculation at a glance (e.g. `🛡️ Holding all unpaid bills • +£215.00 if today's bills already left bank` or `⚠️ Overspent by £35.00`).
+  - **Interactive Calculation Breakdown Modal**: Clicking the tile opens a side-by-side card comparison, step-by-step waterfall calculation table, and itemized bill lists categorized into:
+    - *⚠️ Bills Due Today or Earlier (Unpaid)*: Explains the exact difference between the two views, equipped with instant **✓ Mark Cleared** action buttons.
+    - *⏳ Bills Due Later This Week (Thu–Sun)*: Future committed direct debits.
+    - *✓ Bills Already Cleared*: Directly settled bills.
+- **Active Week Spotlight & Sunday Target Enhancements**:
+  - **Remaining Bills & Inflows Badges**: Added live remaining unpaid bills and pending inflows tracking cards into the Active Week Spotlight with clear `DUE` and `PAID` status badges.
+  - **Clarified Raw Sunday Target**: Renamed the raw metric tile to `🎯 Sunday Target (Raw)` to clearly distinguish raw closing variance from true spendable cash remaining.
+
 ## [0.4.3] - 2026-09-30
 
 ### Fixed & Enhanced

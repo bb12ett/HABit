@@ -179,7 +179,8 @@ import {
   openOverviewTilesModal,
   filterOverviewTilesModal,
   openTileCalculationModal,
-  openWeekCalculationModal
+  openWeekCalculationModal,
+  setSpendableCashMode
 } from './views/forecast_overview.js';
 
 import {
@@ -1307,6 +1308,7 @@ window.budgetApp = {
   filterOverviewTilesModal,
   openTileCalculationModal,
   openWeekCalculationModal,
+  setSpendableCashMode,
   renderSpendAnalyticsView,
   renderNav,
   renderYearMenu,
